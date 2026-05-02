@@ -48,3 +48,6 @@ desktop.ini
 tmp/
 temp/
 uploads/
+
+# Runtime-generated inference output (recreated automatically on each run)
+backend/output/

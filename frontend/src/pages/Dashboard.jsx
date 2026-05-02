@@ -5,6 +5,10 @@ const API = 'http://127.0.0.1:8000'
 
 export default function Dashboard() {
   const [health, setHealth] = useState(null)
+  const [videoFile, setVideoFile] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState(null)
+  const [uploadError, setUploadError] = useState(null)
   const [alerts] = useState([
     { id: 1, time: '14:02:11', message: 'Unattended object detected — Zone A' },
     { id: 2, time: '14:01:47', message: 'Person loitering > 30s — Entrance' },
@@ -23,6 +27,34 @@ export default function Dashboard() {
       .catch(() => setHealth({ status: 'unreachable' }))
   }, [])
 
+  async function handleAnalyze() {
+    if (!videoFile) return
+    setUploading(true)
+    setAnalysisResult(null)
+    setUploadError(null)
+
+    const form = new FormData()
+    form.append('file', videoFile)
+
+    try {
+      const r = await axios.post(`${API}/process-video`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setAnalysisResult(r.data)
+    } catch (e) {
+      setUploadError(e.response?.data?.detail || 'Analysis failed — check backend logs')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const labelCounts = analysisResult?.detections
+    ? analysisResult.detections.reduce((acc, d) => {
+        acc[d.label] = (acc[d.label] || 0) + 1
+        return acc
+      }, {})
+    : {}
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
       <header className="flex items-center justify-between mb-6">
@@ -33,6 +65,84 @@ export default function Dashboard() {
           Backend: {health ? health.status : 'connecting...'}
         </span>
       </header>
+
+      {/* Video Analysis */}
+      <section className="mb-6">
+        <h2 className="text-lg font-semibold mb-3 text-slate-300">Video Analysis</h2>
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+          <div className="flex flex-wrap gap-3 items-center mb-4">
+            <input
+              type="file"
+              accept=".mp4,.avi,.mov,.mkv"
+              onChange={e => {
+                setVideoFile(e.target.files[0] || null)
+                setAnalysisResult(null)
+                setUploadError(null)
+              }}
+              className="text-sm text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-slate-700 file:text-slate-200 file:cursor-pointer hover:file:bg-slate-600"
+            />
+            <button
+              onClick={handleAnalyze}
+              disabled={!videoFile || uploading}
+              className="px-4 py-1.5 text-sm font-medium rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {uploading ? 'Analyzing...' : 'Analyze'}
+            </button>
+          </div>
+
+          {uploading && (
+            <p className="text-sm text-slate-400 animate-pulse">
+              Running YOLO inference — this may take a moment...
+            </p>
+          )}
+
+          {uploadError && (
+            <p className="text-sm text-red-400">{uploadError}</p>
+          )}
+
+          {analysisResult && (
+            <div className="space-y-3">
+              <div className="flex gap-6 text-sm">
+                <span className="text-slate-400">
+                  Total frames: <span className="text-white font-medium">{analysisResult.frames}</span>
+                </span>
+                <span className="text-slate-400">
+                  Frames sampled: <span className="text-white font-medium">{analysisResult.output_frames.length}</span>
+                </span>
+                <span className="text-slate-400">
+                  Detections: <span className="text-white font-medium">{analysisResult.detections.length}</span>
+                </span>
+              </div>
+
+              {analysisResult.detections.length > 0 ? (
+                <div>
+                  <p className="text-xs text-slate-500 mb-2 uppercase tracking-wide">Detected objects</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(labelCounts)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([label, count]) => (
+                        <span
+                          key={label}
+                          className="text-xs px-2.5 py-1 bg-indigo-900 text-indigo-200 rounded-full font-medium"
+                        >
+                          {label} &times; {count}
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">No objects detected in sampled frames.</p>
+              )}
+
+              {analysisResult.output_frames.length > 0 && (
+                <p className="text-xs text-slate-600">
+                  Annotated frames saved to <code className="text-slate-400">backend/output/</code>
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* Live Feed */}
       <section className="mb-6">

@@ -7,3 +7,4 @@ python-multipart
 sqlalchemy
 aiofiles
 python-dotenv
+ultralytics>=8.4.0
