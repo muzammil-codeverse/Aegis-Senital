@@ -6,3 +6,4 @@ pydantic
 python-multipart
 sqlalchemy
 aiofiles
+python-dotenv

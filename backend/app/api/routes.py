@@ -4,7 +4,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from app.services.video_service import extract_frames
 from app.models.database import SessionLocal, Event, Detection
 from app.core.config import load_scenario_config
-import json
+from app.core.logging_config import logger
 
 router = APIRouter()
 
@@ -14,20 +14,23 @@ async def process_video(file: UploadFile = File(...)):
     if not file.filename.lower().endswith((".mp4", ".avi", ".mov", ".mkv")):
         raise HTTPException(status_code=400, detail="Unsupported video format")
 
+    logger.info(f"Received video upload: {file.filename}")
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        frame_count = extract_frames(tmp_path)
+        result = extract_frames(tmp_path)
     finally:
         os.unlink(tmp_path)
 
-    return {"frames": frame_count}
+    logger.info(f"Process-video complete: {result['frames']} frames, {len(result['detections'])} detections")
+    return result
 
 
 @router.get("/config/{scenario}")
 def get_config(scenario: str):
+    logger.info(f"Config requested: {scenario}")
     try:
         config = load_scenario_config(scenario)
         return config
@@ -37,6 +40,7 @@ def get_config(scenario: str):
 
 @router.get("/events")
 def list_events():
+    logger.info("Events list requested")
     db = SessionLocal()
     try:
         events = db.query(Event).order_by(Event.timestamp.desc()).limit(50).all()
@@ -47,6 +51,7 @@ def list_events():
 
 @router.get("/detections")
 def list_detections():
+    logger.info("Detections list requested")
     db = SessionLocal()
     try:
         detections = db.query(Detection).order_by(Detection.timestamp.desc()).limit(50).all()
