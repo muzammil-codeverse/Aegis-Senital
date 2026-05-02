@@ -1,0 +1,12 @@
+{
+  "scenario": "security",
+  "allowed_objects": ["person", "vehicle", "bag"],
+  "rules": {
+    "detect_unattended_objects": true,
+    "detect_intrusion": true,
+    "face_recognition_enabled": false,
+    "loitering_threshold_seconds": 30,
+    "weapon_detection": true,
+    "restricted_zones": []
+  }
+}

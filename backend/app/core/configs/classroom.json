@@ -1,0 +1,10 @@
+{
+  "scenario": "classroom",
+  "allowed_objects": ["person", "chair", "desk", "book", "laptop", "backpack"],
+  "rules": {
+    "max_persons": 35,
+    "detect_unauthorized_devices": true,
+    "alert_on_fighting": true,
+    "attendance_tracking": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "scenario": "traffic",
+  "allowed_objects": ["car", "truck", "bus", "motorcycle", "bicycle", "person"],
+  "rules": {
+    "speed_limit_kmh": 60,
+    "detect_red_light_violation": true,
+    "detect_wrong_way": true,
+    "lane_monitoring": true,
+    "pedestrian_crossing_alert": true
+  }
+}
