@@ -129,18 +129,18 @@ def count_images(root_dir: str) -> int:
     """
 
     if not os.path.exists(root_dir):
-        print(f"[WARN] Directory not found: {root_dir}")
+        print(f"[WARN] Missing directory: {root_dir}")
         return 0
 
     exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-    count = 0
+    total = 0
 
-    for dirpath, _, filenames in os.walk(root_dir):
-        for f in filenames:
+    for r, _, files in os.walk(root_dir):
+        for f in files:
             if f.lower().endswith(exts):
-                count += 1
+                total += 1
 
-    return count
+    return total
 
 
 if __name__ == "__main__":
