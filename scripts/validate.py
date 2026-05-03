@@ -1,82 +1,64 @@
+import os
 import sys
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, "/content/sentinel-ai-system")
-
 from ultralytics import YOLO
 
-_COLAB_ROOT = "/content/sentinel-ai-system"
 
-_DEFAULT_WEAPON_MODEL = f"{_COLAB_ROOT}/models/weapon_detect/weights/best.pt"
-_DEFAULT_PHONE_MODEL = f"{_COLAB_ROOT}/models/phone_detect/weights/best.pt"
-_DEFAULT_WEAPON_CONFIG = f"{_COLAB_ROOT}/configs/weapon.yaml"
-_DEFAULT_PHONE_CONFIG = f"{_COLAB_ROOT}/configs/phone.yaml"
-
-
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Validate trained YOLOv8 models — prints mAP, precision, recall"
+        description="Sentinel AI — Validate trained YOLOv8 model (mAP, precision, recall)",
+        add_help=True,
+        allow_abbrev=False,
     )
     parser.add_argument(
-        "--model",
-        choices=["weapon", "phone", "both"],
-        default="both",
-        help="Which model to validate (default: both)",
+        "--weights",
+        required=True,
+        help="Path to trained model weights (.pt or .onnx)",
     )
     parser.add_argument(
-        "--weapon-model",
-        default=_DEFAULT_WEAPON_MODEL,
-        help="Path to trained weapon model (default: %(default)s)",
+        "--data",
+        default=os.path.join(ROOT, "configs", "weapon.yaml"),
+        help="Path to YOLO dataset YAML (default: configs/weapon.yaml inside repo root)",
     )
-    parser.add_argument(
-        "--phone-model",
-        default=_DEFAULT_PHONE_MODEL,
-        help="Path to trained phone model (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--weapon-config",
-        default=_DEFAULT_WEAPON_CONFIG,
-        help="Weapon dataset YAML (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--phone-config",
-        default=_DEFAULT_PHONE_CONFIG,
-        help="Phone dataset YAML (default: %(default)s)",
-    )
-    return parser.parse_args()
+    return parser
 
 
-def validate_model(label: str, model_path: str, data_config: str) -> None:
-    print(f"\n=== Validating: {label} ===")
-    if not Path(model_path).exists():
-        print(f"[ERROR] Model not found: {model_path}")
+def main(args: argparse.Namespace) -> None:
+    if not Path(args.weights).exists():
+        print(f"[ERROR] Weights not found: {args.weights}")
         sys.exit(1)
-    if not Path(data_config).exists():
-        print(f"[ERROR] Dataset config not found: {data_config}")
+    if not Path(args.data).exists():
+        print(f"[ERROR] Dataset config not found: {args.data}")
         sys.exit(1)
 
-    model = YOLO(model_path)
-    metrics = model.val(data=data_config, verbose=True)
+    print("=" * 60)
+    print("  Sentinel AI — Model Validation")
+    print("=" * 60)
+    print(f"  weights: {args.weights}")
+    print(f"  data:    {args.data}")
+    print("=" * 60)
 
-    print(f"\n--- {label} Results ---")
+    model = YOLO(args.weights)
+    metrics = model.val(data=args.data, verbose=True)
+
+    print("\n" + "=" * 60)
+    print("  Validation Results")
+    print("=" * 60)
     print(f"  mAP@0.5:        {metrics.box.map50:.4f}")
     print(f"  mAP@0.5:0.95:   {metrics.box.map:.4f}")
     print(f"  Precision:      {metrics.box.mp:.4f}")
     print(f"  Recall:         {metrics.box.mr:.4f}")
-
-
-def main() -> None:
-    args = parse_args()
-
-    if args.model in ("weapon", "both"):
-        validate_model("Weapon Detection", args.weapon_model, args.weapon_config)
-
-    if args.model in ("phone", "both"):
-        validate_model("Phone Detection", args.phone_model, args.phone_config)
-
-    print("\n=== Validation Complete ===")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    _parser = build_parser()
+    _args = _parser.parse_args()
+    main(_args)

@@ -1,6 +1,7 @@
 path: /content/datasets/weapon
-train: images/train
-val: images/val
+train: train/images
+val: valid/images
+test: test/images
 
 nc: 5
 names:

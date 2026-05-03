@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
 
+_IMAGE_EXTS: frozenset[str] = frozenset(
+    {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff", ".tif"}
+)
+
 
 def check_labels(label_dir: str) -> bool:
     """
@@ -67,37 +71,71 @@ def check_labels(label_dir: str) -> bool:
 
 def validate_splits(
     dataset_root: str,
-    splits: tuple[str, ...] = ("train", "val", "test"),
+    splits: tuple[str, ...] = ("train", "valid", "test"),
 ) -> bool:
     """
-    Validate label files for multiple dataset splits under dataset_root/labels/.
+    Validate label files for all splits in dataset_root.
 
-    Skips any split directory that does not exist (e.g. no test split).
-    Calls check_labels() for each present split — exits with code 1 on first
-    failure found inside a split.
+    Supports two layouts and auto-detects which one is present:
+      Roboflow: {root}/{split}/labels/   (e.g. train/labels, valid/labels)
+      YOLO:     {root}/labels/{split}/   (e.g. labels/train, labels/val)
 
-    Returns True only when all present splits pass.
+    Skips splits whose label directory does not exist.
+    Raises SystemExit(1) if no splits are found at all, or if any label
+    file fails validation.
     """
     root = Path(dataset_root)
+
+    # Auto-detect layout by probing the first candidate split directory
+    _probe_rf = any((root / s / "labels").exists() for s in splits)
+    _probe_yolo = any((root / "labels" / s).exists() for s in splits)
+
+    if not _probe_rf and not _probe_yolo:
+        print(
+            f"[ERROR] Cannot locate label directories under: {root}\n"
+            f"        Checked Roboflow layout  ({splits[0]}/labels) "
+            f"and YOLO layout (labels/{splits[0]})"
+        )
+        sys.exit(1)
+
+    # Prefer Roboflow layout when both are detected (won't happen in practice)
+    use_roboflow = _probe_rf
     validated = 0
 
     for split in splits:
-        label_dir = root / "labels" / split
+        label_dir = (
+            root / split / "labels"
+            if use_roboflow
+            else root / "labels" / split
+        )
         if not label_dir.exists():
-            print(f"[SKIP] Split not found, skipping: {label_dir}")
+            print(f"[SKIP] Split '{split}' not found: {label_dir}")
             continue
         check_labels(str(label_dir))
         validated += 1
 
     if validated == 0:
-        print(f"[ERROR] No split label directories found under: {root / 'labels'}")
+        print(f"[ERROR] No valid split label directories found under: {root}")
         sys.exit(1)
 
     return True
 
 
+def count_images(image_dir: str) -> int:
+    """
+    Count image files recursively in image_dir.
+
+    Returns 0 if the directory does not exist so callers can emit a
+    contextual error with the path rather than receiving an exception here.
+    """
+    p = Path(image_dir)
+    if not p.exists():
+        return 0
+    return sum(1 for f in p.rglob("*") if f.suffix.lower() in _IMAGE_EXTS)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python utils/data_check.py <label_dir_or_dataset_root> [--splits]")
+        print("Usage: python utils/data_check.py <label_dir>")
         sys.exit(1)
     check_labels(sys.argv[1])

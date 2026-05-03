@@ -1,93 +1,86 @@
+import os
 import sys
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import argparse
 import shutil
 from pathlib import Path
 
-sys.path.insert(0, "/content/sentinel-ai-system")
-
 from ultralytics import YOLO
 
-_COLAB_ROOT = "/content/sentinel-ai-system"
-
-_DEFAULT_MODEL_PATHS: dict[str, str] = {
-    "weapon": f"{_COLAB_ROOT}/models/weapon_detect/weights/best.pt",
-    "phone": f"{_COLAB_ROOT}/models/phone_detect/weights/best.pt",
-}
-_DEFAULT_EXPORTS_DIR = f"{_COLAB_ROOT}/models/exports"
+_EXPORTS_DEFAULT = os.path.join(ROOT, "models", "exports")
 
 
-def parse_args() -> argparse.Namespace:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Export trained YOLOv8 models to ONNX format"
+        description="Sentinel AI — Export trained YOLOv8 model to ONNX",
+        add_help=True,
+        allow_abbrev=False,
     )
     parser.add_argument(
-        "--model",
-        choices=["weapon", "phone", "both"],
-        default="both",
-        help="Which model to export (default: both)",
+        "--weights",
+        required=True,
+        help="Path to trained model weights (.pt)",
     )
     parser.add_argument(
-        "--weapon-model",
-        default=_DEFAULT_MODEL_PATHS["weapon"],
-        help="Path to trained weapon model .pt (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--phone-model",
-        default=_DEFAULT_MODEL_PATHS["phone"],
-        help="Path to trained phone model .pt (default: %(default)s)",
+        "--name",
+        required=True,
+        help="Export name used in output filename: {name}_best.onnx",
     )
     parser.add_argument(
         "--output-dir",
-        default=_DEFAULT_EXPORTS_DIR,
-        help="Directory to save exported ONNX files (default: %(default)s)",
+        default=_EXPORTS_DEFAULT,
+        dest="output_dir",
+        help="Directory to save ONNX file (default: %(default)s)",
     )
     parser.add_argument(
-        "--imgsz", type=int, default=640,
+        "--imgsz",
+        type=int,
+        default=640,
         help="Export image size (default: %(default)s)",
     )
-    return parser.parse_args()
+    return parser
 
 
-def export_model(name: str, model_path: str, output_dir: str, imgsz: int) -> None:
-    print(f"\n=== Exporting: {name} ===")
-
-    if not Path(model_path).exists():
-        print(f"[ERROR] Model weights not found: {model_path}")
+def main(args: argparse.Namespace) -> None:
+    if not Path(args.weights).exists():
+        print(f"[ERROR] Weights not found: {args.weights}")
         sys.exit(1)
 
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    model = YOLO(model_path)
-    model.export(format="onnx", imgsz=imgsz, dynamic=False, simplify=True)
+    print("=" * 60)
+    print("  Sentinel AI — ONNX Export")
+    print("=" * 60)
+    print(f"  weights:    {args.weights}")
+    print(f"  name:       {args.name}")
+    print(f"  output_dir: {args.output_dir}")
+    print(f"  imgsz:      {args.imgsz}")
+    print("=" * 60)
 
-    # Ultralytics always writes <stem>.onnx alongside the .pt file
-    onnx_src = Path(model_path).with_suffix(".onnx")
+    model = YOLO(args.weights)
+    model.export(format="onnx", imgsz=args.imgsz, dynamic=False, simplify=True)
+
+    # Ultralytics writes <weights_stem>.onnx next to the .pt file
+    onnx_src = Path(args.weights).with_suffix(".onnx")
     if not onnx_src.exists():
         print(
             f"[ERROR] Expected ONNX output not found: {onnx_src}\n"
-            f"        Check {Path(model_path).parent} for the exported file."
+            f"        Check {Path(args.weights).parent} for the exported file."
         )
         sys.exit(1)
 
-    onnx_dst = Path(output_dir) / f"{name}_best.onnx"
+    onnx_dst = Path(args.output_dir) / f"{args.name}_best.onnx"
     shutil.copy2(onnx_src, onnx_dst)
-    print(f"[OK] {onnx_dst}")
 
-
-def main() -> None:
-    args = parse_args()
-
-    model_map = {
-        "weapon": args.weapon_model,
-        "phone": args.phone_model,
-    }
-    targets = list(model_map.keys()) if args.model == "both" else [args.model]
-
-    for name in targets:
-        export_model(name, model_map[name], args.output_dir, args.imgsz)
-
-    print(f"\n=== Export Complete — files in {args.output_dir} ===")
+    print(f"\n[OK] Exported: {onnx_dst}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    _parser = build_parser()
+    _args = _parser.parse_args()
+    main(_args)
