@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -121,17 +122,25 @@ def validate_splits(
     return True
 
 
-def count_images(image_dir: str) -> int:
+def count_images(root_dir: str) -> int:
     """
-    Count image files recursively in image_dir.
+    Recursively counts image files in dataset directory.
+    Returns 0 if directory does not exist (safe fail).
+    """
 
-    Returns 0 if the directory does not exist so callers can emit a
-    contextual error with the path rather than receiving an exception here.
-    """
-    p = Path(image_dir)
-    if not p.exists():
+    if not os.path.exists(root_dir):
+        print(f"[WARN] Directory not found: {root_dir}")
         return 0
-    return sum(1 for f in p.rglob("*") if f.suffix.lower() in _IMAGE_EXTS)
+
+    exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+    count = 0
+
+    for dirpath, _, filenames in os.walk(root_dir):
+        for f in filenames:
+            if f.lower().endswith(exts):
+                count += 1
+
+    return count
 
 
 if __name__ == "__main__":
