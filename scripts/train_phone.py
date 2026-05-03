@@ -1,47 +1,85 @@
 import sys
-import os
+import argparse
 from pathlib import Path
 
 sys.path.insert(0, "/content/sentinel-ai-system")
 
 from ultralytics import YOLO
-from utils.data_check import check_labels
+from utils.data_check import validate_splits
 
-CONFIG = "/content/sentinel-ai-system/configs/phone.yaml"
-LABEL_DIR_TRAIN = "/content/datasets/phone/labels/train"
-LABEL_DIR_VAL = "/content/datasets/phone/labels/val"
-OUTPUT_DIR = "/content/sentinel-ai-system/models"
-
-EPOCHS = 40
-IMGSZ = 640
-BATCH = 16
+_COLAB_ROOT = "/content/sentinel-ai-system"
+_COLAB_DATASETS = "/content/datasets"
 
 
-def main():
-    print("=== Phone Detection Training ===")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Train YOLOv8n phone/device detection model"
+    )
+    parser.add_argument(
+        "--data",
+        default=f"{_COLAB_ROOT}/configs/phone.yaml",
+        help="Path to YOLO dataset YAML (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--label-dir",
+        default=f"{_COLAB_DATASETS}/phone/labels",
+        help="Root labels directory; must contain train/ and val/ subdirs (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=40,
+        help="Number of training epochs (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--imgsz", type=int, default=640,
+        help="Input image size (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--batch", type=int, default=16,
+        help="Batch size (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--output",
+        default=f"{_COLAB_ROOT}/models",
+        help="Directory for model artifacts (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--skip-validation", action="store_true",
+        help="Skip label validation (not recommended)",
+    )
+    return parser.parse_args()
 
-    print("Validating training labels ...")
-    check_labels(LABEL_DIR_TRAIN)
-    print("Validating validation labels ...")
-    check_labels(LABEL_DIR_VAL)
 
-    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+def main() -> None:
+    args = parse_args()
+
+    print("=== Phone/Device Detection Training ===")
+    print(f"  data:    {args.data}")
+    print(f"  epochs:  {args.epochs}")
+    print(f"  imgsz:   {args.imgsz}")
+    print(f"  batch:   {args.batch}")
+    print(f"  output:  {args.output}")
+
+    if not args.skip_validation:
+        print("\nValidating labels ...")
+        validate_splits(args.label_dir, splits=("train", "val"))
+        print("Labels OK.\n")
+
+    Path(args.output).mkdir(parents=True, exist_ok=True)
 
     model = YOLO("yolov8n.pt")
-
-    results = model.train(
-        data=CONFIG,
-        epochs=EPOCHS,
-        imgsz=IMGSZ,
-        batch=BATCH,
-        project=OUTPUT_DIR,
+    model.train(
+        data=args.data,
+        epochs=args.epochs,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        project=args.output,
         name="phone_detect",
         exist_ok=True,
         verbose=True,
     )
 
-    print("\n=== Training Complete ===")
-    print(f"Results saved to: {OUTPUT_DIR}/phone_detect")
+    print(f"\n=== Training Complete ===")
+    print(f"Artifacts: {args.output}/phone_detect")
 
 
 if __name__ == "__main__":

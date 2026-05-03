@@ -1,15 +1,19 @@
-# ─────────────────────────────────────────────
-# Sentinel AI — Phone / Unauthorized Device Training Config
-# ─────────────────────────────────────────────
-# dataset_path: absolute path to your data.yaml
-#               (YOLO format: train/val splits + class list)
-# output_path:  directory where experiment folders will be created
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPRECATED — Sentinel AI training orchestration config (local runner only)
+#
+# This file is consumed by ml/training/train.py (the local training wrapper).
+# It is NOT a YOLO dataset config.
+#
+# CANONICAL YOLO DATASET CONFIG (used by all scripts/ training scripts):
+#   → configs/phone.yaml
+#
+# Do NOT pass this file as the --data argument to ultralytics YOLO.
+# ─────────────────────────────────────────────────────────────────────────────
 
-dataset_path: ""          # e.g. D:/datasets/phone/data.yaml
+dataset_path: ""          # path to YOLO data.yaml (configs/phone.yaml)
 epochs: 50
 batch_size: 16
 img_size: 640
-model: yolov8n.pt         # base weights — must exist or be downloadable
-output_path: ""           # e.g. D:/Aegis-Senital/sentinel-ai-system/ml/runs
+model: yolov8n.pt
+output_path: ""
 experiment_name: phone_detect
