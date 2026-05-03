@@ -1,5 +1,6 @@
 import numpy as np
 from ultralytics import YOLO
+from inference.schemas import DetectionResult, DetectedObject
 
 _yolo_model: YOLO | None = None
 
@@ -19,7 +20,7 @@ class DetectionEngine:
         _get_model()
         self._models_loaded = True
 
-    def process_frame(self, frame: np.ndarray) -> dict:
+    def process_frame(self, frame: np.ndarray, frame_id: int = 0) -> DetectionResult:
         if not self._models_loaded:
             raise RuntimeError("Call load_models() before processing frames")
 
@@ -31,13 +32,16 @@ class DetectionEngine:
             if r.boxes is None:
                 continue
             for box in r.boxes:
-                label = model.names[int(box.cls[0])]
-                confidence = float(box.conf[0])
+                confidence = round(float(box.conf[0]), 3)
+                if confidence <= 0:
+                    continue
                 x1, y1, x2, y2 = [round(v) for v in box.xyxy[0].tolist()]
-                objects.append({
-                    "label": label,
-                    "confidence": round(confidence, 3),
-                    "bbox": [x1, y1, x2, y2],
-                })
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                objects.append(DetectedObject(
+                    type=model.names[int(box.cls[0])],
+                    confidence=confidence,
+                    bbox=[x1, y1, x2, y2],
+                ))
 
-        return {"objects": objects}
+        return DetectionResult(frame_id=frame_id, objects=objects)

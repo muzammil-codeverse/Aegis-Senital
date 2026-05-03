@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────
+# Sentinel AI — Weapon Detection Training Config
+# ─────────────────────────────────────────────
+# dataset_path: absolute path to your data.yaml
+#               (YOLO format: train/val splits + class list)
+# output_path:  directory where experiment folders will be created
+# ─────────────────────────────────────────────
+
+dataset_path: ""          # e.g. D:/datasets/weapon/data.yaml
+epochs: 50
+batch_size: 16
+img_size: 640
+model: yolov8n.pt         # base weights — must exist or be downloadable
+output_path: ""           # e.g. D:/Aegis-Senital/sentinel-ai-system/ml/runs
+experiment_name: weapon_detect

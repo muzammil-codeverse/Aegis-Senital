@@ -1,6 +1,6 @@
 import os
 import tempfile
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from app.services.video_service import extract_frames
 from app.models.database import SessionLocal, Event, Detection
 from app.core.config import load_scenario_config
@@ -8,23 +8,37 @@ from app.core.logging_config import logger
 
 router = APIRouter()
 
+VALID_SCENARIOS = ("security", "classroom", "traffic")
+
 
 @router.post("/process-video")
-async def process_video(file: UploadFile = File(...)):
+async def process_video(
+    file: UploadFile = File(...),
+    scenario: str = Query(default="security"),
+):
     if not file.filename.lower().endswith((".mp4", ".avi", ".mov", ".mkv")):
         raise HTTPException(status_code=400, detail="Unsupported video format")
+    if scenario not in VALID_SCENARIOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scenario '{scenario}'. Choose from: {VALID_SCENARIOS}",
+        )
 
-    logger.info(f"Received video upload: {file.filename}")
+    logger.info(f"Received video upload: {file.filename} | scenario={scenario}")
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        result = extract_frames(tmp_path)
+        result = extract_frames(tmp_path, scenario=scenario)
     finally:
         os.unlink(tmp_path)
 
-    logger.info(f"Process-video complete: {result['frames']} frames, {len(result['detections'])} detections")
+    total = sum(len(f["objects"]) for f in result["detections"])
+    logger.info(
+        f"Process-video complete: {result['frames']} frames, {total} detections, "
+        f"{result['event_summary']['confirmed']} confirmed events"
+    )
     return result
 
 
