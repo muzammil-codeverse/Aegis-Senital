@@ -1,0 +1,8 @@
+path: /content/datasets/phone
+train: images/train
+val: images/val
+
+nc: 2
+names:
+  - phone
+  - tablet
