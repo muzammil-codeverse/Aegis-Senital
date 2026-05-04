@@ -445,6 +445,14 @@ class MultiObjectTracker:
             if state.camera_id == camera_id
         ]
 
+    def _track_id_switch(self, detection: Detection, track_id: int) -> None:
+        sig = f"{detection.class_name}:{','.join(str(round(v, 2)) for v in detection.bbox)}"
+        previous = self.previous_assignments.get(sig)
+        if previous is not None and previous != track_id:
+            from inference.metrics import metrics
+            metrics.id_switches += 1
+        self.previous_assignments[sig] = track_id
+
 
 @dataclass
 class _LegacyTrack:
@@ -522,12 +530,3 @@ class ByteTracker:
                 self._tracks[track_index].missed_frames += 1
         self._tracks = [track for track in self._tracks if track.missed_frames < self._max_age]
         return result
-
-
-    def _track_id_switch(self, detection: Detection, track_id: int) -> None:
-        sig = f"{detection.class_name}:{','.join(str(round(v, 2)) for v in detection.bbox)}"
-        previous = self.previous_assignments.get(sig)
-        if previous is not None and previous != track_id:
-            from inference.metrics import metrics
-            metrics.id_switches += 1
-        self.previous_assignments[sig] = track_id

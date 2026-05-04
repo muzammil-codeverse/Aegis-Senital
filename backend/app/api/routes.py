@@ -107,7 +107,7 @@ def get_metrics_snapshot():
 
 
 @router.get("/metrics/core")
-def get_metrics():
+def get_core_metrics():
     return metrics.to_dict()
 
 

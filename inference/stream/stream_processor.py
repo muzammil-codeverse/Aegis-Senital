@@ -554,6 +554,8 @@ class StreamProcessor:
             packet.detections,
             active_tracks=self._tracker.get_active_tracks(self.stream_id),
         )
+        if DETERMINISTIC_MODE:
+            packet.detections = sorted(packet.detections, key=lambda d: d.detection_id)
 
         # Stage 3: per-stream tracking
         packet.tracks = self._tracker.update(packet)
@@ -648,5 +650,3 @@ class StreamProcessor:
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
         )
-        if DETERMINISTIC_MODE:
-            packet.detections = sorted(packet.detections, key=lambda d: d.detection_id)
