@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -17,11 +18,13 @@ from inference.detection_engine import DetectionEngine
 from inference.event_buffer import EventBuffer
 from inference.event_bus import get_event_bus
 from inference.event_engine import EventEngine
+from inference.metrics import metrics
 from inference.model_pool import ModelPool
 from inference.monitoring.metrics import register_stream, get_stream_metrics, get_metrics
 from inference.scenario_engine import ScenarioEngine
 from inference.schemas import FramePacket
 from inference.tracker import MultiObjectTracker
+from inference.validation.pipeline_validator import validate_frame_result
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,7 @@ _CB_COOLDOWN = 30.0              # seconds before an OPEN breaker moves to HALF_
 
 # ── Phase 6: latency budget ───────────────────────────────────────────────────
 _MAX_PIPELINE_MS = 100.0         # target end-to-end per-frame budget (milliseconds)
+DETERMINISTIC_MODE = os.getenv("AEGIS_DETERMINISTIC", "0") == "1"
 
 # Weapon labels for priority scoring (must match event_engine.WEAPON_LABELS)
 _WEAPON_LABELS = frozenset({
@@ -218,7 +222,7 @@ class StreamProcessor:
         )
 
         # ── adaptive batch state (written by inference thread only) ───────────
-        self._batch_size: int = _BATCH_SIZE_INIT
+        self._batch_size: int = 4 if DETERMINISTIC_MODE else _BATCH_SIZE_INIT
         self._batch_seq: int = 0
         self._seq_lock: threading.Lock = threading.Lock()
 
@@ -370,6 +374,7 @@ class StreamProcessor:
                 if self._skip_next_event.is_set():
                     self._skip_next_event.clear()
                     get_metrics().record_frame_dropped()
+                    metrics.frames_dropped += 1
                     get_metrics().record_latency_violation()
                     logger.debug(
                         "StreamProcessor '%s': frame %d dropped — latency budget signal",
@@ -383,6 +388,7 @@ class StreamProcessor:
                     self._ingest_queue.put_nowait((frame_id, resized))
                 except queue.Full:
                     get_metrics().record_frame_dropped()
+                    metrics.frames_dropped += 1
                 frame_id += 1
 
         finally:
@@ -437,8 +443,11 @@ class StreamProcessor:
         enforce the latency budget, and enqueue resulting packets by priority.
         """
         self._circuit_breaker.check_and_transition()
+        if not frames:
+            return
         if self._circuit_breaker.is_open:
             get_metrics().record_frame_dropped(len(frames))
+            metrics.frames_dropped += len(frames)
             return
 
         t0 = time.monotonic()
@@ -449,10 +458,11 @@ class StreamProcessor:
             per_frame_ms = batch_ms / n
 
             # Adaptive batch size: grow when fast, shrink when slow.
-            if per_frame_ms < _BATCH_GROW_THRESHOLD_MS:
-                self._batch_size = min(_BATCH_SIZE_MAX, self._batch_size + 1)
-            elif per_frame_ms > _BATCH_SHRINK_THRESHOLD_MS:
-                self._batch_size = max(_BATCH_SIZE_MIN, self._batch_size - 1)
+            if not DETERMINISTIC_MODE:
+                if per_frame_ms < _BATCH_GROW_THRESHOLD_MS:
+                    self._batch_size = min(_BATCH_SIZE_MAX, self._batch_size + 1)
+                elif per_frame_ms > _BATCH_SHRINK_THRESHOLD_MS:
+                    self._batch_size = max(_BATCH_SIZE_MIN, self._batch_size - 1)
 
             # Latency budget: signal ingest to drop the next frame.
             if per_frame_ms > _MAX_PIPELINE_MS:
@@ -469,6 +479,8 @@ class StreamProcessor:
                 sum(self._recent_pipeline_ms) / len(self._recent_pipeline_ms)
                 if self._recent_pipeline_ms else 0.0
             )
+            metrics.avg_latency_ms = avg_ms
+            metrics.max_latency_ms = max(metrics.max_latency_ms, per_frame_ms)
             self._skip_context_next = avg_ms > _MAX_PIPELINE_MS
 
             # Score and enqueue each packet with priority for postproc ordering.
@@ -481,6 +493,7 @@ class StreamProcessor:
                     self._result_queue.put_nowait((priority, seq, packet))
                 except queue.Full:
                     get_metrics().record_queue_overflow()
+                    metrics.queue_overflows += 1
 
             sm = get_stream_metrics(self.stream_id)
             if sm is not None:
@@ -488,12 +501,10 @@ class StreamProcessor:
 
             self._circuit_breaker.record_success()
             self._cb_frame_results.append(True)
+            metrics.frames_processed += len(packets)
 
         except Exception as exc:
-            logger.warning(
-                "StreamProcessor '%s': inference batch [%s] failed: %s",
-                self.stream_id, frame_ids, exc,
-            )
+            logger.error({"stage": "inference", "error": str(exc), "frame_id": frame_ids[0] if frame_ids else None})
             sm = get_stream_metrics(self.stream_id)
             if sm is not None:
                 sm.record_failure()
@@ -543,6 +554,8 @@ class StreamProcessor:
             packet.detections,
             active_tracks=self._tracker.get_active_tracks(self.stream_id),
         )
+        if DETERMINISTIC_MODE:
+            packet.detections = sorted(packet.detections, key=lambda d: d.detection_id)
 
         # Stage 3: per-stream tracking
         packet.tracks = self._tracker.update(packet)
@@ -557,6 +570,19 @@ class StreamProcessor:
         self._buffer.add(packet)
         events = self._event_engine.evaluate(self._buffer)
         scenarios = self._scenario_engine.aggregate(events)
+        validate_frame_result(packet, packet.tracks, events)
+
+        os.makedirs("/output/debug_snapshots/", exist_ok=True)
+        with open(f"/output/debug_snapshots/frame_{packet.frame_id}.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "frame_id": packet.frame_id,
+                    "detections": [d.model_dump() for d in packet.detections],
+                    "tracks": [t.model_dump() for t in packet.tracks],
+                    "events": [e.model_dump() for e in events],
+                },
+                f,
+            )
 
         # Stage 5: publish to central EventBus
         now = time.monotonic()
@@ -614,6 +640,7 @@ class StreamProcessor:
     def _trip_circuit_breaker(self, reason: str) -> None:
         self._circuit_breaker.force_open()
         get_metrics().record_circuit_break()
+        metrics.circuit_breaker_trips += 1
         logger.critical(
             json.dumps({
                 "event": "circuit_breaker_tripped",

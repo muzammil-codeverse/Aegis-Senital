@@ -269,6 +269,7 @@ class MultiObjectTracker:
         self._db = db or get_db()
         self._identity_fusion = identity_fusion or IdentityFusionEngine(self._db)
         self._camera_graph = camera_graph
+        self.previous_assignments: dict[str, int] = {}
 
     def update(self, frame_packet: FramePacket) -> list[Track]:
         _t0 = time.monotonic()
@@ -280,7 +281,15 @@ class MultiObjectTracker:
     def _update_inner(self, frame_packet: FramePacket) -> list[Track]:
         camera_id = frame_packet.camera_id or "default"
         self._identity_fusion.annotate_detections(frame_packet)
-        detections = frame_packet.detections
+        detections = []
+        for det in frame_packet.detections:
+            if not det.bbox or len(det.bbox) != 4 or det.bbox[2] <= det.bbox[0] or det.bbox[3] <= det.bbox[1]:
+                continue
+            if det.appearance_embedding is None:
+                det.appearance_embedding = []
+            if det.face_embedding is None:
+                det.face_embedding = []
+            detections.append(det)
         visible_states = [state for state in self.active_tracks.values() if state.camera_id == camera_id]
         matched_track_to_detection: dict[int, Detection] = {}
 
@@ -293,6 +302,7 @@ class MultiObjectTracker:
             for det in detections:
                 state = self._spawn(det, frame_packet.frame_id, camera_id)
                 matched_track_to_detection[state.track_id] = det
+                self._track_id_switch(det, state.track_id)
             self._resolve_identities(frame_packet, matched_track_to_detection)
             frame_packet.tracks = self._to_tracks(camera_id)
             return frame_packet.tracks
@@ -327,12 +337,14 @@ class MultiObjectTracker:
             matched_states.add(state.track_id)
             matched_detections.add(best_detection_index)
             matched_track_to_detection[state.track_id] = detection
+            self._track_id_switch(detection, state.track_id)
 
         for detection_index, detection in enumerate(detections):
             if detection_index in matched_detections:
                 continue
             state = self._spawn(detection, frame_packet.frame_id, camera_id)
             matched_track_to_detection[state.track_id] = detection
+            self._track_id_switch(detection, state.track_id)
 
         for state in visible_states:
             if state.track_id in matched_states:
@@ -432,6 +444,14 @@ class MultiObjectTracker:
             for state in self.active_tracks.values()
             if state.camera_id == camera_id
         ]
+
+    def _track_id_switch(self, detection: Detection, track_id: int) -> None:
+        sig = f"{detection.class_name}:{','.join(str(round(v, 2)) for v in detection.bbox)}"
+        previous = self.previous_assignments.get(sig)
+        if previous is not None and previous != track_id:
+            from inference.metrics import metrics
+            metrics.id_switches += 1
+        self.previous_assignments[sig] = track_id
 
 
 @dataclass

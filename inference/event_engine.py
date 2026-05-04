@@ -153,8 +153,12 @@ class EventEngine:
         events.extend(self._loitering_events(packet, tracks, buffer))
         events.extend(self._unattended_object_events(packet, tracks))
         events.extend(self._geofence_events(packet, tracks))
+        active_tracks = {track.track_id for track in tracks}
 
         for event in events:
+            for track_id in event.track_ids:
+                if track_id not in active_tracks:
+                    logger.error("Invalid event: track not found")
             self._db.persist_event(event, frame_id=packet.frame_id)
             self._recent_event_scores.append(event.risk_score)
 
