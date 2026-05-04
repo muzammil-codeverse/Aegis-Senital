@@ -81,12 +81,20 @@ class _FaceEmbedder:
                 raise RuntimeError(
                     "Face model path must resolve to <project>/models/<bundle_name> for InsightFace boot."
                 )
+            import torch
+            _cuda = torch.cuda.is_available()
+            providers = (
+                ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                if _cuda
+                else ["CPUExecutionProvider"]
+            )
+            ctx_id = 0 if _cuda else -1   # 0 = first GPU, -1 = CPU
             self._app = FaceAnalysis(
                 name=model_path.name,
                 root=str(model_path.parent.parent),
-                providers=["CPUExecutionProvider"],
+                providers=providers,
             )
-            self._app.prepare(ctx_id=-1)
+            self._app.prepare(ctx_id=ctx_id)
             self._available = True
             logger.info("_FaceEmbedder: InsightFace loaded successfully.")
         except Exception as exc:

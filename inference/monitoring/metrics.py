@@ -34,6 +34,13 @@ class SystemMetrics:
         self.dropped_low_priority_events: int = 0
         self.expired_identities: int = 0
         self.stream_circuit_breaks: int = 0
+        # Phase 7 — observability counters
+        self.frames_dropped: int = 0          # frames skipped by latency budget
+        self.queue_overflow_count: int = 0    # GPU queue full rejections
+        # GPU utilisation estimate: ratio of cumulative inference seconds to wall seconds
+        self._gpu_busy_seconds: float = 0.0
+        self._gpu_wall_start: float = 0.0
+        self._gpu_tracking_active: bool = False
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -91,6 +98,33 @@ class SystemMetrics:
     def record_circuit_break(self) -> None:
         with self._lock:
             self.stream_circuit_breaks += 1
+
+    def record_frame_dropped(self, count: int = 1) -> None:
+        with self._lock:
+            self.frames_dropped += count
+
+    def record_queue_overflow(self, count: int = 1) -> None:
+        with self._lock:
+            self.queue_overflow_count += count
+
+    def record_gpu_inference(self, busy_seconds: float) -> None:
+        """Accumulate GPU busy time for utilisation estimate."""
+        with self._lock:
+            self._gpu_busy_seconds += busy_seconds
+            if not self._gpu_tracking_active:
+                self._gpu_wall_start = time.monotonic()
+                self._gpu_tracking_active = True
+
+    @property
+    def gpu_util_estimate(self) -> float:
+        """Rolling GPU utilisation in [0, 1]: busy_time / wall_time."""
+        with self._lock:
+            if not self._gpu_tracking_active or self._gpu_wall_start == 0.0:
+                return 0.0
+            wall = time.monotonic() - self._gpu_wall_start
+            if wall <= 0.0:
+                return 0.0
+            return round(min(1.0, self._gpu_busy_seconds / wall), 4)
 
     @property
     def identity_confidence_avg(self) -> float:
@@ -158,6 +192,14 @@ class SystemMetrics:
                 "dropped_low_priority_events": self.dropped_low_priority_events,
                 "expired_identities": self.expired_identities,
                 "stream_circuit_breaks": self.stream_circuit_breaks,
+                # Phase 7 — observability metrics
+                "frames_dropped": self.frames_dropped,
+                "queue_overflow_count": self.queue_overflow_count,
+                "gpu_util_estimate": (
+                    round(min(1.0, self._gpu_busy_seconds / max(1e-9, time.monotonic() - self._gpu_wall_start)), 4)
+                    if self._gpu_tracking_active else 0.0
+                ),
+                "latency_avg_ms": _avg_ms(self._pipeline_times),
             }
 
 

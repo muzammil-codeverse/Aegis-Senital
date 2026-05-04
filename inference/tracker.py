@@ -24,6 +24,11 @@ _VELOCITY_ALPHA = 0.30
 _MATCH_THRESHOLD = 0.35
 _MAX_AGE_DEFAULT = 30
 
+# BoT-SORT style matching constants
+_GATE_MIN_IOU = 0.0               # predicted bbox must have at least this IoU with detection
+_APPEARANCE_GATE_THRESHOLD = 0.10 # cosine similarity below this rejects the match
+_IDENTITY_DECAY_ON_MISS = 0.90    # confidence multiplied by this each missed frame
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -139,6 +144,9 @@ class _TrackState:
     def miss(self) -> None:
         self.bbox_history.append(self.predict_bbox())
         self.velocity = [v * (1.0 - _VELOCITY_ALPHA) for v in self.velocity]
+        # Decay identity confidence each missed frame so long-absent tracks
+        # do not hold stale high-confidence identity assignments.
+        self.identity_confidence *= _IDENTITY_DECAY_ON_MISS
         self.age += 1
         self.missed_frames += 1
         self.status = "LOST"
@@ -221,10 +229,20 @@ def _embedding_similarity(state: _TrackState, det: Detection) -> float:
 def _match_score(state: _TrackState, det: Detection) -> float:
     iou = _iou(state.predict_bbox(), det.bbox)
     motion = _motion_similarity(state, det)
-    if not state.appearance_embedding or not det.appearance_embedding:
-        # IoU+motion-only fallback when embeddings unavailable
+    has_emb = bool(state.appearance_embedding) and bool(det.appearance_embedding)
+
+    if not has_emb:
+        # Kalman prediction gate: no spatial overlap → reject when no appearance fallback.
+        if iou <= _GATE_MIN_IOU:
+            return 0.0
         return 0.6 * iou + 0.4 * motion
-    return 0.4 * iou + 0.3 * motion + 0.3 * _embedding_similarity(state, det)
+
+    emb_sim = _embedding_similarity(state, det)
+    # Appearance gate: cosine similarity below threshold rejects the match.
+    # This also covers the Kalman gate case (iou=0 AND poor appearance → 0.0).
+    if emb_sim < _APPEARANCE_GATE_THRESHOLD:
+        return 0.0
+    return 0.4 * iou + 0.3 * motion + 0.3 * emb_sim
 
 
 class MultiObjectTracker:

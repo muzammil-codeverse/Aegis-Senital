@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
 
 import numpy as np
 from ultralytics import YOLO
@@ -19,29 +20,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Class name normalisation maps
-_WEAPON_RAW: frozenset[str] = frozenset(
-    {"pistol", "rifle", "knife", "grenade", "shotgun", "gun", "sword"}
-)
-_DEVICE_RAW: frozenset[str] = frozenset({"phone", "tablet", "cell phone"})
+# Phone-model raw class names that should be normalised to "phone".
+# Roboflow numeric exports use '0'/'1'; named exports use 'phone'/'cell phone'.
+_DEVICE_RAW: frozenset[str] = frozenset({"phone", "tablet", "cell phone", "0", "1"})
 
 
 def _normalize_class(raw: str, source_model: str) -> str:
     """
-    Map raw YOLO class labels to canonical threat categories.
+    Normalise raw YOLO class labels to canonical threat categories.
 
-    Phone model note: the trained phone_detector (v1) uses numeric class names
-    '0' and '1' from its Roboflow export.  Both IDs are phone-related so both
-    normalise to 'phone' when the source is phone_model.
+    Weapon sub-classes (pistol, rifle, knife, grenade, shotgun, …) are
+    preserved exactly as returned by the model so that downstream engines
+    (EventEngine class weights, ScenarioEngine clustering) can act on the
+    full granularity.
+
+    Phone model: Roboflow numeric export names ('0', '1') and named variants
+    ('phone', 'cell phone') are all collapsed to 'phone'.
     """
-    if source_model == "weapon_model" and raw in _WEAPON_RAW:
-        return "weapon"
-    if source_model == "phone_model":
-        # Handles both named classes ("phone", "cell phone") and
-        # Roboflow numeric export names ('0', '1')
+    if source_model == "phone_model" or raw in _DEVICE_RAW:
         return "phone"
-    if raw in _DEVICE_RAW:
-        return "phone"
+    # Weapon sub-classes and any other labels pass through unchanged.
     return raw
 
 
@@ -50,12 +48,16 @@ class DetectionEngine:
     Unified dual-model inference engine for real-time surveillance.
 
     Loads weapon and phone YOLO models once at construction and merges
-    their per-frame outputs into a canonical FramePacket.  Maintains
-    separate internal pipelines to support independent model updates.
+    their per-frame outputs into a canonical FramePacket.  Supports both
+    single-frame (predict) and multi-frame batch (predict_batch) inference.
+    Batch inference issues a single YOLO forward pass per model for all
+    frames in the batch, yielding substantially better GPU utilisation than
+    N sequential single-frame calls.
 
     Usage (new API):
         engine = DetectionEngine(weapon_model_path, phone_model_path)
-        packet = engine.predict(frame, frame_id=i)
+        packet  = engine.predict(frame, frame_id=i)
+        packets = engine.predict_batch(frames, frame_ids=[…])
 
     Usage (legacy API, backwards-compatible):
         engine = DetectionEngine()          # loads required weapon + phone models
@@ -78,6 +80,7 @@ class DetectionEngine:
             self._weapon_path = ""
             self._phone_path = ""
             self._device = model_pool.device
+            self._use_half = model_pool.use_half
             self._weapon_model = None
             self._phone_model = None
             self._model_status = dict(model_pool.model_status)
@@ -89,6 +92,7 @@ class DetectionEngine:
             self._weapon_path = weapon_model_path or weapon_model["resolved_path"]
             self._phone_path = phone_model_path or phone_model["resolved_path"]
             self._device = self._resolve_device(device)
+            self._use_half: bool = self._device == "cuda"
             self._weapon_model: YOLO | None = None
             self._phone_model: YOLO | None = None
             self._model_status: dict[str, str] = {
@@ -124,6 +128,13 @@ class DetectionEngine:
             raise RuntimeError(f"{label} has unsupported format: {path}")
         try:
             model = YOLO(path)
+            # Explicitly place weights and cast to target dtype upfront.
+            try:
+                model.model.to(self._device)
+                if self._use_half:
+                    model.model.half()   # FP16 weights for ~2× GPU throughput
+            except Exception:
+                pass  # ultralytics handles device/dtype via runtime args if this fails
             self._model_status[label] = "loaded"
             logger.info(json.dumps({
                 "event": "model_loaded", "model": label,
@@ -157,7 +168,7 @@ class DetectionEngine:
         if not self.is_loaded:
             self._load_models()
 
-    # ── primary inference interface ───────────────────────────────────────────
+    # ── primary inference interface — single frame ────────────────────────────
 
     def predict(
         self,
@@ -168,16 +179,14 @@ class DetectionEngine:
         """
         Run all configured models on *frame* and return a unified FramePacket.
 
-        Detections from both models are merged; class names are normalised.
-        No CPU-GPU synchronisation occurs inside this method (tensor values
-        are read in a single batched .tolist() call per result set).
+        Detections from both models are merged; phone class names are normalised;
+        weapon sub-class names are preserved at full granularity.
         """
         if not self.is_loaded:
             raise RuntimeError("DetectionEngine cannot run without weapon and phone models loaded.")
 
         detections: list[Detection] = []
         _t0 = time.monotonic()
-        # In pool mode _weapon_model/_phone_model are None; _run_model routes via pool.
         detections.extend(self._run_model(frame, self._weapon_model, "weapon_model", camera_id))
         detections.extend(self._run_model(frame, self._phone_model, "phone_model", camera_id))
         _m = get_metrics()
@@ -201,6 +210,69 @@ class DetectionEngine:
             image=frame,
         )
 
+    # ── primary inference interface — batch ───────────────────────────────────
+
+    def predict_batch(
+        self,
+        frames: List[np.ndarray],
+        frame_ids: List[int] | None = None,
+        camera_id: str = "default",
+    ) -> List[FramePacket]:
+        """
+        Run both models over a list of frames in two batched GPU calls and
+        return one FramePacket per input frame.
+
+        Compared to calling predict() N times, predict_batch() issues only
+        two YOLO forward passes (one per model) regardless of batch size,
+        dramatically reducing per-frame GPU overhead.
+
+        Args:
+            frames:    List of BGR np.ndarray images (all at the same resolution).
+            frame_ids: Optional frame identifiers; defaults to [0, 1, 2, …].
+            camera_id: Camera identifier attached to every Detection in the batch.
+
+        Returns:
+            List[FramePacket], one per input frame, in the same order.
+        """
+        if not self.is_loaded:
+            raise RuntimeError("DetectionEngine cannot run without weapon and phone models loaded.")
+        if not frames:
+            return []
+        if frame_ids is None:
+            frame_ids = list(range(len(frames)))
+
+        _t0 = time.monotonic()
+        weapon_per_frame = self._run_model_batch(frames, "weapon_model", camera_id)
+        phone_per_frame = self._run_model_batch(frames, "phone_model", camera_id)
+        _m = get_metrics()
+        _m.record_inference_time(time.monotonic() - _t0)
+
+        packets: List[FramePacket] = []
+        for i, frame in enumerate(frames):
+            fid = frame_ids[i] if i < len(frame_ids) else i
+            detections = weapon_per_frame[i] + phone_per_frame[i]
+            _m.increment("detections_count", len(detections))
+            height, width = frame.shape[:2]
+            packets.append(FramePacket(
+                frame_id=fid,
+                detections=detections,
+                camera_id=camera_id,
+                frame_width=width,
+                frame_height=height,
+                metadata={"model_status": self.model_status},
+                image=frame,
+            ))
+
+        logger.debug(json.dumps({
+            "event": "predict_batch",
+            "batch_size": len(frames),
+            "total_detections": sum(len(p.detections) for p in packets),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }))
+        return packets
+
+    # ── internal inference helpers ────────────────────────────────────────────
+
     def _run_model(
         self,
         frame: np.ndarray,
@@ -209,14 +281,12 @@ class DetectionEngine:
         camera_id: str,
     ) -> list[Detection]:
         """
-        Single-model inference. Reads all tensor data in one batch call.
-
-        When operating in pool mode (self._model_pool is not None) the YOLO
-        call is routed through ModelPool which owns the GPU semaphore.
+        Single-frame inference.  Routes through ModelPool when in pool mode.
+        Reads all tensor data in one batch .tolist() call to avoid per-box
+        CPU-GPU synchronisation overhead.
         """
         try:
             if self._model_pool is not None:
-                # Pool path: semaphore-guarded shared inference
                 if source_model == "weapon_model":
                     results = self._model_pool.run_weapon(frame)
                     names = self._model_pool.weapon_names
@@ -224,8 +294,7 @@ class DetectionEngine:
                     results = self._model_pool.run_phone(frame)
                     names = self._model_pool.phone_names
             else:
-                # Standalone path: private YOLO instance
-                results = model(frame, verbose=False, device=self._device)
+                results = model(frame, verbose=False, device=self._device, half=self._use_half)
                 names = model.names
         except Exception as exc:
             logger.error(json.dumps({
@@ -235,6 +304,62 @@ class DetectionEngine:
                 "ts": datetime.now(timezone.utc).isoformat(),
             }))
             return []
+        return self._parse_results(results, names, source_model, camera_id)
+
+    def _run_model_batch(
+        self,
+        frames: List[np.ndarray],
+        source_model: str,
+        camera_id: str,
+    ) -> List[List[Detection]]:
+        """
+        Batch inference for a list of frames.  Issues one YOLO forward pass for
+        all frames combined.  Returns a list-of-lists: one Detection list per
+        input frame, in the same order.
+        """
+        try:
+            if self._model_pool is not None:
+                if source_model == "weapon_model":
+                    all_results = self._model_pool.run_weapon_batch(frames)
+                    names = self._model_pool.weapon_names
+                else:
+                    all_results = self._model_pool.run_phone_batch(frames)
+                    names = self._model_pool.phone_names
+            else:
+                model = (
+                    self._weapon_model
+                    if source_model == "weapon_model"
+                    else self._phone_model
+                )
+                all_results = model(frames, verbose=False, device=self._device, half=self._use_half)
+                names = model.names
+        except Exception as exc:
+            logger.error(json.dumps({
+                "event": "model_batch_inference_error",
+                "model": source_model,
+                "batch_size": len(frames),
+                "error": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }))
+            return [[] for _ in frames]
+
+        per_frame: List[List[Detection]] = [
+            self._parse_results([r], names, source_model, camera_id)
+            for r in all_results
+        ]
+        # Guard against YOLO returning fewer result objects than input frames
+        while len(per_frame) < len(frames):
+            per_frame.append([])
+        return per_frame
+
+    @staticmethod
+    def _parse_results(
+        results: list,
+        names: dict,
+        source_model: str,
+        camera_id: str,
+    ) -> list[Detection]:
+        """Extract Detection objects from ultralytics result objects."""
         out: list[Detection] = []
         for r in results:
             if r.boxes is None:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
+from typing import List
 
 import cv2
 import numpy as np
@@ -18,53 +20,169 @@ from inference.event_engine import EventEngine
 from inference.model_pool import ModelPool
 from inference.monitoring.metrics import register_stream, get_stream_metrics, get_metrics
 from inference.scenario_engine import ScenarioEngine
+from inference.schemas import FramePacket
 from inference.tracker import MultiObjectTracker
 
 logger = logging.getLogger(__name__)
 
 _RESIZE_DIM = (640, 640)
 
+# ── adaptive batch sizing ──────────────────────────────────────────────────────
+_BATCH_SIZE_INIT = 4
+_BATCH_SIZE_MIN = 2
+_BATCH_SIZE_MAX = 8
+_BATCH_GROW_THRESHOLD_MS = 60.0     # per-frame ms below this → grow batch by 1
+_BATCH_SHRINK_THRESHOLD_MS = 100.0  # per-frame ms above this → shrink batch by 1
+
+# ── 3-thread pipeline queue sizes ─────────────────────────────────────────────
+_INGEST_QUEUE_MAXSIZE = 32   # raw frames between ingest and inference threads
+_RESULT_QUEUE_MAXSIZE = 64   # FramePackets between inference and postproc threads
+
+# ── result-queue priority levels (lower = higher priority) ────────────────────
+_PRIORITY_WEAPON = 3    # at least one weapon-class detection
+_PRIORITY_PERSON = 5    # persons present, no weapons
+_PRIORITY_EMPTY = 9     # no significant detections
+
 # ── Phase 6: circuit breaker constants ───────────────────────────────────────
 _CB_FAILURE_WINDOW = 60          # rolling window in frames for failure-rate check
-_CB_FAILURE_THRESHOLD = 0.50     # ≥50% failure rate in window trips the breaker
+_CB_FAILURE_THRESHOLD = 0.50     # ≥50% failure rate in window trips the rate breaker
 _CB_EVENT_RATE_WINDOW = 10.0     # seconds for event-rate check
 _CB_EVENT_RATE_THRESHOLD = 100   # events/sec sustained over the window trips breaker
-_CB_COOLDOWN = 30.0              # seconds before a tripped breaker resets
+_CB_COOLDOWN = 30.0              # seconds before an OPEN breaker moves to HALF_OPEN
 
 # ── Phase 6: latency budget ───────────────────────────────────────────────────
-_MAX_PIPELINE_MS = 100.0         # target end-to-end frame budget (milliseconds)
+_MAX_PIPELINE_MS = 100.0         # target end-to-end per-frame budget (milliseconds)
 
+# Weapon labels for priority scoring (must match event_engine.WEAPON_LABELS)
+_WEAPON_LABELS = frozenset({
+    "weapon", "pistol", "rifle", "knife", "grenade", "gun", "shotgun", "sword",
+})
+
+
+def _frame_priority(packet: FramePacket) -> int:
+    """Assign a result-queue priority to a FramePacket based on detections."""
+    classes = {d.class_name for d in packet.detections}
+    if classes & _WEAPON_LABELS:
+        return _PRIORITY_WEAPON
+    if "person" in classes:
+        return _PRIORITY_PERSON
+    return _PRIORITY_EMPTY
+
+
+# ── Circuit Breaker ───────────────────────────────────────────────────────────
+
+class CircuitBreaker:
+    """
+    Thread-safe three-state fault isolator: CLOSED → OPEN → HALF_OPEN → CLOSED.
+
+    State machine:
+        CLOSED    — normal operation; failures increment the counter; success
+                    resets it.  When failures reach failure_threshold the
+                    breaker transitions to OPEN.
+        OPEN      — all requests are blocked.  After reset_timeout seconds
+                    the breaker moves to HALF_OPEN.
+        HALF_OPEN — one probe request is allowed through.  If it succeeds
+                    the breaker closes; if it fails the breaker re-opens.
+
+    All mutations are protected by an internal Lock so the breaker can be
+    read from the postproc thread while being written from the inference thread.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        reset_timeout: float = 10.0,
+    ) -> None:
+        self._lock = threading.Lock()
+        self.failures: int = 0
+        self.failure_threshold: int = failure_threshold
+        self.last_failure_time: float | None = None
+        self.reset_timeout: float = reset_timeout
+        self.state: str = "CLOSED"  # CLOSED | OPEN | HALF_OPEN
+
+    def record_success(self) -> None:
+        with self._lock:
+            if self.state == "HALF_OPEN":
+                self.state = "CLOSED"
+                self.failures = 0
+                self.last_failure_time = None
+            elif self.state == "CLOSED":
+                self.failures = 0
+
+    def record_failure(self) -> None:
+        with self._lock:
+            self.failures += 1
+            self.last_failure_time = time.monotonic()
+            if self.state == "HALF_OPEN" or self.failures >= self.failure_threshold:
+                self.state = "OPEN"
+
+    def check_and_transition(self) -> None:
+        """Evaluate OPEN → HALF_OPEN timeout transition.  Call once per batch cycle."""
+        with self._lock:
+            if self.state == "OPEN" and self.last_failure_time is not None:
+                if time.monotonic() - self.last_failure_time >= self.reset_timeout:
+                    self.state = "HALF_OPEN"
+                    logger.info("CircuitBreaker: OPEN → HALF_OPEN (probe allowed)")
+
+    def force_open(self) -> None:
+        with self._lock:
+            self.state = "OPEN"
+            self.last_failure_time = time.monotonic()
+            self.failures = self.failure_threshold
+
+    @property
+    def is_open(self) -> bool:
+        return self.state == "OPEN"
+
+    @property
+    def allows_request(self) -> bool:
+        return self.state in ("CLOSED", "HALF_OPEN")
+
+
+# ── StreamProcessor ───────────────────────────────────────────────────────────
 
 class StreamProcessor:
     """
-    Self-contained per-stream inference pipeline.
+    Self-contained per-stream inference pipeline — three decoupled threads.
 
-    Each instance owns its own DetectionEngine (backed by the shared ModelPool),
-    MultiObjectTracker, EventBuffer, EventEngine, and ScenarioEngine.  No
-    mutable state is shared with other streams.
+    Thread 1 — ingest (_ingest_loop):
+        Opens the capture source, reads frames, resizes them to 640×640, and
+        pushes (frame_id, frame) tuples to _ingest_queue (bounded Queue,
+        maxsize=32).  Drops frames immediately when the queue is full rather
+        than blocking.  Obeys the _skip_next_event signal set by the inference
+        thread when the pipeline is running over the latency budget.
 
-    The pipeline mirrors video_service._process_frame_job:
-        1. Resize frame
-        2. Detect   — pool-guarded GPU inference
-        3. Track    — per-stream tracker, no global lock
-        4. Buffer   — per-stream EventBuffer
-        5. Evaluate — per-stream EventEngine → Events
-        6. Publish  — Events pushed to central EventBus
+    Thread 2 — inference (_inference_loop / _run_batch):
+        Pops frames from _ingest_queue and accumulates them into variable-size
+        batches (_batch_size, starting at 4, range 2–8).  On a full batch a
+        single predict_batch() GPU call is issued.  Each resulting FramePacket
+        is scored for priority (weapon → 3, person → 5, empty → 9) and pushed
+        to _result_queue (PriorityQueue, maxsize=64) so the postproc thread
+        handles high-severity frames first.  Adaptive batch sizing:
+            per-frame ms < 60  → grow batch size (up to 8)
+            per-frame ms > 100 → shrink batch size (down to 2)
+        Sets _skip_next_event when per-frame ms > _MAX_PIPELINE_MS so the
+        ingest thread drops the next frame to relieve GPU pressure.
 
-    Phase-6 hardening:
-        Circuit breaker — auto-disables the stream if the sustained failure rate
-        exceeds _CB_FAILURE_THRESHOLD or the event rate exceeds
-        _CB_EVENT_RATE_THRESHOLD events/sec.  The breaker resets automatically
-        after _CB_COOLDOWN seconds.
+    Thread 3 — post-processing (_postproc_loop):
+        Drains _result_queue in priority order.  For each packet runs:
+        fusion → tracking → context annotation → event buffer → event engine
+        → scenario engine → EventBus publish.
 
-        Latency budget — if a frame's pipeline time exceeds _MAX_PIPELINE_MS,
-        a latency_violation is recorded.  Context annotation is skipped on the
-        next frame to shed load when latency is consistently over budget.
+    Both single-frame and batch inference modes are routed through the same
+    three-thread architecture.  Shutdown propagates via sentinel None values
+    pushed through each queue in order (ingest → inference → postproc).
+
+    Circuit breaker (thread-safe, CLOSED/OPEN/HALF_OPEN):
+        5 consecutive inference failures → OPEN.  After _CB_COOLDOWN seconds
+        → HALF_OPEN (one probe).  Also tripped by a rate-based secondary check
+        (_check_circuit_breaker): ≥50% failure rate over 60 frames, or
+        event rate > 100/s over 10 seconds.
 
     Lifecycle:
-        proc = StreamProcessor("cam_01", "rtsp://...")
+        proc = StreamProcessor("cam_01", "rtsp://…", model_pool)
         proc.start()
-        ...
+        …
         proc.stop()
     """
 
@@ -93,22 +211,38 @@ class StreamProcessor:
         self._scenario_engine = ScenarioEngine(db=_db)
         self._context_engine = ContextEngine()
 
+        # ── 3-thread pipeline queues ──────────────────────────────────────────
+        self._ingest_queue: queue.Queue = queue.Queue(maxsize=_INGEST_QUEUE_MAXSIZE)
+        self._result_queue: queue.PriorityQueue = queue.PriorityQueue(
+            maxsize=_RESULT_QUEUE_MAXSIZE
+        )
+
+        # ── adaptive batch state (written by inference thread only) ───────────
+        self._batch_size: int = _BATCH_SIZE_INIT
+        self._batch_seq: int = 0
+        self._seq_lock: threading.Lock = threading.Lock()
+
+        # ── inter-thread latency signals ──────────────────────────────────────
+        # Set by inference thread; cleared by ingest thread after dropping a frame.
+        self._skip_next_event: threading.Event = threading.Event()
+        # Written by inference thread, read by postproc thread (GIL-safe bool).
+        self._skip_context_next: bool = False
+
         # ── thread control ────────────────────────────────────────────────────
         self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
         self._status: str = "idle"
+        self._ingest_thread: threading.Thread | None = None
+        self._inference_thread: threading.Thread | None = None
+        self._postproc_thread: threading.Thread | None = None
 
-        # ── Phase 6: circuit breaker state ───────────────────────────────────
-        self._circuit_open: bool = False
-        self._circuit_tripped_at: float = 0.0
+        # ── Phase 6: circuit breaker ──────────────────────────────────────────
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            reset_timeout=_CB_COOLDOWN,
+        )
         self._cb_frame_results: deque[bool] = deque(maxlen=_CB_FAILURE_WINDOW)
         self._cb_event_times: deque[float] = deque(maxlen=2000)
-
-        # ── Phase 6: latency budget tracking ─────────────────────────────────
-        # Rolling window of recent pipeline times (ms) — used to detect
-        # sustained overload and decide whether to shed context annotation load.
         self._recent_pipeline_ms: deque[float] = deque(maxlen=20)
-        self._skip_context_next: bool = False
 
         # ── per-stream metrics ────────────────────────────────────────────────
         register_stream(stream_id)
@@ -116,18 +250,33 @@ class StreamProcessor:
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        """Spawn the processing thread and begin reading frames."""
-        if self._thread is not None and self._thread.is_alive():
+        """Spawn the three pipeline threads and begin processing."""
+        if self._ingest_thread is not None and self._ingest_thread.is_alive():
             logger.warning("StreamProcessor '%s' already running", self.stream_id)
             return
         self._stop_event.clear()
         self._status = "starting"
-        self._thread = threading.Thread(
-            target=self._run,
-            name=f"stream-{self.stream_id}",
+
+        self._postproc_thread = threading.Thread(
+            target=self._postproc_loop,
+            name=f"stream-{self.stream_id}-postproc",
             daemon=True,
         )
-        self._thread.start()
+        self._inference_thread = threading.Thread(
+            target=self._inference_loop,
+            name=f"stream-{self.stream_id}-inference",
+            daemon=True,
+        )
+        self._ingest_thread = threading.Thread(
+            target=self._ingest_loop,
+            name=f"stream-{self.stream_id}-ingest",
+            daemon=True,
+        )
+        # Start in reverse dependency order so downstream threads are ready first.
+        self._postproc_thread.start()
+        self._inference_thread.start()
+        self._ingest_thread.start()
+
         logger.info(
             json.dumps({
                 "event": "stream_started",
@@ -138,10 +287,17 @@ class StreamProcessor:
         )
 
     def stop(self) -> None:
-        """Signal the processing thread to stop and wait for it to exit."""
+        """Signal all three threads to stop and wait for them to exit."""
         self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=10.0)
+        # Unblock any thread waiting on an empty ingest queue.
+        for _ in range(3):
+            try:
+                self._ingest_queue.put_nowait(None)
+            except queue.Full:
+                pass
+        for thread in (self._ingest_thread, self._inference_thread, self._postproc_thread):
+            if thread is not None:
+                thread.join(timeout=10.0)
         self._status = "stopped"
         logger.info(
             json.dumps({
@@ -154,8 +310,8 @@ class StreamProcessor:
     @property
     def is_running(self) -> bool:
         return (
-            self._thread is not None
-            and self._thread.is_alive()
+            self._ingest_thread is not None
+            and self._ingest_thread.is_alive()
             and not self._stop_event.is_set()
         )
 
@@ -166,104 +322,275 @@ class StreamProcessor:
             "source": self.source,
             "status": self._status,
             "running": self.is_running,
-            "circuit_open": self._circuit_open,
+            "circuit_state": self._circuit_breaker.state,
+            "circuit_open": self._circuit_breaker.is_open,
+            "batch_size": self._batch_size,
+            "ingest_queue_depth": self._ingest_queue.qsize(),
+            "result_queue_depth": self._result_queue.qsize(),
             "metrics": sm.snapshot() if sm else {},
         }
 
-    # ── main processing loop ──────────────────────────────────────────────────
+    # ── Thread 1: frame ingestion ─────────────────────────────────────────────
 
-    def _run(self) -> None:
-        self._status = "running"
+    def _ingest_loop(self) -> None:
+        """
+        Read frames from the capture source and push them to _ingest_queue.
+
+        Respects the _skip_next_event signal: when the inference thread sets it
+        (because the batch was slow), the next readable frame is discarded rather
+        than enqueued.  Frames are also silently dropped when _ingest_queue is
+        full so the ingest thread never blocks the capture loop.
+        """
         cap = cv2.VideoCapture(self.source)
-
         if not cap.isOpened():
             logger.error(
                 "StreamProcessor '%s': cannot open source '%s'",
                 self.stream_id, self.source,
             )
             self._status = "error"
+            self._ingest_queue.put(None)  # propagate sentinel so downstream exits
             return
 
-        sm = get_stream_metrics(self.stream_id)
-        bus = get_event_bus()
-        frame_id = 0
         _is_file = isinstance(self.source, str) and self.source.lower().endswith(
             (".mp4", ".avi", ".mov", ".mkv", ".webm")
         )
+        frame_id = 0
+        self._status = "running"
 
         try:
             while not self._stop_event.is_set():
-                # ── circuit breaker guard ─────────────────────────────────────
-                if self._circuit_open:
-                    now = time.monotonic()
-                    if now - self._circuit_tripped_at >= _CB_COOLDOWN:
-                        self._circuit_open = False
-                        logger.info(
-                            "StreamProcessor '%s': circuit breaker reset after cooldown",
-                            self.stream_id,
-                        )
-                    else:
-                        time.sleep(0.1)
-                        continue
-
                 ret, frame = cap.read()
-
                 if not ret:
                     if _is_file:
-                        break  # end of file
-                    # Live camera lost: brief pause then retry
-                    time.sleep(0.05)
+                        break  # end of file — flush then exit
+                    time.sleep(0.05)  # live camera blip: retry
                     continue
 
-                t0 = time.monotonic()
+                # Latency-budget drop: inference thread signalled us to shed load.
+                if self._skip_next_event.is_set():
+                    self._skip_next_event.clear()
+                    get_metrics().record_frame_dropped()
+                    get_metrics().record_latency_violation()
+                    logger.debug(
+                        "StreamProcessor '%s': frame %d dropped — latency budget signal",
+                        self.stream_id, frame_id,
+                    )
+                    frame_id += 1
+                    continue
+
+                resized = cv2.resize(frame, _RESIZE_DIM)
                 try:
-                    self._process_frame(frame, frame_id, bus)
-                    pipeline_ms = (time.monotonic() - t0) * 1000.0
-                    self._recent_pipeline_ms.append(pipeline_ms)
-                    if sm is not None:
-                        sm.record_frame(pipeline_ms / 1000.0)
-                    self._cb_frame_results.append(True)
-
-                    # Latency violation
-                    if pipeline_ms > _MAX_PIPELINE_MS:
-                        get_metrics().record_latency_violation()
-                        logger.debug(
-                            "StreamProcessor '%s': frame %d exceeded latency budget "
-                            "(%.1fms > %.1fms)",
-                            self.stream_id, frame_id, pipeline_ms, _MAX_PIPELINE_MS,
-                        )
-
-                    # Flag context annotation to be skipped next frame when avg
-                    # pipeline time is consistently over budget (shed load).
-                    avg_ms = (
-                        sum(self._recent_pipeline_ms) / len(self._recent_pipeline_ms)
-                        if self._recent_pipeline_ms else 0.0
-                    )
-                    self._skip_context_next = avg_ms > _MAX_PIPELINE_MS
-
-                except Exception as exc:
-                    logger.warning(
-                        "StreamProcessor '%s': frame %d failed: %s",
-                        self.stream_id, frame_id, exc,
-                    )
-                    if sm is not None:
-                        sm.record_failure()
-                    self._cb_frame_results.append(False)
-
-                self._check_circuit_breaker()
+                    self._ingest_queue.put_nowait((frame_id, resized))
+                except queue.Full:
+                    get_metrics().record_frame_dropped()
                 frame_id += 1
+
         finally:
             cap.release()
-            self._status = "stopped"
 
-    # ── circuit breaker ───────────────────────────────────────────────────────
+        # Send sentinel to unblock the inference thread.
+        self._ingest_queue.put(None)
 
-    def _check_circuit_breaker(self) -> None:
-        """Trip the circuit breaker if failure rate or event rate exceeds thresholds."""
-        if self._circuit_open:
+    # ── Thread 2: batched GPU inference ──────────────────────────────────────
+
+    def _inference_loop(self) -> None:
+        """
+        Accumulate frames from _ingest_queue into variable-size batches and
+        dispatch each full batch to _run_batch().  Propagates shutdown sentinel.
+        """
+        batch_frames: List[np.ndarray] = []
+        batch_ids: List[int] = []
+
+        def _flush() -> None:
+            if batch_frames:
+                self._run_batch(list(batch_frames), list(batch_ids))
+                batch_frames.clear()
+                batch_ids.clear()
+
+        while True:
+            try:
+                item = self._ingest_queue.get(timeout=0.1)
+            except queue.Empty:
+                if self._stop_event.is_set():
+                    _flush()
+                    self._result_queue.put(None)
+                    break
+                continue
+
+            if item is None:
+                _flush()
+                self._result_queue.put(None)
+                break
+
+            fid, frame = item
+            batch_frames.append(frame)
+            batch_ids.append(fid)
+
+            if len(batch_frames) < self._batch_size:
+                continue  # keep filling the batch
+
+            _flush()
+
+    def _run_batch(self, frames: List[np.ndarray], frame_ids: List[int]) -> None:
+        """
+        Run a single predict_batch() GPU call, adaptively resize the batch,
+        enforce the latency budget, and enqueue resulting packets by priority.
+        """
+        self._circuit_breaker.check_and_transition()
+        if self._circuit_breaker.is_open:
+            get_metrics().record_frame_dropped(len(frames))
             return
 
-        # Failure-rate check
+        t0 = time.monotonic()
+        try:
+            packets = self._engine.predict_batch(frames, frame_ids, self.stream_id)
+            batch_ms = (time.monotonic() - t0) * 1000.0
+            n = max(1, len(frames))
+            per_frame_ms = batch_ms / n
+
+            # Adaptive batch size: grow when fast, shrink when slow.
+            if per_frame_ms < _BATCH_GROW_THRESHOLD_MS:
+                self._batch_size = min(_BATCH_SIZE_MAX, self._batch_size + 1)
+            elif per_frame_ms > _BATCH_SHRINK_THRESHOLD_MS:
+                self._batch_size = max(_BATCH_SIZE_MIN, self._batch_size - 1)
+
+            # Latency budget: signal ingest to drop the next frame.
+            if per_frame_ms > _MAX_PIPELINE_MS:
+                self._skip_next_event.set()
+                logger.warning(
+                    "StreamProcessor '%s': per-frame %.1f ms > budget %.1f ms "
+                    "— dropping next frame",
+                    self.stream_id, per_frame_ms, _MAX_PIPELINE_MS,
+                )
+
+            # Update rolling latency and context-suppression flag.
+            self._recent_pipeline_ms.append(per_frame_ms)
+            avg_ms = (
+                sum(self._recent_pipeline_ms) / len(self._recent_pipeline_ms)
+                if self._recent_pipeline_ms else 0.0
+            )
+            self._skip_context_next = avg_ms > _MAX_PIPELINE_MS
+
+            # Score and enqueue each packet with priority for postproc ordering.
+            for packet in packets:
+                priority = _frame_priority(packet)
+                with self._seq_lock:
+                    seq = self._batch_seq
+                    self._batch_seq += 1
+                try:
+                    self._result_queue.put_nowait((priority, seq, packet))
+                except queue.Full:
+                    get_metrics().record_queue_overflow()
+
+            sm = get_stream_metrics(self.stream_id)
+            if sm is not None:
+                sm.record_frame(batch_ms / 1000.0)
+
+            self._circuit_breaker.record_success()
+            self._cb_frame_results.append(True)
+
+        except Exception as exc:
+            logger.warning(
+                "StreamProcessor '%s': inference batch [%s] failed: %s",
+                self.stream_id, frame_ids, exc,
+            )
+            sm = get_stream_metrics(self.stream_id)
+            if sm is not None:
+                sm.record_failure()
+            self._circuit_breaker.record_failure()
+            self._cb_frame_results.append(False)
+
+        self._check_circuit_breaker()
+
+    # ── Thread 3: tracking, events, publish ───────────────────────────────────
+
+    def _postproc_loop(self) -> None:
+        """
+        Drain _result_queue in priority order (weapon frames first) and run
+        the full post-detection pipeline for each FramePacket.
+        """
+        bus = get_event_bus()
+
+        while True:
+            try:
+                item = self._result_queue.get(timeout=0.1)
+            except queue.Empty:
+                if self._stop_event.is_set():
+                    break
+                continue
+
+            if item is None:
+                break
+
+            _, _, packet = item
+            try:
+                self._process_packet(packet, bus)
+            except Exception as exc:
+                logger.warning(
+                    "StreamProcessor '%s': postproc failed for frame %d: %s",
+                    self.stream_id, packet.frame_id, exc,
+                )
+
+    # ── per-frame post-detection pipeline ────────────────────────────────────
+
+    def _process_packet(self, packet: FramePacket, bus: object) -> None:
+        """
+        Run the tracking → event → scenario pipeline for one FramePacket whose
+        detections have already been populated by predict_batch().
+        """
+        # Stage 2: model-level fusion (NMS across weapon+phone detections)
+        packet.detections = self._fusion_engine.fuse(
+            packet.detections,
+            active_tracks=self._tracker.get_active_tracks(self.stream_id),
+        )
+
+        # Stage 3: per-stream tracking
+        packet.tracks = self._tracker.update(packet)
+
+        # Stage 3b: context annotation — suppressed when pipeline is over budget
+        if not self._skip_context_next:
+            ctx_count = self._context_engine.annotate(packet)
+            if ctx_count:
+                get_metrics().record_context_annotation(ctx_count)
+
+        # Stage 4: buffer + temporal scoring
+        self._buffer.add(packet)
+        events = self._event_engine.evaluate(self._buffer)
+        scenarios = self._scenario_engine.aggregate(events)
+
+        # Stage 5: publish to central EventBus
+        now = time.monotonic()
+        for event in events:
+            bus.publish_event(event, stream_id=self.stream_id)
+            self._cb_event_times.append(now)
+
+        logger.debug(
+            json.dumps({
+                "event": "stream_frame_processed",
+                "stream_id": self.stream_id,
+                "frame_id": packet.frame_id,
+                "detections": len(packet.detections),
+                "tracks": len(packet.tracks),
+                "events": len(events),
+                "scenarios": len(scenarios),
+                "context_skipped": self._skip_context_next,
+                "circuit_state": self._circuit_breaker.state,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+        )
+
+    # ── circuit breaker (rate-based secondary check) ──────────────────────────
+
+    def _check_circuit_breaker(self) -> None:
+        """
+        Trip the circuit breaker if the sustained failure rate or event rate
+        exceeds thresholds.  Complements the consecutive-failure CircuitBreaker
+        class by catching episodic (non-consecutive) overload patterns.
+        """
+        if self._circuit_breaker.is_open:
+            return
+
+        # Failure-rate check over rolling window
         n = len(self._cb_frame_results)
         if n >= _CB_FAILURE_WINDOW // 2:
             failure_rate = sum(1 for r in self._cb_frame_results if not r) / n
@@ -285,8 +612,7 @@ class StreamProcessor:
             )
 
     def _trip_circuit_breaker(self, reason: str) -> None:
-        self._circuit_open = True
-        self._circuit_tripped_at = time.monotonic()
+        self._circuit_breaker.force_open()
         get_metrics().record_circuit_break()
         logger.critical(
             json.dumps({
@@ -294,56 +620,6 @@ class StreamProcessor:
                 "stream_id": self.stream_id,
                 "reason": reason,
                 "cooldown_seconds": _CB_COOLDOWN,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            })
-        )
-
-    # ── main processing pipeline ──────────────────────────────────────────────
-
-    def _process_frame(self, frame: np.ndarray, frame_id: int, bus: object) -> None:
-        resized = cv2.resize(frame, _RESIZE_DIM)
-
-        # Stage 1: detection via shared ModelPool (GPU semaphore inside pool)
-        packet = self._engine.predict(resized, frame_id=frame_id, camera_id=self.stream_id)
-
-        # Stage 2: model-level fusion (NMS across weapon+phone detections)
-        packet.detections = self._fusion_engine.fuse(
-            packet.detections,
-            active_tracks=self._tracker.get_active_tracks(self.stream_id),
-        )
-
-        # Stage 3: per-stream tracking (own state — no global lock needed)
-        packet.tracks = self._tracker.update(packet)
-
-        # Stage 3b: context annotation — skipped when pipeline is over budget
-        # to shed load.  The flag is set/cleared by the run loop based on
-        # rolling average pipeline time vs _MAX_PIPELINE_MS.
-        if not self._skip_context_next:
-            ctx_count = self._context_engine.annotate(packet)
-            if ctx_count:
-                get_metrics().record_context_annotation(ctx_count)
-
-        # Stage 4: buffer + temporal scoring
-        self._buffer.add(packet)
-        events = self._event_engine.evaluate(self._buffer)
-        scenarios = self._scenario_engine.aggregate(events)
-
-        # Stage 5: publish to central EventBus
-        now = time.monotonic()
-        for event in events:
-            bus.publish_event(event, stream_id=self.stream_id)
-            self._cb_event_times.append(now)
-
-        logger.debug(
-            json.dumps({
-                "event": "stream_frame_processed",
-                "stream_id": self.stream_id,
-                "frame_id": frame_id,
-                "detections": len(packet.detections),
-                "tracks": len(packet.tracks),
-                "events": len(events),
-                "scenarios": len(scenarios),
-                "context_skipped": self._skip_context_next,
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
         )

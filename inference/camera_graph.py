@@ -104,3 +104,61 @@ class CameraGraph:
         observed_heading = math.degrees(math.atan2(vy, vx))
         delta = abs(((observed_heading - expected_heading + 180.0) % 360.0) - 180.0)
         return round(max(0.0, 1.0 - delta / 180.0), 4)
+
+
+def load_camera_graph_from_config(config: dict) -> CameraGraph:
+    """
+    Build a CameraGraph from a configuration dictionary.
+
+    Expected format::
+
+        {
+            "cameras": {
+                "cam_1": {"location": [x, y], "fov": {"heading": 90, "angle": 60}},
+                "cam_2": {"location": [x, y], "fov": {"heading": 270, "angle": 90}}
+            },
+            "connections": [
+                {
+                    "from": "cam_1",
+                    "to":   "cam_2",
+                    "overlap":      0.3,
+                    "probability":  0.7,
+                    "heading":      90    # expected exit heading in degrees
+                }
+            ]
+        }
+
+    ``location`` is stored as ``CameraNode.location_embedding`` (arbitrary-length
+    float list; can be a 2-D pixel coordinate or a geo coordinate pair).
+    ``fov`` is stored verbatim as ``CameraNode.field_of_view``.
+    ``heading`` on a connection is stored in ``CameraEdge.metadata`` so that
+    ``CameraGraph._motion_alignment`` can use it during transition scoring.
+    """
+    graph = CameraGraph()
+
+    for cam_id, cam_cfg in config.get("cameras", {}).items():
+        location = cam_cfg.get("location", [])
+        fov = cam_cfg.get("fov", {})
+        node = CameraNode(
+            camera_id=cam_id,
+            location_embedding=[float(v) for v in location],
+            field_of_view=dict(fov),
+            metadata={k: v for k, v in cam_cfg.items() if k not in ("location", "fov")},
+        )
+        graph.add_camera(node)
+
+    for conn in config.get("connections", []):
+        source = conn.get("from", "")
+        target = conn.get("to", "")
+        if not source or not target:
+            continue
+        edge = CameraEdge(
+            source_camera_id=source,
+            target_camera_id=target,
+            overlap_score=float(conn.get("overlap", 0.0)),
+            transition_probability=float(conn.get("probability", 0.0)),
+            metadata={"heading": conn["heading"]} if "heading" in conn else {},
+        )
+        graph.connect(edge)
+
+    return graph

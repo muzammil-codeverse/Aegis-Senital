@@ -5,6 +5,9 @@ import logging
 import math
 from collections import deque
 from datetime import datetime, timezone
+from typing import List
+
+from cachetools import TTLCache
 
 from inference.event_buffer import EventBuffer
 from inference.identity_db import IdentityDB, get_db
@@ -14,6 +17,7 @@ from inference.schemas import DetectionResult, Event, FramePacket, Track
 logger = logging.getLogger(__name__)
 
 _CLASS_WEIGHTS: dict[str, float] = {
+    # Weapon sub-classes (preserved after removing normalisation)
     "weapon": 0.95,
     "pistol": 0.95,
     "rifle": 0.95,
@@ -22,6 +26,7 @@ _CLASS_WEIGHTS: dict[str, float] = {
     "gun": 0.95,
     "shotgun": 0.95,
     "sword": 0.80,
+    # Distraction / contextual
     "phone": 0.45,
     "tablet": 0.40,
     "cell phone": 0.45,
@@ -39,11 +44,21 @@ _DECAY_LAMBDA = 0.35
 _WEAPON_CONFIRMATION = 3
 _PHONE_CONFIRMATION = 2
 
+# Loitering
+_LOITERING_SPEED_THRESHOLD = 0.1   # pixels/frame — below this is "stationary"
+
+# Unattended object
+_UNATTENDED_FRAME_THRESHOLD = 30   # consecutive frames without a nearby person
+_PERSON_PROXIMITY_IOU = 0.05       # IoU threshold for "person is nearby"
+
 
 def _parse_timestamp(timestamp: str) -> datetime:
     try:
-        return datetime.fromisoformat(timestamp)
-    except ValueError:
+        dt = datetime.fromisoformat(timestamp)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, AttributeError):
         return datetime.now(timezone.utc)
 
 
@@ -72,17 +87,52 @@ def _iou(b1: list[float], b2: list[float]) -> float:
 class EventEngine:
     """
     Temporal threat scoring engine with decayed memory and queued persistence.
+
+    Detects the following event types:
+      WEAPON_THREAT          — confirmed weapon track above risk threshold
+      PHONE_USAGE_RISK       — phone track with optional person proximity bonus
+      ARMED_CROWD_THREAT     — weapon event + 3+ persons in the same frame
+      LOITERING_DETECTED     — person stationary beyond loitering_threshold_seconds
+      UNATTENDED_OBJECT      — non-person object present without nearby person
+                               for >= _UNATTENDED_FRAME_THRESHOLD frames
+      GEOFENCE_VIOLATION     — any track centre inside a restricted zone polygon
+
+    Args:
+        db:                         IdentityDB instance (or None for default singleton).
+        loitering_threshold_seconds: Seconds a person must be nearly stationary
+                                    before a LOITERING_DETECTED event fires.
+        restricted_zones:           List of polygons, each a list of [x, y] points
+                                    in pixel coordinates, read from scenario config
+                                    rules.restricted_zones.
     """
 
-    def __init__(self, db: IdentityDB | None = None) -> None:
+    def __init__(
+        self,
+        db: IdentityDB | None = None,
+        loitering_threshold_seconds: float = 30.0,
+        restricted_zones: list | None = None,
+    ) -> None:
         self._db = db or get_db()
-        self._score_memory: dict[str, tuple[float, datetime]] = {}
+
+        # TTL-bounded score memory prevents unbounded growth.
+        # Entries expire after 300 s of inactivity; max 10 000 live entries.
+        self._score_memory: TTLCache = TTLCache(maxsize=10_000, ttl=300)
+
         # Phase 5 — adaptive threshold state
-        # Sliding window of risk scores from recently emitted events.
-        # Low-scoring events (near threshold) are treated as noise signals.
         self._recent_event_scores: deque[float] = deque(maxlen=30)
-        # Rolling avg detections per frame (feeds stream_load_factor)
         self._recent_det_counts: deque[int] = deque(maxlen=20)
+
+        # Behaviour detection config
+        self._loitering_threshold_seconds = loitering_threshold_seconds
+        self._restricted_zones: list = restricted_zones or []
+
+        # Unattended object registry: track_id → consecutive unattended frames
+        self._unattended_registry: dict[int, int] = {}
+
+        # Object ownership map: object_track_id → person_track_id assigned at first detection
+        self._object_owner_map: dict[int, int] = {}
+
+    # ── main evaluate entry point ─────────────────────────────────────────────
 
     def evaluate(self, buffer: EventBuffer) -> list[Event]:
         if len(buffer) == 0:
@@ -92,7 +142,6 @@ class EventEngine:
             return []
         packet = recent[-1]
 
-        # Track rolling detection count before computing threshold
         self._recent_det_counts.append(len(packet.detections))
         threshold = self._adaptive_threshold(buffer.get_scene_density(), len(packet.tracks))
         tracks = [track for track in packet.tracks if track.missed_frames == 0]
@@ -101,6 +150,9 @@ class EventEngine:
         events.extend(self._weapon_events(packet, tracks, buffer, threshold))
         events.extend(self._phone_events(packet, tracks, buffer, threshold))
         events.extend(self._crowd_events(packet, tracks, events))
+        events.extend(self._loitering_events(packet, tracks, buffer))
+        events.extend(self._unattended_object_events(packet, tracks))
+        events.extend(self._geofence_events(packet, tracks))
 
         for event in events:
             self._db.persist_event(event, frame_id=packet.frame_id)
@@ -129,6 +181,8 @@ class EventEngine:
                 )
             )
         return events
+
+    # ── existing event generators ─────────────────────────────────────────────
 
     def _weapon_events(
         self,
@@ -205,6 +259,336 @@ class EventEngine:
         )
         return [event]
 
+    # ── new event generators ──────────────────────────────────────────────────
+
+    def _loitering_events(
+        self,
+        packet: FramePacket,
+        tracks: list[Track],
+        buffer: EventBuffer,
+    ) -> list[Event]:
+        """
+        Fire LOITERING_DETECTED for any person track that has been nearly
+        stationary for longer than _loitering_threshold_seconds.
+
+        Stationarity is measured via sliding-window motion variance computed
+        from the track's bbox_series (up to 30 most-recent confirmed frames).
+        loiter_score = dwell_factor * (1 - normalized_motion_variance).
+
+        Tracks whose centre falls inside a restricted zone are skipped because
+        a GEOFENCE_VIOLATION event takes precedence.
+        """
+        events: list[Event] = []
+        for track in tracks:
+            if track.class_name != "person":
+                continue
+
+            # Skip if inside any restricted zone — geofence violation is the primary signal.
+            bbox = track.bbox
+            cx = (bbox[0] + bbox[2]) / 2.0
+            cy = (bbox[1] + bbox[3]) / 2.0
+            if self._in_any_zone(cx, cy):
+                continue
+
+            try:
+                first = _parse_timestamp(track.first_seen_at)
+                last = _parse_timestamp(track.last_seen_at)
+                duration_secs = max(0.0, (last - first).total_seconds())
+            except Exception:
+                continue
+
+            if duration_secs < self._loitering_threshold_seconds:
+                continue
+
+            # Sliding-window motion variance from the track series.
+            series = buffer.get_track_series(track.track_id)
+            if series is not None and len(series.bbox_series) >= 5:
+                recent = series.bbox_series[-30:]
+                centers = [
+                    ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0)
+                    for b in recent
+                ]
+                speeds = [
+                    math.sqrt(
+                        (centers[i][0] - centers[i - 1][0]) ** 2
+                        + (centers[i][1] - centers[i - 1][1]) ** 2
+                    )
+                    for i in range(1, len(centers))
+                ]
+                mean_speed = sum(speeds) / len(speeds)
+                variance = sum((s - mean_speed) ** 2 for s in speeds) / len(speeds)
+                # Normalise: 100 px²/frame² treated as maximum variance.
+                normalized_variance = min(1.0, variance / 100.0)
+            else:
+                # Fall back to EMA velocity magnitude when series is too short.
+                vx = track.velocity[0] if len(track.velocity) > 0 else 0.0
+                vy = track.velocity[1] if len(track.velocity) > 1 else 0.0
+                speed_mag = math.sqrt(vx * vx + vy * vy)
+                normalized_variance = min(1.0, speed_mag / 5.0)
+
+            dwell_factor = min(1.0, duration_secs / 300.0)
+            loiter_score = dwell_factor * (1.0 - normalized_variance)
+            score = min(0.70, 0.25 + 0.45 * loiter_score)
+
+            if score < 0.26:
+                continue
+
+            events.append(Event(
+                event_type="LOITERING_DETECTED",
+                severity=_severity(score),
+                severity_score=round(score, 4),
+                risk_score=round(score, 4),
+                priority_level="MEDIUM",
+                track_ids=[track.track_id],
+                track_ref_ids=[track.track_uuid],
+                identity_ids=[track.identity_id] if track.identity_id else [],
+                camera_ids=[packet.camera_id],
+                frame_range=(packet.frame_id, packet.frame_id),
+                confidence_score=track.confidence,
+                time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
+                timestamp=packet.timestamp,
+                metadata={
+                    "duration_seconds": round(duration_secs, 1),
+                    "loiter_score": round(loiter_score, 4),
+                    "normalized_motion_variance": round(normalized_variance, 4),
+                    "threshold_seconds": self._loitering_threshold_seconds,
+                },
+            ))
+        return events
+
+    def _unattended_object_events(
+        self,
+        packet: FramePacket,
+        tracks: list[Track],
+    ) -> list[Event]:
+        """
+        Fire UNATTENDED_OBJECT when a non-person track has been separated from
+        its owner person for at least _UNATTENDED_FRAME_THRESHOLD consecutive frames.
+
+        Ownership is assigned at the object's first appearance: the nearest person
+        by IoU becomes the owner.  Subsequent frames check whether that specific
+        person is still present in the active track set.  Objects that were spawned
+        without any nearby person fall back to the IoU proximity check.
+
+        Registry entries for tracks that leave the active set are purged to avoid
+        stale counters accumulating in memory.
+        """
+        events: list[Event] = []
+        person_tracks = [t for t in tracks if t.class_name == "person"]
+        object_tracks = [t for t in tracks if t.class_name != "person"]
+
+        active_ids = {t.track_id for t in tracks}
+        person_ids = {t.track_id for t in person_tracks}
+
+        for track in object_tracks:
+            # Assign an owner person the first time this object is seen.
+            if track.track_id not in self._object_owner_map:
+                best_iou = 0.0
+                best_person_id: int | None = None
+                for p in person_tracks:
+                    iou = _iou(track.bbox, p.bbox)
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_person_id = p.track_id
+                if best_person_id is not None:
+                    self._object_owner_map[track.track_id] = best_person_id
+
+            owner_id = self._object_owner_map.get(track.track_id)
+
+            if owner_id is not None:
+                # Owner-based check: is the assigned person still active?
+                if owner_id in person_ids:
+                    self._unattended_registry.pop(track.track_id, None)
+                    continue
+                # Owner has left the scene → increment unattended counter.
+                self._unattended_registry[track.track_id] = (
+                    self._unattended_registry.get(track.track_id, 0) + 1
+                )
+            else:
+                # No owner assigned (object appeared without any nearby person).
+                # Fall back to per-frame IoU proximity check.
+                nearby = any(
+                    _iou(track.bbox, p.bbox) > _PERSON_PROXIMITY_IOU
+                    for p in person_tracks
+                )
+                if nearby:
+                    self._unattended_registry.pop(track.track_id, None)
+                    continue
+                self._unattended_registry[track.track_id] = (
+                    self._unattended_registry.get(track.track_id, 0) + 1
+                )
+
+            count = self._unattended_registry.get(track.track_id, 0)
+            if count < _UNATTENDED_FRAME_THRESHOLD:
+                continue
+
+            score = min(1.0, 0.40 + 0.20 * min(1.0, count / (3 * _UNATTENDED_FRAME_THRESHOLD)))
+            events.append(Event(
+                event_type="UNATTENDED_OBJECT",
+                severity=_severity(score),
+                severity_score=round(score, 4),
+                risk_score=round(score, 4),
+                priority_level="MEDIUM",
+                track_ids=[track.track_id],
+                track_ref_ids=[track.track_uuid],
+                identity_ids=[],
+                camera_ids=[packet.camera_id],
+                frame_range=(packet.frame_id, packet.frame_id),
+                confidence_score=track.confidence,
+                time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
+                timestamp=packet.timestamp,
+                metadata={
+                    "object_class": track.class_name,
+                    "owner_track_id": owner_id,
+                    "unattended_frames": count,
+                    "threshold_frames": _UNATTENDED_FRAME_THRESHOLD,
+                },
+            ))
+
+        # Purge stale entries for tracks no longer in the active set.
+        for tid in [tid for tid in list(self._unattended_registry) if tid not in active_ids]:
+            del self._unattended_registry[tid]
+        for tid in [tid for tid in list(self._object_owner_map) if tid not in active_ids]:
+            del self._object_owner_map[tid]
+
+        return events
+
+    def _geofence_events(
+        self,
+        packet: FramePacket,
+        tracks: list[Track],
+    ) -> list[Event]:
+        """
+        Fire GEOFENCE_VIOLATION when any track's bounding-box centre falls
+        inside a restricted zone polygon.
+
+        Supports two zone formats:
+          Legacy:   [[x, y], [x, y], ...]                       — plain polygon
+          Semantic: {"zone": [[x, y], ...],                      — polygon
+                     "allowed_objects": ["person"],              — classes that may enter freely
+                     "active_hours": [8, 20]}                    — UTC hour window [start, end)
+
+        Semantic zones skip the event when:
+          • the track's class is listed in allowed_objects, OR
+          • the current UTC hour is outside active_hours.
+
+        One event is emitted per (track, zone) pair per frame; the first
+        matching zone terminates the inner loop for that track.
+        """
+        if not self._restricted_zones:
+            return []
+
+        current_hour = datetime.now(timezone.utc).hour
+        events: list[Event] = []
+
+        for track in tracks:
+            bbox = track.bbox
+            cx = (bbox[0] + bbox[2]) / 2.0
+            cy = (bbox[1] + bbox[3]) / 2.0
+
+            for zone_idx, zone_entry in enumerate(self._restricted_zones):
+                # Parse zone format — dict (semantic) or list (legacy).
+                if isinstance(zone_entry, dict):
+                    polygon = zone_entry.get("zone", [])
+                    allowed_objects: list | None = zone_entry.get("allowed_objects")
+                    active_hours: list | None = zone_entry.get("active_hours")
+                else:
+                    polygon = zone_entry
+                    allowed_objects = None
+                    active_hours = None
+
+                if len(polygon) < 3:
+                    continue
+
+                # Hour-window gate: skip if zone is not active right now.
+                if active_hours is not None and len(active_hours) >= 2:
+                    start_h, end_h = int(active_hours[0]), int(active_hours[1])
+                    if start_h <= end_h:
+                        if not (start_h <= current_hour < end_h):
+                            continue
+                    else:  # window wraps midnight, e.g. [22, 6)
+                        if not (current_hour >= start_h or current_hour < end_h):
+                            continue
+
+                # Allowed-object gate: object class is permitted inside this zone.
+                if allowed_objects is not None and track.class_name in allowed_objects:
+                    continue
+
+                if not self._point_in_polygon((cx, cy), polygon):
+                    continue
+
+                class_w = _CLASS_WEIGHTS.get(track.class_name, _DEFAULT_CLASS_WEIGHT)
+                score = min(1.0, 0.55 + 0.20 * class_w)
+                events.append(Event(
+                    event_type="GEOFENCE_VIOLATION",
+                    severity=_severity(score),
+                    severity_score=round(score, 4),
+                    risk_score=round(score, 4),
+                    priority_level="HIGH",
+                    track_ids=[track.track_id],
+                    track_ref_ids=[track.track_uuid],
+                    identity_ids=[track.identity_id] if track.identity_id else [],
+                    camera_ids=[packet.camera_id],
+                    frame_range=(packet.frame_id, packet.frame_id),
+                    confidence_score=track.confidence,
+                    time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
+                    timestamp=packet.timestamp,
+                    metadata={
+                        "zone_index": zone_idx,
+                        "object_class": track.class_name,
+                        "center_px": [round(cx, 1), round(cy, 1)],
+                        "allowed_objects": allowed_objects,
+                        "active_hours": active_hours,
+                    },
+                ))
+                break  # one violation per track per frame (first matching zone)
+
+        return events
+
+    def _in_any_zone(self, cx: float, cy: float) -> bool:
+        """Return True if (cx, cy) falls inside any configured restricted zone."""
+        for zone_entry in self._restricted_zones:
+            polygon = (
+                zone_entry.get("zone", [])
+                if isinstance(zone_entry, dict)
+                else zone_entry
+            )
+            if len(polygon) >= 3 and self._point_in_polygon((cx, cy), polygon):
+                return True
+        return False
+
+    @staticmethod
+    def _point_in_polygon(
+        point: tuple[float, float],
+        polygon: list[list[float]],
+    ) -> bool:
+        """
+        Ray-casting point-in-polygon test.
+
+        Args:
+            point:   (x, y) in pixel coordinates.
+            polygon: List of [x, y] vertices.  Must have at least 3 points.
+
+        Returns:
+            True if *point* is strictly inside *polygon*.
+        """
+        x, y = point
+        n = len(polygon)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = float(polygon[i][0]), float(polygon[i][1])
+            xj, yj = float(polygon[j][0]), float(polygon[j][1])
+            # Edge crosses the horizontal ray from point to the right
+            if (yi > y) != (yj > y):
+                x_intersect = (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
+                if x < x_intersect:
+                    inside = not inside
+            j = i
+        return inside
+
+    # ── scoring helpers ───────────────────────────────────────────────────────
+
     def _score_track(self, packet: FramePacket, track: Track, label: str) -> tuple[float, dict[str, float]]:
         width = packet.frame_width or (packet.image.shape[1] if packet.image is not None else 640)
         height = packet.frame_height or (packet.image.shape[0] if packet.image is not None else 640)
@@ -256,16 +640,6 @@ class EventEngine:
         return min(1.0, speed / 35.0)
 
     def _adaptive_threshold(self, scene_density: float, track_count: int) -> float:
-        """
-        threshold = base_density_threshold + noise_factor + stream_load_factor
-
-        base_density_threshold  scales with scene_density (existing logic).
-        noise_factor            rises when recent events had low risk scores,
-                                indicating the engine may be firing on noise.
-        stream_load_factor      rises with avg detections per frame; dense
-                                scenes produce more spurious detections.
-        """
-        # Base: scene-density + track-count scaling (unchanged from Phase 4)
         if scene_density >= 0.60:
             base = min(0.75, _BASE_THRESHOLD + 0.10 + 0.01 * track_count)
         elif scene_density <= 0.20:
@@ -278,11 +652,6 @@ class EventEngine:
         return round(max(0.25, min(0.75, base + noise + load)), 4)
 
     def _noise_factor(self) -> float:
-        """
-        Fraction of recent events that scored in the [base, base+0.15] band
-        (barely above threshold) × 0.10 scaling cap.  High ratio ⟹ noisy
-        detector ⟹ raise threshold.
-        """
         if not self._recent_event_scores:
             return 0.0
         low_band = sum(
@@ -293,10 +662,6 @@ class EventEngine:
         return round(min(0.08, ratio * 0.12), 4)
 
     def _stream_load_factor(self) -> float:
-        """
-        avg_detections_per_frame × 0.003, capped at +0.06.
-        More detections ⟹ more spurious matches ⟹ stricter threshold.
-        """
         if not self._recent_det_counts:
             return 0.0
         avg = sum(self._recent_det_counts) / len(self._recent_det_counts)
@@ -304,21 +669,14 @@ class EventEngine:
 
     @staticmethod
     def _compute_priority(event_type: str, track: Track) -> str:
-        """
-        Assign priority_level from event type and track attributes.
-
-        Rules (highest wins):
-            ARMED_CROWD_THREAT              → CRITICAL
-            WEAPON_THREAT + known identity  → HIGH
-            WEAPON_THREAT (no identity)     → MEDIUM
-            PHONE_USAGE_RISK                → LOW
-        """
         if event_type == "ARMED_CROWD_THREAT":
             return "CRITICAL"
         if event_type == "WEAPON_THREAT":
             if track.identity_id is not None:
                 return "HIGH"
             return "MEDIUM"
+        if event_type == "GEOFENCE_VIOLATION":
+            return "HIGH"
         return "LOW"
 
     @staticmethod
@@ -348,6 +706,8 @@ class EventEngine:
             metadata=components,
         )
 
+
+# ── legacy function interface ─────────────────────────────────────────────────
 
 _LEGACY_WEAPON_LABELS = frozenset({"weapon", "pistol", "rifle", "knife", "grenade", "shotgun", "gun", "sword"})
 _LEGACY_CROWD_THRESHOLD = 5

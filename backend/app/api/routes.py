@@ -90,6 +90,21 @@ async def process_video(
     return result
 
 
+@router.get("/metrics")
+def get_metrics_snapshot():
+    """
+    Expose all system-level pipeline metrics in a single call.
+
+    Includes frame throughput, latency, GPU utilisation estimate, queue
+    overflow counts, circuit-break events, and identity-fusion statistics.
+    Intended for dashboards, Prometheus scrapers, or operator alerting.
+    """
+    from inference.monitoring.metrics import all_stream_snapshots
+    m = get_metrics().snapshot()
+    m["per_stream"] = all_stream_snapshots()
+    return m
+
+
 @router.get("/config/{scenario}")
 def get_config(scenario: str):
     logger.info(f"Config requested: {scenario}")
