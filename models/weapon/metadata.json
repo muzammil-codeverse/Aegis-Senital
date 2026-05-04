@@ -1,0 +1,21 @@
+{
+  "model_name": "weapon_detector",
+  "type": "weapon",
+  "framework": "yolo",
+  "architecture": "YOLOv8n",
+  "input_size": 640,
+  "confidence_threshold": 0.4,
+  "iou_threshold": 0.5,
+  "classes": ["pistol", "rifle", "knife", "grenade", "shotgun"],
+  "nc": 5,
+  "mAP50": 0.6907,
+  "mAP50_95": 0.3938,
+  "epochs_trained": 50,
+  "batch_size": 16,
+  "train_images": 11870,
+  "training_run": "weapon_run_v1/20260503_131745",
+  "source_path": "weapon_model/aegis_models/weapon_run_v1/20260503_131745/weapon/weights/best.pt",
+  "created_at": "2026-05-03T13:17:45+00:00",
+  "validated": true,
+  "version": "v1"
+}

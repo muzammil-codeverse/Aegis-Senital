@@ -1,0 +1,12 @@
+path: /content/datasets/weapon
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 5
+names:
+  - pistol
+  - rifle
+  - knife
+  - grenade
+  - shotgun

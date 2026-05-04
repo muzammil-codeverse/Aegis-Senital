@@ -1,0 +1,13 @@
+names:
+- '0'
+- '1'
+nc: 2
+roboflow:
+  license: CC BY 4.0
+  project: mobile-phone-detection-v84ha
+  url: https://universe.roboflow.com/college-ai4bu/mobile-phone-detection-v84ha/dataset/1
+  version: 1
+  workspace: college-ai4bu
+test: ../test/images
+train: ../train/images
+val: ../valid/images

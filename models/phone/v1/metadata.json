@@ -1,0 +1,22 @@
+{
+  "model_name": "phone_detector",
+  "version": "v1",
+  "path": "models/phone/v1/best.pt",
+  "onnx_path": "phone_model_bundle/content/export_bundle/phone/best.onnx",
+  "classes": ["phone"],
+  "nc": 2,
+  "class_id_map": {"0": "phone", "1": "phone"},
+  "mAP50": null,
+  "training_dataset": "mobile-phone-detection-v84ha",
+  "created_at": "2026-05-03T09:20:53+00:00",
+  "framework": "YOLOv8",
+  "source": "roboflow",
+  "roboflow_project": "college-ai4bu/mobile-phone-detection-v84ha",
+  "val_results": "phone_model_bundle/content/export_bundle/phone/val_results/",
+  "checkpoints": {
+    "epoch45": "phone_model_bundle/content/export_bundle/phone/epoch45.pt",
+    "epoch55": "phone_model_bundle/content/export_bundle/phone/epoch55.pt",
+    "best": "models/phone/v1/best.pt"
+  },
+  "notes": "Classes 0 and 1 in Roboflow export both map to phone detection. Use best.pt for inference."
+}

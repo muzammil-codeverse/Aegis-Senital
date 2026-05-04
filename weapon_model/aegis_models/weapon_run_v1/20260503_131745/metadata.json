@@ -1,0 +1,11 @@
+{
+  "dataset_path": "/content/datasets/weapon",
+  "epochs": 50,
+  "batch": 16,
+  "imgsz": 640,
+  "train_images": 11870,
+  "timestamp": "20260503_131745",
+  "device": "auto",
+  "seed": 42,
+  "save_period": 5
+}

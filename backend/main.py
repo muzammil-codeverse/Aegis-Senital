@@ -11,7 +11,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.models.database import init_db
+from app.services.video_service import bootstrap_inference_runtime
 from app.core.logging_config import logger
+from inference.logging_setup import configure_logging
+from ml.runtime import system_boot_check
 
 app = FastAPI(title="Sentinel AI System", version="1.0.0")
 
@@ -41,14 +44,13 @@ app.include_router(router)
 
 @app.on_event("startup")
 async def startup():
+    configure_logging()
+    system_boot_check()
+    bootstrap_inference_runtime()
     init_db()
+    logger.info("Aegis Sentinel startup complete.")
 
 
 @app.get("/")
 def root():
     return {"message": "Sentinel AI System is running"}
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "sentinel-ai-backend"}

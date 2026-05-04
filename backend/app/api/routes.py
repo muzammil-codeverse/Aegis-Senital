@@ -1,14 +1,62 @@
 import os
 import tempfile
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from pydantic import BaseModel
 from app.services.video_service import extract_frames
-from app.models.database import SessionLocal, Event, Detection
 from app.core.config import load_scenario_config
 from app.core.logging_config import logger
+from inference.identity_db import get_db
+from inference.monitoring.metrics import get_metrics
 
 router = APIRouter()
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
+
+
+# ── Stream request/response models ────────────────────────────────────────────
+
+class StreamAddRequest(BaseModel):
+    source: str
+    stream_id: str | None = None
+
+
+class StreamRemoveRequest(BaseModel):
+    stream_id: str
+
+
+@router.get("/health")
+def health_check():
+    from app.services.video_service import _engine, _runtime_db, _identity_fusion
+    from inference.stream.stream_manager import get_stream_manager
+
+    models_loaded = _engine is not None and getattr(_engine, "is_loaded", False)
+
+    db_connected = False
+    if _runtime_db is not None:
+        try:
+            db_connected = _runtime_db.db_healthy
+        except Exception:
+            pass
+
+    identity_status: dict = {}
+    if _identity_fusion is not None:
+        try:
+            identity_status = _identity_fusion.get_status()
+        except Exception:
+            pass
+
+    stream_health = get_stream_manager().health_summary()
+
+    return {
+        "status": "ok",
+        "models_loaded": models_loaded,
+        "db_connected": db_connected,
+        "identity_fusion": identity_status,
+        "metrics": get_metrics().snapshot(),
+        "active_streams": stream_health["active_streams"],
+        "total_streams": stream_health["total_streams"],
+        "stream_metrics": stream_health["stream_metrics"],
+    }
 
 
 @router.post("/process-video")
@@ -55,20 +103,79 @@ def get_config(scenario: str):
 @router.get("/events")
 def list_events():
     logger.info("Events list requested")
-    db = SessionLocal()
-    try:
-        events = db.query(Event).order_by(Event.timestamp.desc()).limit(50).all()
-        return [{"id": e.id, "timestamp": str(e.timestamp), "type": e.type, "metadata": e.meta} for e in events]
-    finally:
-        db.close()
+    events = get_db().get_events(limit=50)
+    return [
+        {
+            "id": e.get("event_id"),
+            "timestamp": e.get("timestamp"),
+            "type": e.get("event_type"),
+            "severity": e.get("severity"),
+            "confidence": e.get("confidence"),
+            "metadata": e.get("metadata", {}),
+        }
+        for e in events
+    ]
 
 
 @router.get("/detections")
 def list_detections():
     logger.info("Detections list requested")
-    db = SessionLocal()
+    tracks = get_db().get_tracks(limit=50)
+    return [
+        {
+            "id": t.get("track_id"),
+            "timestamp": t.get("last_seen"),
+            "type": t.get("class_name"),
+            "confidence": t.get("confidence"),
+            "bbox": t.get("bbox", []),
+            "metadata": t.get("metadata", {}),
+        }
+        for t in tracks
+    ]
+
+
+# ── Stream management endpoints ───────────────────────────────────────────────
+
+@router.get("/streams")
+def list_streams():
+    """Return status and per-stream metrics for all registered streams."""
+    from inference.stream.stream_manager import get_stream_manager
+    logger.info("Streams list requested")
+    return get_stream_manager().list_streams()
+
+
+@router.post("/streams/add")
+def add_stream(body: StreamAddRequest):
+    """
+    Register and start a new stream.
+
+    ``source`` may be an RTSP URL, a local camera index (as a string,
+    e.g. ``"0"``), or a video file path.
+    ``stream_id`` is optional — one is auto-generated when omitted.
+    """
+    from inference.stream.stream_manager import get_stream_manager
+    logger.info("Add stream requested: source=%s stream_id=%s", body.source, body.stream_id)
     try:
-        detections = db.query(Detection).order_by(Detection.timestamp.desc()).limit(50).all()
-        return [{"id": d.id, "timestamp": str(d.timestamp), "type": d.type, "metadata": d.meta} for d in detections]
-    finally:
-        db.close()
+        assigned_id = get_stream_manager().add_stream(
+            source=body.source,
+            stream_id=body.stream_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"stream_id": assigned_id, "status": "started"}
+
+
+@router.post("/streams/remove")
+def remove_stream(body: StreamRemoveRequest):
+    """Stop and deregister a stream by its stream_id."""
+    from inference.stream.stream_manager import get_stream_manager
+    logger.info("Remove stream requested: stream_id=%s", body.stream_id)
+    removed = get_stream_manager().remove_stream(body.stream_id)
+    if not removed:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Stream '{body.stream_id}' not found",
+        )
+    return {"stream_id": body.stream_id, "status": "stopped"}
