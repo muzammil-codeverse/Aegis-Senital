@@ -6,6 +6,7 @@ from app.services.video_service import extract_frames
 from app.core.config import load_scenario_config
 from app.core.logging_config import logger
 from inference.identity_db import get_db
+from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
 
 router = APIRouter()
@@ -103,6 +104,11 @@ def get_metrics_snapshot():
     m = get_metrics().snapshot()
     m["per_stream"] = all_stream_snapshots()
     return m
+
+
+@router.get("/metrics/core")
+def get_metrics():
+    return metrics.to_dict()
 
 
 @router.get("/config/{scenario}")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 import time
@@ -11,6 +12,7 @@ from typing import Any, List
 import numpy as np
 
 logger = logging.getLogger(__name__)
+DETERMINISTIC_MODE = os.getenv("AEGIS_DETERMINISTIC", "0") == "1"
 
 _WORKER_THREAD_NAME = "model-pool-gpu-worker"
 _GPU_QUEUE_MAXSIZE = 32  # hard cap — requests beyond this are rejected immediately
@@ -220,6 +222,8 @@ class ModelPool:
                 )
                 _t_infer = time.monotonic()
                 if isinstance(req, _BatchInferenceRequest):
+                    if DETERMINISTIC_MODE:
+                        req.frames = list(req.frames)
                     result = model(
                         req.frames,
                         verbose=False,
@@ -260,6 +264,8 @@ class ModelPool:
         try:
             self._request_queue.put_nowait((req.priority, seq, req))
         except queue.Full:
+            from inference.metrics import metrics
+            metrics.queue_overflows += 1
             raise RuntimeError(
                 f"ModelPool GPU queue is full (maxsize={_GPU_QUEUE_MAXSIZE}) "
                 "— inference request dropped to protect pipeline latency"
