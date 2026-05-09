@@ -96,6 +96,18 @@ class SystemMetrics:
         self.open_vocab_model_load_success = 0
         self.open_vocab_model_load_failures = 0
         self.open_vocab_model_unloads = 0
+        # Phase 25/26B — open-vocab streaming and auto-load lifecycle metrics
+        self.open_vocab_ws_events_published_total = 0
+        self.open_vocab_ws_events_dropped_total = 0
+        self.open_vocab_ws_event_payload_bytes = 0
+        self.open_vocab_ws_event_rate_limited_total = 0
+        self.open_vocab_model_auto_load_attempts_total = 0
+        self.open_vocab_model_auto_load_failures_total = 0
+        self.open_vocab_model_auto_load_success_total = 0
+        self.open_vocab_model_auto_load_skipped_total = 0
+        self.open_vocab_model_auto_load_timeout_total = 0
+        self.open_vocab_scan_to_push_latency_ms = 0.0
+        self.open_vocab_active_stream_subscribers = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

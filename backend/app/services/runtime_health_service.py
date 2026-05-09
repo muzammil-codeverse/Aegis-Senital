@@ -52,13 +52,45 @@ class RuntimeHealthService:
             return {"status": "degraded", "detail": "torch not installed"}
 
     def _check_open_vocab(self) -> dict:
-        model_path = os.environ.get("AEGIS_OPEN_VOCAB_MODEL_PATH", "")
-        allow_download = os.environ.get("AEGIS_OPEN_VOCAB_ALLOW_DOWNLOAD", "false").lower() == "true"
-        if model_path and Path(model_path).exists():
-            return {"status": "ok", "detail": "model path configured"}
-        if allow_download:
-            return {"status": "degraded", "detail": "model path not set; download enabled"}
-        return {"status": "unavailable", "detail": "model path not configured and download disabled"}
+        required = bool(self._config.get("services", {}).get("open_vocab", {}).get("required", False))
+        try:
+            from inference.runtime import get_intelligence_runtime
+
+            status = get_intelligence_runtime().get_open_vocab_status()
+        except Exception as exc:
+            status = {
+                "model_loaded": False,
+                "auto_load_on_camera_start": False,
+                "last_auto_load_status": "failed",
+                "last_auto_load_error": str(exc),
+            }
+
+        model_loaded = bool(status.get("model_loaded") or status.get("adapter", {}).get("available"))
+        last_status = status.get("last_auto_load_status", "disabled")
+        last_error = status.get("last_auto_load_error") or status.get("reason") or status.get("error")
+        if model_loaded:
+            health_status = "ok"
+            detail = None
+        elif required:
+            health_status = "error"
+            detail = last_error or "open-vocab required but model not loaded"
+        elif last_status in {"failed", "timeout"}:
+            health_status = "degraded"
+            detail = last_error or f"last auto-load status: {last_status}"
+        elif last_status == "disabled":
+            health_status = "degraded"
+            detail = "auto-load disabled"
+        else:
+            health_status = "unavailable"
+            detail = last_error or "open-vocab model not loaded"
+        return {
+            "status": health_status,
+            "detail": detail,
+            "model_loaded": model_loaded,
+            "auto_load_on_camera_start": bool(status.get("auto_load_on_camera_start", False)),
+            "last_auto_load_status": last_status,
+            "last_auto_load_error": last_error,
+        }
 
     def _check_storage(self) -> dict:
         paths = ["storage", "storage/open_vocab", "models"]
@@ -135,6 +167,7 @@ class RuntimeHealthService:
         require_postgres = deploy_config.get("require_postgres", False)
         require_redis = deploy_config.get("require_redis", False)
         require_gpu = deploy_config.get("require_gpu", False)
+        require_open_vocab = bool(self._config.get("services", {}).get("open_vocab", {}).get("required", False))
 
         failures = []
         if require_postgres:
@@ -157,6 +190,11 @@ class RuntimeHealthService:
         security = self._check_security()
         if security["status"] == "error":
             failures.append(f"security: {security['detail']}")
+
+        if require_open_vocab:
+            open_vocab = self._check_open_vocab()
+            if open_vocab["status"] != "ok":
+                failures.append(f"open_vocab: {open_vocab['detail']}")
 
         return {
             "ready": len(failures) == 0,

@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 _HIGH_CONF_FP_THRESHOLD = 0.70
 _LOW_CONF_TP_THRESHOLD = 0.30
 _LOW_IOU_MATCH_THRESHOLD = 0.60
+_FAILURE_TYPES = (
+    "false_positive",
+    "false_negative",
+    "high_confidence_false_positive",
+    "low_iou_match",
+    "class_confusion",
+    "low_confidence_true_positive",
+)
 
 
 class DetectionBenchmarkRunner:
@@ -117,6 +125,7 @@ class DetectionBenchmarkRunner:
                 samples, predictions_by_sample, class_names, max_per_type=max_per_type,
             )
             self._write_failure_cases(failure_cases, run_dir)
+        failure_case_summary = self._summarize_failures(failure_cases)
 
         # Per-class metrics CSV
         self._write_per_class_csv(metric_result, run_dir)
@@ -128,6 +137,7 @@ class DetectionBenchmarkRunner:
             metric_result.warnings  # not mutating
 
         # Threshold sweep
+        threshold_recommendation: dict = {}
         if threshold_sweep_config and threshold_sweep_config.get("enabled"):
             thresholds = threshold_sweep_config.get("thresholds")
             sweep_rows = compute_threshold_sweep(
@@ -138,10 +148,13 @@ class DetectionBenchmarkRunner:
                 thresholds=thresholds,
             )
             self._write_threshold_sweep_csv(sweep_rows, run_dir)
+            threshold_recommendation = self._recommend_threshold(sweep_rows)
 
         metrics = metric_result.to_dict()
         if latency_stats:
             metrics["inference_latency"] = latency_stats
+        if threshold_recommendation:
+            metrics["threshold_recommendation"] = threshold_recommendation
 
         return BenchmarkTaskResult(
             task="detection",
@@ -151,8 +164,13 @@ class DetectionBenchmarkRunner:
             device=self.device,
             dataset_name=dataset_name,
             dataset_version=dataset_version,
+            dataset_size=len(samples),
+            class_names=list(class_names),
             metrics=metrics,
             failure_cases_count=len(failure_cases),
+            failure_case_summary=failure_case_summary,
+            dataset_improvement_recommendations=self._dataset_improvement_recommendations(dataset_name),
+            real_run=True,
             warnings=warnings + metric_result.warnings,
         )
 
@@ -350,6 +368,57 @@ class DetectionBenchmarkRunner:
             writer.writeheader()
             writer.writerows(rows)
         logger.info("Wrote threshold sweep CSV to %s", out_path)
+
+    def _summarize_failures(self, cases: list[FailureCase]) -> dict[str, int]:
+        summary = {name: 0 for name in _FAILURE_TYPES}
+        for case in cases:
+            if case.failure_type in summary:
+                summary[case.failure_type] += 1
+        return summary
+
+    def _recommend_threshold(self, rows: list[dict]) -> dict:
+        all_rows = [row for row in rows if row.get("class") == "all"]
+        if not all_rows:
+            return {}
+        best = max(
+            all_rows,
+            key=lambda row: (
+                float(row.get("f1", 0.0) or 0.0),
+                float(row.get("recall", 0.0) or 0.0),
+                -float(row.get("fp_per_image", 0.0) or 0.0),
+            ),
+        )
+        return {
+            "threshold": best.get("threshold"),
+            "precision": best.get("precision"),
+            "recall": best.get("recall"),
+            "f1": best.get("f1"),
+            "fp_per_image": best.get("fp_per_image"),
+            "fn_per_image": best.get("fn_per_image"),
+        }
+
+    def _dataset_improvement_recommendations(self, dataset_name: str) -> list[str]:
+        lowered = dataset_name.lower()
+        if "weapon" in lowered:
+            return [
+                "add hard negatives for weapon-like objects",
+                "add low-light samples",
+                "add occluded weapon samples",
+                "add CCTV-angle samples",
+                "add small-object distant samples",
+            ]
+        if "phone" in lowered:
+            return [
+                "add reflective phone-like objects",
+                "add CCTV-angle samples",
+                "add small-object distant samples",
+                "add low-light samples",
+            ]
+        return [
+            "add low-light samples",
+            "add CCTV-angle samples",
+            "add small-object distant samples",
+        ]
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

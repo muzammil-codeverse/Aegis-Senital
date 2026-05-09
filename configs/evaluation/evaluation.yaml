@@ -31,28 +31,38 @@ inference:
 # Phase 26 — model candidates for head-to-head benchmarking
 # Set required: true for models that must exist; required: false for optional candidates.
 # Paths must be set per deployment — do NOT commit real paths to version control.
+# Phase 26B — `configs/evaluation/evaluation.local.yaml` is auto-merged when present
+# for machine-specific dataset overrides.
 model_candidates:
   weapon:
     - name: weapon_yolov8_baseline
       backend: ultralytics_yolo
-      path: ""
+      path: "models/weapon/model.pt"
       required: true
       task: detection
       classes:
-        - weapon
+        - pistol
+        - rifle
+        - knife
+        - grenade
+        - shotgun
 
     - name: weapon_yolo11_candidate
       backend: ultralytics_yolo
-      path: ""
+      path: "models/weapon/yolo11_best.pt"
       required: false
       task: detection
       classes:
-        - weapon
+        - pistol
+        - rifle
+        - knife
+        - grenade
+        - shotgun
 
   phone:
     - name: phone_yolov8_baseline
       backend: ultralytics_yolo
-      path: ""
+      path: "models/phone/model.pt"
       required: true
       task: detection
       classes:
@@ -60,7 +70,7 @@ model_candidates:
 
     - name: phone_yolo11_candidate
       backend: ultralytics_yolo
-      path: ""
+      path: "models/phone/yolo11_best.pt"
       required: false
       task: detection
       classes:
@@ -83,16 +93,40 @@ model_selection_policy:
   prefer_recall_for_weapon: true
   prefer_precision_for_phone: false
 
-# Legacy models section (superseded by model_candidates for detection tasks)
+# Baseline models (legacy-compatible aliases retained for older tooling)
 models:
+  weapon_yolov8_baseline:
+    path: "models/weapon/model.pt"
+    task: detection
+    backend: ultralytics_yolo
+    version: "v1"
+    class_names: ["pistol", "rifle", "knife", "grenade", "shotgun"]
+  phone_yolov8_baseline:
+    path: "models/phone/model.pt"
+    task: detection
+    backend: ultralytics_yolo
+    version: "v1"
+    class_names: ["phone"]
   weapon_yolo:
-    path: ""
+    path: "models/weapon/model.pt"
+    task: detection
+    backend: ultralytics_yolo
+    version: "v1"
+    class_names: ["pistol", "rifle", "knife", "grenade", "shotgun"]
+  phone_yolo:
+    path: "models/phone/model.pt"
+    task: detection
+    backend: ultralytics_yolo
+    version: "v1"
+    class_names: ["phone"]
+  weapon_yolo11_candidate:
+    path: "models/weapon/yolo11_best.pt"
     task: detection
     backend: ultralytics_yolo
     version: null
-    class_names: ["weapon"]
-  phone_yolo:
-    path: ""
+    class_names: ["pistol", "rifle", "knife", "grenade", "shotgun"]
+  phone_yolo11_candidate:
+    path: "models/phone/yolo11_best.pt"
     task: detection
     backend: ultralytics_yolo
     version: null
@@ -110,8 +144,29 @@ models:
     task: open_vocab
     version: null
 
-# Datasets (populate paths per environment — see datasets.example.yaml)
-datasets: {}
+# Detection benchmark datasets. Machine-specific path overrides belong in
+# configs/evaluation/evaluation.local.yaml when local dataset directories differ.
+datasets:
+  weapon_eval:
+    task: detection
+    type: coco_yolo
+    images_dir: "datasets/evaluation/weapon/images"
+    labels_dir: "datasets/evaluation/weapon/labels"
+    class_names:
+      - pistol
+      - rifle
+      - knife
+      - grenade
+      - shotgun
+    required: true
+  phone_eval:
+    task: detection
+    type: coco_yolo
+    images_dir: "datasets/evaluation/phone/images"
+    labels_dir: "datasets/evaluation/phone/labels"
+    class_names:
+      - phone
+    required: true
 
 # Open-vocab evaluation prompts
 open_vocab_eval:

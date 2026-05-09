@@ -14,30 +14,63 @@ class DatasetEntry:
         name: str,
         task: str,
         path: str,
+        dataset_type: str = "generic",
         version: str | None = None,
         required: bool = False,
         loader: str = "generic",
+        images_dir: str | None = None,
+        labels_dir: str | None = None,
         metadata: dict | None = None,
     ) -> None:
         self.name = name
         self.task = task
         self.path = path
+        self.dataset_type = dataset_type
         self.version = version
         self.required = required
         self.loader = loader
+        self.images_dir = images_dir
+        self.labels_dir = labels_dir
         self.metadata = metadata or {}
 
     def exists(self) -> bool:
+        if self.dataset_type == "coco_yolo":
+            return bool(self.images_dir and Path(self.images_dir).exists()) and bool(
+                self.labels_dir and Path(self.labels_dir).exists()
+            )
         return Path(self.path).exists()
+
+    def missing_paths(self) -> list[str]:
+        missing: list[str] = []
+        if self.dataset_type == "coco_yolo":
+            if self.images_dir and not Path(self.images_dir).exists():
+                missing.append(self.images_dir)
+            if self.labels_dir and not Path(self.labels_dir).exists():
+                missing.append(self.labels_dir)
+            return missing
+        if self.path and not Path(self.path).exists():
+            missing.append(self.path)
+        return missing
+
+    def missing_message(self) -> str:
+        missing = self.missing_paths()
+        if not missing:
+            return ""
+        if self.dataset_type == "coco_yolo":
+            return f"Dataset '{self.name}' missing required paths: {', '.join(missing)}"
+        return f"Dataset '{self.name}' path not found: {missing[0]}"
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "task": self.task,
             "path": self.path,
+            "type": self.dataset_type,
             "version": self.version,
             "required": self.required,
             "loader": self.loader,
+            "images_dir": self.images_dir,
+            "labels_dir": self.labels_dir,
             "exists": self.exists(),
         }
 
@@ -53,21 +86,38 @@ class DatasetRegistry:
         for name, ds_cfg in datasets_cfg.items():
             if not isinstance(ds_cfg, dict):
                 continue
+            dataset_type = str(ds_cfg.get("type", ds_cfg.get("loader", "generic")))
+            images_dir = ds_cfg.get("images_dir")
+            labels_dir = ds_cfg.get("labels_dir")
+            path = ds_cfg.get("path", "")
+            if dataset_type == "coco_yolo" and not path:
+                if images_dir:
+                    try:
+                        path = str(Path(images_dir).parent.parent)
+                    except Exception:
+                        path = ""
             entry = DatasetEntry(
                 name=name,
                 task=ds_cfg.get("task", "unknown"),
-                path=ds_cfg.get("path", ""),
+                path=path,
+                dataset_type=dataset_type,
                 version=ds_cfg.get("version"),
                 required=bool(ds_cfg.get("required", False)),
-                loader=ds_cfg.get("loader", "generic"),
-                metadata=ds_cfg.get("metadata", {}),
+                loader=ds_cfg.get("loader", dataset_type),
+                images_dir=images_dir,
+                labels_dir=labels_dir,
+                metadata={
+                    **ds_cfg.get("metadata", {}),
+                    "class_names": list(ds_cfg.get("class_names", [])),
+                },
             )
             self._datasets[name] = entry
             if not entry.exists():
-                msg = f"Dataset '{name}' path not found: {entry.path}"
+                msg = entry.missing_message() or f"Dataset '{name}' path not found: {entry.path}"
                 if entry.required:
-                    raise FileNotFoundError(msg)
-                logger.warning("%s (optional — skipping)", msg)
+                    logger.warning("%s (required — will fail on use)", msg)
+                else:
+                    logger.warning("%s (optional — skipping)", msg)
 
     def register(self, entry: DatasetEntry) -> None:
         self._datasets[entry.name] = entry
@@ -80,9 +130,7 @@ class DatasetRegistry:
         if entry is None:
             raise FileNotFoundError(f"Required dataset '{name}' not registered")
         if not entry.exists():
-            raise FileNotFoundError(
-                f"Required dataset '{name}' path not found: {entry.path}"
-            )
+            raise FileNotFoundError(entry.missing_message() or f"Required dataset '{name}' path not found: {entry.path}")
         return entry
 
     def list_all(self) -> list[dict]:

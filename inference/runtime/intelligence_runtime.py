@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 class IntelligenceRuntime:
     def __init__(self, config: dict | None = None) -> None:
         cfg = config or _safe_runtime_config()
+        try:
+            self._open_vocab_config = load_runtime_config("open_vocab")
+        except FileNotFoundError:
+            self._open_vocab_config = {}
         self._lock = threading.RLock()
         self.trajectory_engine = TrajectoryEngine()
         self.anomaly_engine = AnomalyEngine()
@@ -72,7 +76,7 @@ class IntelligenceRuntime:
             "handoff_predictions": 0,
         }
         # Phase 23: open-vocabulary threat scanner
-        self.open_vocab_scanner = _build_open_vocab_scanner()
+        self.open_vocab_scanner = _build_open_vocab_scanner(self._open_vocab_config)
 
     def process_frame_context(
         self,
@@ -238,6 +242,7 @@ class IntelligenceRuntime:
         return {
             "status": "ok",
             "metrics": dict(self._metrics),
+            "open_vocab": self.get_open_vocab_status(),
             "event_bus": get_event_bus().health(),
             "supervisor": get_runtime_supervisor().get_health_snapshot(),
         }
@@ -345,12 +350,67 @@ class IntelligenceRuntime:
     def get_open_vocab_status(self) -> dict:
         """Return open-vocab scanner status and metrics."""
         if self.open_vocab_scanner is None:
-            return {"status": "unavailable", "reason": "open_vocab_scanner not initialized"}
+            runtime_cfg = self._open_vocab_config.get("open_vocab_runtime", {})
+            return {
+                "status": "unavailable",
+                "reason": "open_vocab_scanner not initialized",
+                "model_loaded": False,
+                "auto_load_on_camera_start": bool(runtime_cfg.get("auto_load_on_camera_start", False)),
+                "require_open_vocab_for_stream": bool(runtime_cfg.get("require_open_vocab_for_stream", False)),
+                "last_auto_load_status": "disabled" if not runtime_cfg.get("auto_load_on_camera_start", False) else "failed",
+                "last_auto_load_error": "open_vocab_scanner not initialized",
+            }
         try:
             return self.open_vocab_scanner.get_status()
         except Exception as exc:
             logger.warning("get_open_vocab_status error: %s", exc)
             return {"status": "error", "error": str(exc)}
+
+    def prepare_open_vocab_for_stream(self, camera_id: str) -> dict:
+        runtime_cfg = self._open_vocab_config.get("open_vocab_runtime", {})
+        auto_load = bool(runtime_cfg.get("auto_load_on_camera_start", False))
+        require_for_stream = bool(runtime_cfg.get("require_open_vocab_for_stream", False))
+        timeout = float(runtime_cfg.get("load_timeout_seconds", 45))
+        if auto_load and self.open_vocab_scanner is None:
+            try:
+                from inference.monitoring.metrics import get_metrics as get_monitoring_metrics
+                from inference.metrics import metrics as system_metrics
+
+                get_monitoring_metrics().increment("open_vocab_model_auto_load_attempts_total")
+                get_monitoring_metrics().increment("open_vocab_model_auto_load_failures_total")
+                system_metrics.increment("open_vocab_model_auto_load_attempts_total")
+                system_metrics.increment("open_vocab_model_auto_load_failures_total")
+            except Exception:
+                pass
+        if self.open_vocab_scanner is None:
+            if require_for_stream:
+                return {
+                    "status": "failed",
+                    "loaded": False,
+                    "error": "Open-vocab scanner not initialized",
+                    "block_stream": True,
+                }
+            return {
+                "status": "disabled" if not auto_load else "failed",
+                "loaded": False,
+                "error": "Open-vocab scanner not initialized" if auto_load else None,
+                "block_stream": False,
+            }
+        result = self.open_vocab_scanner.ensure_model_loaded_for_camera_start(
+            camera_id=camera_id,
+            wait_for_result=require_for_stream,
+            timeout_seconds=timeout,
+        )
+        result["block_stream"] = require_for_stream and result.get("status") in {"failed", "timeout"}
+        return result
+
+    def handle_streams_idle(self) -> None:
+        if self.open_vocab_scanner is None:
+            return
+        try:
+            self.open_vocab_scanner.unload_if_idle()
+        except Exception as exc:
+            logger.warning("handle_streams_idle failed: %s", exc)
 
     def cleanup(self) -> None:
         with self._lock:
@@ -477,14 +537,11 @@ class IntelligenceRuntime:
             self._heatmap_points[camera_id] = deque(kept, maxlen=points.maxlen)
 
 
-def _build_open_vocab_scanner():
+def _build_open_vocab_scanner(ov_config: dict | None = None):
     """Build and return an OpenVocabThreatScanner, or None if unavailable."""
     if not _OPEN_VOCAB_AVAILABLE or _OpenVocabThreatScanner is None:
         return None
-    try:
-        ov_config = load_runtime_config("open_vocab")
-    except FileNotFoundError:
-        ov_config = {}
+    ov_config = ov_config or {}
     if not ov_config.get("enabled", True):
         return None
     try:

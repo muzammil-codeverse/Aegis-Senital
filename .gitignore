@@ -53,3 +53,6 @@ uploads/
 # Runtime-generated inference output (recreated automatically on each run)
 backend/output/
 storage/
+
+# Local machine-specific evaluation benchmark overrides
+configs/evaluation/evaluation.local.yaml

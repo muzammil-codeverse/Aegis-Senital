@@ -125,6 +125,9 @@ class SystemMetrics:
         self.open_vocab_ws_event_rate_limited_total: int = 0
         self.open_vocab_model_auto_load_attempts_total: int = 0
         self.open_vocab_model_auto_load_failures_total: int = 0
+        self.open_vocab_model_auto_load_success_total: int = 0
+        self.open_vocab_model_auto_load_skipped_total: int = 0
+        self.open_vocab_model_auto_load_timeout_total: int = 0
         self.open_vocab_scan_to_push_latency_ms: float = 0.0
         self.open_vocab_active_stream_subscribers: int = 0
 
@@ -338,6 +341,9 @@ class SystemMetrics:
                 "open_vocab_ws_event_rate_limited_total": self.open_vocab_ws_event_rate_limited_total,
                 "open_vocab_model_auto_load_attempts_total": self.open_vocab_model_auto_load_attempts_total,
                 "open_vocab_model_auto_load_failures_total": self.open_vocab_model_auto_load_failures_total,
+                "open_vocab_model_auto_load_success_total": self.open_vocab_model_auto_load_success_total,
+                "open_vocab_model_auto_load_skipped_total": self.open_vocab_model_auto_load_skipped_total,
+                "open_vocab_model_auto_load_timeout_total": self.open_vocab_model_auto_load_timeout_total,
                 "open_vocab_scan_to_push_latency_ms": self.open_vocab_scan_to_push_latency_ms,
                 "open_vocab_active_stream_subscribers": self.open_vocab_active_stream_subscribers,
             }

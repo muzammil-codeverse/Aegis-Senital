@@ -1,5 +1,7 @@
 from __future__ import annotations
+import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -40,15 +42,25 @@ class OpenVocabThreatScanner:
         self._active_scans = 0
 
         scan_policy = self._config.get("scan_policy", {})
-        self._max_concurrent = scan_policy.get("max_concurrent_scans", 2)
+        runtime_cfg = self._config.get("open_vocab_runtime", {})
+        self._max_concurrent = runtime_cfg.get("max_concurrent_scans", scan_policy.get("max_concurrent_scans", 2))
         self._cooldown = scan_policy.get("cooldown_seconds_per_camera", 5)
         self._timeout = scan_policy.get("scan_timeout_seconds", 15)
         self._run_on_high_risk = scan_policy.get("run_on_high_risk_frames", True)
         self._run_on_incident = scan_policy.get("run_on_incident_frames", True)
         self._high_risk_threshold = self._config.get("thresholds", {}).get("high_risk_threshold", 0.55)
         self._max_detections = self._config.get("thresholds", {}).get("max_detections_per_frame", 20)
+        self._auto_load_on_camera_start = bool(runtime_cfg.get("auto_load_on_camera_start", False))
+        self._require_open_vocab_for_stream = bool(runtime_cfg.get("require_open_vocab_for_stream", False))
+        self._load_timeout_seconds = float(runtime_cfg.get("load_timeout_seconds", 45))
+        self._unload_when_no_active_streams = bool(runtime_cfg.get("unload_when_no_active_streams", False))
 
         self._camera_last_scan: dict[str, float] = {}
+        self._auto_load_lock = threading.RLock()
+        self._auto_load_event = threading.Event()
+        self._auto_load_in_progress = False
+        self._last_auto_load_status = "disabled" if not self._auto_load_on_camera_start else "skipped"
+        self._last_auto_load_error: str | None = None
 
         self._adapter: OpenVocabDetectorAdapter = self._build_adapter()
         self._prompt_library = OpenVocabPromptLibrary(config=self._config)
@@ -66,6 +78,155 @@ class OpenVocabThreatScanner:
             "open_vocab_scan_queue_rejected": 0,
         }
         self._latency_samples: list[float] = []
+
+    @property
+    def adapter(self) -> OpenVocabDetectorAdapter:
+        return self._adapter
+
+    def _increment_metric(self, counter: str, n: int = 1) -> None:
+        try:
+            from inference.monitoring.metrics import get_metrics as get_monitoring_metrics
+
+            get_monitoring_metrics().increment(counter, n)
+        except Exception:
+            pass
+        try:
+            from inference.metrics import metrics as system_metrics
+
+            system_metrics.increment(counter, n)
+        except Exception:
+            pass
+
+    def _apply_runtime_model_overrides(self) -> None:
+        model_path = os.environ.get("AEGIS_OPEN_VOCAB_MODEL_PATH", "")
+        processor_path = os.environ.get("AEGIS_OPEN_VOCAB_PROCESSOR_PATH", "")
+        allow_download = os.environ.get("AEGIS_OPEN_VOCAB_ALLOW_DOWNLOAD", "false").lower() == "true"
+        config_override: dict[str, str] = {}
+        if model_path:
+            config_override["local_model_path"] = model_path
+        if processor_path:
+            config_override["local_processor_path"] = processor_path
+        if hasattr(self._adapter, "set_config_override") and config_override:
+            self._adapter.set_config_override(config_override)
+        if allow_download and hasattr(self._adapter, "_config"):
+            self._adapter._config["allow_huggingface_download"] = True
+
+    def _set_auto_load_state(self, status: str, error: str | None = None) -> None:
+        with self._auto_load_lock:
+            self._last_auto_load_status = status
+            self._last_auto_load_error = error
+
+    def _auto_load_worker(self, camera_id: str | None) -> None:
+        status = "failed"
+        error: str | None = None
+        try:
+            self._apply_runtime_model_overrides()
+            self._adapter.load()
+            adapter_status = self._adapter.get_status()
+            if adapter_status.get("available"):
+                status = "success"
+                self._increment_metric("open_vocab_model_auto_load_success_total")
+            else:
+                error = str(adapter_status.get("reason") or "adapter reported unavailable after load")
+                self._increment_metric("open_vocab_model_auto_load_failures_total")
+        except Exception as exc:
+            error = str(exc)
+            self._increment_metric("open_vocab_model_auto_load_failures_total")
+        finally:
+            with self._auto_load_lock:
+                self._auto_load_in_progress = False
+                self._last_auto_load_status = status
+                self._last_auto_load_error = error
+                self._auto_load_event.set()
+            if status != "success":
+                logger.warning(
+                    json.dumps(
+                        {
+                            "event": "open_vocab_auto_load_failed",
+                            "camera_id": camera_id,
+                            "status": status,
+                            "error": error,
+                        }
+                    )
+                )
+
+    def ensure_model_loaded_for_camera_start(
+        self,
+        camera_id: str | None = None,
+        *,
+        wait_for_result: bool = False,
+        timeout_seconds: float | None = None,
+    ) -> dict:
+        timeout = float(timeout_seconds or self._load_timeout_seconds)
+        if self._adapter.is_available():
+            self._set_auto_load_state("skipped", None)
+            self._increment_metric("open_vocab_model_auto_load_skipped_total")
+            return {"status": "skipped", "loaded": True, "error": None}
+
+        if not self._auto_load_on_camera_start:
+            if self._require_open_vocab_for_stream:
+                detail = "Open-vocab required for stream but auto-load is disabled and model is not loaded"
+                self._set_auto_load_state("failed", detail)
+                return {"status": "failed", "loaded": False, "error": detail}
+            self._set_auto_load_state("disabled", None)
+            return {"status": "disabled", "loaded": False, "error": None}
+
+        with self._auto_load_lock:
+            if not self._auto_load_in_progress:
+                self._auto_load_in_progress = True
+                self._auto_load_event = threading.Event()
+                self._last_auto_load_error = None
+                self._increment_metric("open_vocab_model_auto_load_attempts_total")
+                thread = threading.Thread(
+                    target=self._auto_load_worker,
+                    args=(camera_id,),
+                    name="open-vocab-auto-load",
+                    daemon=True,
+                )
+                thread.start()
+            elif not wait_for_result:
+                self._increment_metric("open_vocab_model_auto_load_skipped_total")
+
+        if not wait_for_result:
+            return {
+                "status": "loading",
+                "loaded": self._adapter.is_available(),
+                "error": self._last_auto_load_error,
+            }
+
+        finished = self._auto_load_event.wait(timeout=timeout)
+        if not finished:
+            detail = f"Open-vocab model auto-load timed out after {timeout:.1f}s"
+            self._set_auto_load_state("timeout", detail)
+            self._increment_metric("open_vocab_model_auto_load_timeout_total")
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "open_vocab_auto_load_timeout",
+                        "camera_id": camera_id,
+                        "timeout_seconds": timeout,
+                    }
+                )
+            )
+            return {"status": "timeout", "loaded": False, "error": detail}
+
+        adapter_status = self._adapter.get_status()
+        loaded = bool(adapter_status.get("available"))
+        return {
+            "status": self._last_auto_load_status,
+            "loaded": loaded,
+            "error": self._last_auto_load_error,
+        }
+
+    def unload_if_idle(self) -> None:
+        if not self._unload_when_no_active_streams:
+            return
+        if not self._adapter.is_available():
+            return
+        try:
+            self._adapter.unload()
+        except Exception as exc:
+            logger.warning("Open-vocab unload_if_idle failed: %s", exc)
 
     def _build_adapter(self) -> OpenVocabDetectorAdapter:
         provider = self._config.get("model", {}).get("provider", "grounding_dino")
@@ -371,12 +532,18 @@ class OpenVocabThreatScanner:
             metrics["open_vocab_prompts_active"] = len(self._prompt_library.get_enabled_prompts())
         return {
             "enabled": self._config.get("enabled", True),
+            "model_loaded": bool(adapter_status.get("available")),
+            "auto_load_on_camera_start": self._auto_load_on_camera_start,
+            "require_open_vocab_for_stream": self._require_open_vocab_for_stream,
+            "last_auto_load_status": self._last_auto_load_status,
+            "last_auto_load_error": self._last_auto_load_error,
             "adapter": adapter_status,
             "metrics": metrics,
             "config": {
                 "max_concurrent_scans": self._max_concurrent,
                 "cooldown_seconds_per_camera": self._cooldown,
                 "max_detections_per_frame": self._max_detections,
+                "load_timeout_seconds": self._load_timeout_seconds,
             },
         }
 

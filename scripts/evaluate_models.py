@@ -26,7 +26,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from datetime import datetime, timezone
@@ -38,6 +37,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 logger = logging.getLogger("evaluate_models")
 
 SUPPORTED_TASKS = ["detection", "tracking", "face", "reid", "identity_fusion", "open_vocab", "latency"]
+
+
+class OptionalModelUnavailable(RuntimeError):
+    pass
 
 
 def main() -> int:
@@ -83,11 +86,17 @@ def main() -> int:
         model_names = [None]  # single anonymous run
 
     save_failures = not args.no_failure_cases and config.get("evaluation", {}).get("save_failure_cases", True)
-    registry = DatasetRegistry(config)
+    try:
+        registry = DatasetRegistry(config)
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        return 1
 
     # Run each model separately
     run_dirs: list[Path] = []
+    completed_runs: list[tuple[object, Path]] = []
     model_metric_summaries: list[dict] = []
+    real_detection_results: list[tuple[Path, object]] = []
 
     for model_name in model_names:
         ts = datetime.now(timezone.utc).strftime("%Y_%m_%d_%H%M%S")
@@ -129,9 +138,11 @@ def main() -> int:
         if task_result:
             run.task_results.append(task_result)
 
+        run_dirs.append(run_dir)
+        completed_runs.append((run, run_dir))
+
         writer = ReportWriter()
         artifacts = writer.write(run, run_dir)
-        run_dirs.append(run_dir)
 
         print(f"\n{'='*60}")
         print(f"Run ID:  {run.run_id}")
@@ -140,26 +151,57 @@ def main() -> int:
         for name, path in artifacts.items():
             print(f"  {name}: {path}")
 
-        if task_result and not task_result.skipped:
+        if task_result and not task_result.skipped and task_result.real_run:
             print(f"\nMetrics ({args.task}" + (f" / {model_name}" if model_name else "") + "):")
             for k, v in task_result.metrics.items():
                 if isinstance(v, (int, float)):
                     print(f"  {k}: {v}")
             # Collect for recommendation
             m_summary = {"model_name": model_name or "default"}
-            for key in ("map_50", "recall", "precision", "false_positives_per_image"):
+            for key in (
+                "map_50",
+                "map_50_95",
+                "recall",
+                "precision",
+                "f1",
+                "false_positives_per_image",
+                "false_negatives_per_image",
+            ):
                 if key in task_result.metrics and isinstance(task_result.metrics[key], (int, float)):
                     m_summary[key] = task_result.metrics[key]
             lat = task_result.metrics.get("inference_latency", {})
             if "p95_ms" in lat:
                 m_summary["p95_latency_ms"] = lat["p95_ms"]
+            gpu = task_result.metrics.get("gpu_profile", {})
+            if "peak_memory_mb" in gpu and isinstance(gpu["peak_memory_mb"], (int, float)):
+                m_summary["peak_gpu_mb"] = gpu["peak_memory_mb"]
+            m_summary["real_run"] = True
+            m_summary["dataset_size"] = task_result.dataset_size
             model_metric_summaries.append(m_summary)
+            if args.task == "detection":
+                real_detection_results.append((run_dir, task_result))
         elif task_result and task_result.skipped:
             print(f"\n[SKIPPED] {task_result.skip_reason}")
 
     # Auto-comparison
-    if args.compare and len(run_dirs) >= 2:
-        _run_comparison(config, run_dirs, model_metric_summaries, args.task)
+    if args.compare and len(real_detection_results) >= 2:
+        _run_comparison(config, real_detection_results, model_metric_summaries, args.task, args.dataset)
+
+    if args.task == "detection" and model_metric_summaries:
+        from backend.app.evaluation.recommendation import recommend_detection_model
+
+        task_key = _infer_detection_task_key(args.dataset or "")
+        sample_size = max((summary.get("dataset_size", 0) for summary in model_metric_summaries), default=0)
+        recommendation = recommend_detection_model(task_key, model_metric_summaries, sample_size=sample_size)
+        for run, run_dir in completed_runs:
+            for task_result in run.task_results:
+                if task_result.task == "detection" and task_result.real_run:
+                    task_result.metrics["model_recommendation"] = recommendation
+            ReportWriter().write(run, run_dir)
+        print(f"\nModel Recommendation ({task_key}):")
+        print(f"  Recommended: {recommendation.get('recommended_model') or 'none'}")
+        print(f"  Reason: {recommendation.get('reason', '')}")
+        print(f"  Confidence: {recommendation.get('confidence', 'low')}")
 
     return 0
 
@@ -173,9 +215,7 @@ def _run_detection(
 
     dataset_name = args.dataset or config.get("evaluation", {}).get("default_detection_dataset", "weapon_eval")
     effective_model = model_name or "weapon_yolo"
-
-    # Try to resolve real model adapter
-    predict_fn = _make_predict_fn(config, effective_model, device)
+    dataset_cfg = config.get("datasets", {}).get(dataset_name, {})
 
     try:
         dataset_entry = registry.get_required(dataset_name)
@@ -187,8 +227,14 @@ def _run_detection(
             skipped=True, skip_reason=str(exc),
         )
 
-    class_names = config.get("datasets", {}).get(dataset_name, {}).get("class_names", ["weapon", "phone", "person"])
-    loader = CocoYoloLoader(dataset_entry.path, class_names=class_names)
+    model_cfg = _find_model_cfg(config, effective_model) or {}
+    class_names = dataset_cfg.get("class_names") or model_cfg.get("classes", [])
+    loader = CocoYoloLoader(
+        dataset_entry.path,
+        class_names=class_names,
+        images_dir=dataset_entry.images_dir,
+        labels_dir=dataset_entry.labels_dir,
+    )
     samples = loader.load_yolo_annotations()
 
     if not samples:
@@ -199,6 +245,22 @@ def _run_detection(
         )
 
     model_path = _resolve_model_path(config, effective_model)
+    try:
+        predict_fn, adapter = _make_predict_fn(config, effective_model, device)
+    except OptionalModelUnavailable as exc:
+        logger.warning("%s", exc)
+        from backend.app.evaluation.schemas import BenchmarkTaskResult
+        return BenchmarkTaskResult(
+            task="detection", model_name=effective_model, dataset_name=dataset_name,
+            skipped=True, skip_reason=str(exc),
+        )
+    except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
+        logger.error("%s", exc)
+        from backend.app.evaluation.schemas import BenchmarkTaskResult
+        return BenchmarkTaskResult(
+            task="detection", model_name=effective_model, dataset_name=dataset_name,
+            skipped=True, skip_reason=str(exc),
+        )
     sweep_cfg = config.get("detection_threshold_sweep", {})
 
     runner = DetectionBenchmarkRunner(
@@ -206,7 +268,13 @@ def _run_detection(
         model_path=model_path,
         device=device,
     )
-    return runner.run(
+    try:
+        from backend.app.evaluation.metrics.gpu_metrics import reset_gpu_peak_memory
+
+        reset_gpu_peak_memory()
+    except Exception:
+        pass
+    result = runner.run(
         samples=samples,
         predict_fn=predict_fn,
         dataset_name=dataset_name,
@@ -216,50 +284,54 @@ def _run_detection(
         compute_map_50_95=compute_map_50_95,
         threshold_sweep_config=sweep_cfg,
     )
+    try:
+        from backend.app.evaluation.metrics.gpu_metrics import profile_gpu
+        result.metrics["gpu_profile"] = profile_gpu(
+            model_loaded=bool(adapter and adapter.is_loaded()),
+            batch_size=1,
+        ).to_dict()
+    except Exception as exc:
+        logger.warning("GPU profiling degraded for '%s': %s", effective_model, exc)
+        result.metrics["gpu_profile"] = {
+            "gpu_available": False,
+            "profiling_degraded": True,
+            "degradation_reason": str(exc),
+        }
+    return result
 
 
 def _make_predict_fn(config: dict, model_name: str, device: str):
     """
-    Try to load a real YOLO adapter. Falls back to empty-predictions stub
-    if weights are missing (optional model) or ultralytics is not installed.
-    Required models raise and abort the run.
+    Resolve a real prediction function for a configured model.
+    Optional unavailable models are skipped explicitly; empty-prediction stubs
+    are not allowed for real benchmark execution.
     """
-    # Check model_candidates first, then legacy models section
     model_cfg = _find_model_cfg(config, model_name)
+    if not model_cfg:
+        raise RuntimeError(f"Model '{model_name}' not found in evaluation config")
 
-    if model_cfg:
-        required = model_cfg.get("required", True)
-        try:
-            from backend.app.evaluation.model_resolver import resolve_adapter
-            adapter = resolve_adapter(model_cfg, device=device, allow_missing=not required)
-            if adapter is not None:
-                logger.info("Loaded real inference adapter for '%s'", model_name)
-                # Warmup
-                n_warmup = config.get("inference", {}).get("warmup_runs", 5)
-                adapter.warmup(n=n_warmup)
+    required = bool(model_cfg.get("required", True))
+    from backend.app.evaluation.model_resolver import resolve_adapter
 
-                def predict_fn(image_path: str) -> list[dict]:
-                    pred = adapter.predict(image_path, confidence_threshold=0.25)
-                    return [
-                        {"bbox": d.bbox, "score": d.score, "class_id": d.class_id}
-                        for d in pred.detections
-                    ]
-                return predict_fn
-        except FileNotFoundError as exc:
-            logger.error("Required model '%s' missing weights — aborting: %s", model_name, exc)
-            raise
-        except ImportError as exc:
-            logger.warning("ultralytics not installed — using empty stub for '%s': %s", model_name, exc)
-        except Exception as exc:
-            logger.warning("Could not load model '%s': %s — using empty stub", model_name, exc)
+    adapter = resolve_adapter(model_cfg, device=device, allow_missing=not required)
+    if adapter is None:
+        path = _resolve_model_path(config, model_name)
+        raise OptionalModelUnavailable(
+            f"Optional model '{model_name}' unavailable; missing weights at '{path}'"
+        )
 
-    # Stub — no real model available
-    logger.info("Using empty predict stub for '%s' (no real weights available)", model_name)
+    logger.info("Loaded real inference adapter for '%s'", model_name)
+    n_warmup = config.get("inference", {}).get("warmup_runs", 5)
+    adapter.warmup(n=n_warmup)
 
-    def predict_fn_stub(image_path: str) -> list[dict]:
-        return []
+    def predict_fn(image_path: str) -> list[dict]:
+        pred = adapter.predict(image_path, confidence_threshold=0.25)
+        return [
+            {"bbox": d.bbox, "score": d.score, "class_id": d.class_id}
+            for d in pred.detections
+        ]
 
-    return predict_fn_stub
+    return predict_fn, adapter
 
 
 def _find_model_cfg(config: dict, model_name: str) -> dict | None:
@@ -282,34 +354,36 @@ def _resolve_model_path(config: dict, model_name: str) -> str:
     return cfg.get("path", "") if cfg else ""
 
 
-def _run_comparison(config: dict, run_dirs: list[Path], model_summaries: list[dict], task: str) -> None:
+def _run_comparison(config: dict, real_results: list[tuple[Path, object]], model_summaries: list[dict], task: str, dataset_name: str | None) -> None:
     from backend.app.evaluation.reports.comparison_report import BenchmarkComparator
-    policy = config.get("model_selection_policy", {})
     comparator = BenchmarkComparator(regression_policy=config.get("regression_policy", {}))
 
     print(f"\n{'='*60}")
     print("Model Comparison")
 
     # Pairwise comparisons (baseline = first, candidates = rest)
-    baseline_dir = run_dirs[0]
-    for cand_dir in run_dirs[1:]:
+    baseline_dir, _baseline_task_result = real_results[0]
+    comparison_dir = baseline_dir.parent / "comparisons"
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+    comparison_key = _infer_detection_task_key(dataset_name or "")
+    for cand_dir, _cand_task_result in real_results[1:]:
         try:
             comparison = comparator.compare(baseline_dir, cand_dir)
-            out_path = cand_dir.parent / f"compare_{baseline_dir.name}_vs_{cand_dir.name}.md"
+            out_path = comparison_dir / f"{comparison_key}_baseline_vs_candidate.md"
             comparator.write_report(comparison, out_path)
             print(f"Comparison: {out_path}")
             print(f"  Status: {comparison.overall_status.upper()}")
         except Exception as exc:
             logger.warning("Comparison failed: %s", exc)
 
-    # Recommendation engine
-    if model_summaries and policy:
-        from backend.app.evaluation.model_resolver import apply_model_selection_policy
-        rec = apply_model_selection_policy(model_summaries, policy, task=task)
-        print(f"\nModel Selection Recommendation ({task}):")
-        print(f"  Recommended: {rec.get('recommended_model') or 'none (policy failures)'}")
-        print(f"  Reason: {rec.get('reason', '')}")
-        print(f"  Confidence: {rec.get('confidence', 'unknown')}")
+
+def _infer_detection_task_key(dataset_name: str) -> str:
+    lowered = dataset_name.lower()
+    if "phone" in lowered:
+        return "phone"
+    if "weapon" in lowered:
+        return "weapon"
+    return "detection"
 
 
 def _run_tracking(args, config, registry, device, run_dir, save_failures):

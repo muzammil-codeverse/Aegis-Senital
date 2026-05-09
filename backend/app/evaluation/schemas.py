@@ -338,9 +338,14 @@ class BenchmarkTaskResult:
     device: str = "cpu"
     dataset_name: str = ""
     dataset_version: str | None = None
+    dataset_size: int = 0
+    class_names: list[str] = field(default_factory=list)
     metrics: dict = field(default_factory=dict)
     artifacts: dict = field(default_factory=dict)
     failure_cases_count: int = 0
+    failure_case_summary: dict[str, int] = field(default_factory=dict)
+    dataset_improvement_recommendations: list[str] = field(default_factory=list)
+    real_run: bool = False
     warnings: list[str] = field(default_factory=list)
     skipped: bool = False
     skip_reason: str = ""
@@ -354,9 +359,14 @@ class BenchmarkTaskResult:
             "device": self.device,
             "dataset_name": self.dataset_name,
             "dataset_version": self.dataset_version,
+            "dataset_size": self.dataset_size,
+            "class_names": self.class_names,
             "metrics": self.metrics,
             "artifacts": self.artifacts,
             "failure_cases_count": self.failure_cases_count,
+            "failure_case_summary": self.failure_case_summary,
+            "dataset_improvement_recommendations": self.dataset_improvement_recommendations,
+            "real_run": self.real_run,
             "warnings": self.warnings,
             "skipped": self.skipped,
             "skip_reason": self.skip_reason,

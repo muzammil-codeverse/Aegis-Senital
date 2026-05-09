@@ -73,6 +73,14 @@ class StreamSessionManager:
         except Exception:
             pass
 
+    def _prepare_open_vocab_for_stream(self, camera_id: str) -> dict:
+        try:
+            from inference.runtime import get_intelligence_runtime
+
+            return get_intelligence_runtime().prepare_open_vocab_for_stream(camera_id)
+        except Exception as exc:
+            return {"status": "failed", "loaded": False, "error": str(exc)}
+
     def start_stream(self, camera_id: str) -> dict:
         session = self._get_or_create(camera_id)
         with self._lock:
@@ -88,6 +96,15 @@ class StreamSessionManager:
         try:
             if not source_uri:
                 raise RuntimeError(f"Camera '{camera_id}' has no source_uri configured")
+            open_vocab_result = self._prepare_open_vocab_for_stream(camera_id)
+            if open_vocab_result.get("block_stream"):
+                raise RuntimeError(open_vocab_result.get("error") or "Open-vocab model unavailable")
+            if open_vocab_result.get("status") in {"failed", "timeout"}:
+                logger.warning(
+                    "Open-vocab degraded during stream start for %s: %s",
+                    camera_id,
+                    open_vocab_result.get("error") or open_vocab_result.get("status"),
+                )
             from inference.stream.stream_manager import get_stream_manager
             mgr = get_stream_manager()
             stream_id = f"cam_{camera_id}"
@@ -149,6 +166,16 @@ class StreamSessionManager:
 
         self._update_camera_status(camera_id, "offline")
         self._emit_event("stream_stopped", camera_id)
+        try:
+            from inference.runtime import get_intelligence_runtime
+
+            if not any(
+                entry.state in {StreamSessionState.RUNNING, StreamSessionState.STARTING, StreamSessionState.PAUSED}
+                for entry in self._sessions.values()
+            ):
+                get_intelligence_runtime().handle_streams_idle()
+        except Exception:
+            pass
         return session.to_dict()
 
     def pause_stream(self, camera_id: str) -> dict:

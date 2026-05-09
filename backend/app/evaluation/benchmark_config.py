@@ -1,13 +1,24 @@
-"""Phase 25 — Benchmark configuration loader."""
+"""Phase 25/26B — Benchmark configuration loader."""
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def _deep_merge(base: Any, override: Any) -> Any:
+    if not isinstance(base, dict) or not isinstance(override, dict):
+        return override
+    merged = dict(base)
+    for key, value in override.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def load_evaluation_config(config_path: str | Path) -> dict:
@@ -15,7 +26,13 @@ def load_evaluation_config(config_path: str | Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"Evaluation config not found: {path}")
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        config = yaml.safe_load(f) or {}
+    local_override_path = path.with_name("evaluation.local.yaml")
+    if path.name == "evaluation.yaml" and local_override_path.exists():
+        with open(local_override_path, encoding="utf-8") as f:
+            override = yaml.safe_load(f) or {}
+        config = _deep_merge(config, override)
+    return config
 
 
 def load_regression_policy(config: dict) -> dict:

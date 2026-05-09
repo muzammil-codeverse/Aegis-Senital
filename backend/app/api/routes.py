@@ -637,6 +637,11 @@ def get_core_metrics():
             "system_health_requests", "system_readiness_failures", "runtime_validation_failures",
             "open_vocab_model_load_attempts", "open_vocab_model_load_success",
             "open_vocab_model_load_failures", "open_vocab_model_unloads",
+            "open_vocab_model_auto_load_attempts_total",
+            "open_vocab_model_auto_load_failures_total",
+            "open_vocab_model_auto_load_success_total",
+            "open_vocab_model_auto_load_skipped_total",
+            "open_vocab_model_auto_load_timeout_total",
         ):
             base.setdefault(_p24_key, _mon24.get(_p24_key, 0))
     except Exception:
@@ -644,6 +649,11 @@ def get_core_metrics():
             "system_health_requests", "system_readiness_failures", "runtime_validation_failures",
             "open_vocab_model_load_attempts", "open_vocab_model_load_success",
             "open_vocab_model_load_failures", "open_vocab_model_unloads",
+            "open_vocab_model_auto_load_attempts_total",
+            "open_vocab_model_auto_load_failures_total",
+            "open_vocab_model_auto_load_success_total",
+            "open_vocab_model_auto_load_skipped_total",
+            "open_vocab_model_auto_load_timeout_total",
         ):
             base.setdefault(_p24_key, 0)
     return base
@@ -2281,23 +2291,26 @@ def open_vocab_model_status_api(
         if adapter is None:
             return {"status": "ok", "adapter": None, "detail": "No adapter attached"}
 
-        raw_status = adapter.get_status() if hasattr(adapter, "get_status") else {}
+        raw_status = scanner.get_status() if hasattr(scanner, "get_status") else {}
         model_path = _os.environ.get("AEGIS_OPEN_VOCAB_MODEL_PATH", "")
         processor_path = _os.environ.get("AEGIS_OPEN_VOCAB_PROCESSOR_PATH", "")
 
         # Redact paths for non-admin users; expose boolean only
         is_admin = getattr(current_user, "role", "") in {"admin", "supervisor"}
         public_status = {
-            "provider": raw_status.get("provider"),
-            "available": raw_status.get("available", False),
-            "loaded": raw_status.get("available", False),
-            "device": raw_status.get("device"),
+            "provider": raw_status.get("adapter", {}).get("provider"),
+            "available": raw_status.get("model_loaded", False),
+            "loaded": raw_status.get("model_loaded", False),
+            "device": raw_status.get("adapter", {}).get("device"),
             "model_path_configured": bool(model_path),
             "processor_path_configured": bool(processor_path),
-            "last_load_error": raw_status.get("reason") if not raw_status.get("available") else None,
+            "last_load_error": raw_status.get("adapter", {}).get("reason") if not raw_status.get("model_loaded") else None,
+            "auto_load_on_camera_start": raw_status.get("auto_load_on_camera_start", False),
+            "last_auto_load_status": raw_status.get("last_auto_load_status"),
+            "last_auto_load_error": raw_status.get("last_auto_load_error"),
         }
         if is_admin:
-            public_status["model_id"] = raw_status.get("model_id")
+            public_status["model_id"] = raw_status.get("adapter", {}).get("model_id")
 
         return {"status": "ok", "adapter": public_status}
     except Exception as exc:

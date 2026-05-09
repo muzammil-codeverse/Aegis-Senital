@@ -22,9 +22,18 @@ class CocoYoloLoader:
         images/
     """
 
-    def __init__(self, dataset_path: str, class_names: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        dataset_path: str,
+        class_names: list[str] | None = None,
+        *,
+        images_dir: str | None = None,
+        labels_dir: str | None = None,
+    ) -> None:
         self._path = Path(dataset_path)
         self._class_names = class_names or []
+        self._images_dir = Path(images_dir) if images_dir else self._path / "images"
+        self._labels_dir = Path(labels_dir) if labels_dir else self._path / "labels"
 
     def load_yolo_annotations(self) -> list[dict]:
         """
@@ -32,8 +41,8 @@ class CocoYoloLoader:
             { image_path, width, height, annotations: [{class_id, class_name, bbox_xywh_norm}] }
         Returns empty list if dataset path does not exist.
         """
-        labels_dir = self._path / "labels"
-        images_dir = self._path / "images"
+        labels_dir = self._labels_dir
+        images_dir = self._images_dir
         if not labels_dir.exists():
             logger.warning("YOLO labels dir not found: %s", labels_dir)
             return []
