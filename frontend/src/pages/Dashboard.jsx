@@ -3,12 +3,46 @@ import { getLiveAnomalies } from '../api/camerasApi'
 import { normalizeError } from '../api/client'
 import AlertDetailDrawer from '../components/alerts/AlertDetailDrawer'
 import CommandOverview from '../components/dashboard/CommandOverview'
+import { useCameras } from '../hooks/useCameras'
+import { useLatestFrames } from '../hooks/useLatestFrames'
+import { getStreams } from '../api/camerasApi'
 import { compareSeverity, normalizeSeverity } from '../utils/severity'
+import { DASHBOARD_POLL_MS } from '../config'
 
 export default function Dashboard({ alertState, incidentState, metricsState, websocketState, health }) {
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
+
+  // Camera state — managed here, passed down to avoid duplicate fetching
+  const { cameras, loading: camerasLoading, error: camerasError, refresh: refreshCameras, selectedCamera, setSelectedCamera } = useCameras()
+  const { framesByCameraId, refresh: refreshFrames } = useLatestFrames()
+  const [streamStatesByCameraId, setStreamStatesByCameraId] = useState({})
+
+  // Fetch stream session states
+  const refreshStreamStates = useCallback(async () => {
+    try {
+      const res = await getStreams()
+      const byId = {}
+      for (const s of res.items) {
+        if (s?.camera_id) byId[s.camera_id] = s
+      }
+      setStreamStatesByCameraId(byId)
+    } catch (_) {}
+  }, [])
+
+  useEffect(() => {
+    refreshStreamStates()
+    const t = window.setInterval(refreshStreamStates, DASHBOARD_POLL_MS)
+    return () => window.clearInterval(t)
+  }, [refreshStreamStates])
+
+  // Auto-select first camera when cameras load
+  useEffect(() => {
+    if (!selectedCamera && cameras.length > 0) {
+      setSelectedCamera(cameras[0])
+    }
+  }, [cameras, selectedCamera, setSelectedCamera])
 
   const refreshAnomalies = useCallback(async () => {
     setAnomaliesLoading(true)
@@ -30,19 +64,59 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
   }, [refreshAnomalies])
 
   const mergedAlerts = useMemo(() => mergeAlerts(alertState.alerts, websocketState.alerts), [alertState.alerts, websocketState.alerts])
-  const cameras = useMemo(() => deriveCameraSummaries(mergedAlerts, incidentState.incidents), [mergedAlerts, incidentState.incidents])
+
+  // Alert count per camera_id
+  const alertCountByCameraId = useMemo(() => {
+    const counts = {}
+    mergedAlerts.forEach(alert => {
+      ;(alert.camera_ids || []).forEach(cid => {
+        counts[String(cid)] = (counts[String(cid)] || 0) + 1
+      })
+    })
+    return counts
+  }, [mergedAlerts])
+
+  // Related alerts for selected camera
+  const selectedCameraAlerts = useMemo(() => {
+    if (!selectedCamera) return []
+    return mergedAlerts.filter(a => (a.camera_ids || []).includes(selectedCamera.camera_id))
+  }, [mergedAlerts, selectedCamera])
+
+  const handleCameraSelect = useCallback(cam => {
+    setSelectedCamera(cam)
+  }, [setSelectedCamera])
+
+  const handleCameraRefresh = useCallback(() => {
+    refreshCameras()
+    refreshFrames()
+    refreshStreamStates()
+  }, [refreshCameras, refreshFrames, refreshStreamStates])
 
   return (
     <>
       <CommandOverview
+        // Camera props
+        cameras={cameras}
+        camerasLoading={camerasLoading}
+        camerasError={camerasError}
+        selectedCamera={selectedCamera}
+        framesByCameraId={framesByCameraId}
+        streamStatesByCameraId={streamStatesByCameraId}
+        alertCountByCameraId={alertCountByCameraId}
+        selectedCameraAlerts={selectedCameraAlerts}
+        onCameraSelect={handleCameraSelect}
+        onCameraRefresh={handleCameraRefresh}
+        // Alert props
         alerts={mergedAlerts}
         alertState={alertState}
+        // Incident props
         incidents={incidentState.incidents}
         incidentState={incidentState}
+        // Metrics / health
         metricsState={metricsState}
         health={health}
         websocketStatus={websocketState.status}
-        cameras={cameras}
+        // Anomalies
         anomalies={anomalies}
         anomaliesLoading={anomaliesLoading}
         anomaliesError={anomaliesError}
@@ -71,48 +145,8 @@ function mergeAlerts(apiAlerts, websocketAlerts) {
     byId.set(alert.alert_id, { ...byId.get(alert.alert_id), ...alert })
   })
   return [...byId.values()].sort((a, b) => {
-    const severityOrder = compareSeverity(a.severity, b.severity)
-    if (severityOrder !== 0) return severityOrder
+    const sev = compareSeverity(a.severity, b.severity)
+    if (sev !== 0) return sev
     return Number(b.updated_at || b.created_at || 0) - Number(a.updated_at || a.created_at || 0)
   })
-}
-
-function deriveCameraSummaries(alerts, incidents) {
-  const cameras = new Map()
-  function ensure(cameraId) {
-    if (!cameras.has(cameraId)) {
-      cameras.set(cameraId, {
-        camera_id: cameraId,
-        status: 'referenced',
-        eventCount: 0,
-        riskScore: 0,
-        riskSeverity: 'info',
-        track_ids: [],
-      })
-    }
-    return cameras.get(cameraId)
-  }
-  alerts.forEach(alert => {
-    ;(alert.camera_ids || []).forEach(cameraId => {
-      const camera = ensure(String(cameraId))
-      camera.eventCount += 1
-      camera.riskScore = Math.max(camera.riskScore, Number(alert.risk_score || 0))
-      camera.riskSeverity = higherSeverity(camera.riskSeverity, alert.severity)
-      camera.track_ids = [...new Set([...camera.track_ids, ...(alert.track_ids || [])])]
-    })
-  })
-  incidents.forEach(incident => {
-    ;(incident.camera_ids || []).forEach(cameraId => {
-      const camera = ensure(String(cameraId))
-      camera.eventCount += 1
-      camera.riskScore = Math.max(camera.riskScore, Number(incident.risk_score || 0))
-      camera.riskSeverity = higherSeverity(camera.riskSeverity, incident.severity)
-      camera.track_ids = [...new Set([...camera.track_ids, ...(incident.track_ids || [])])]
-    })
-  })
-  return [...cameras.values()]
-}
-
-function higherSeverity(current, incoming) {
-  return compareSeverity(incoming, current) < 0 ? normalizeSeverity(incoming) : normalizeSeverity(current)
 }

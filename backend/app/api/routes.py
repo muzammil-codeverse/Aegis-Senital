@@ -140,7 +140,32 @@ def get_metrics_snapshot():
 
 @router.get("/metrics/core")
 def get_core_metrics():
-    return metrics.to_dict()
+    base = metrics.to_dict()
+    # Bridge Phase-15/16 camera metrics from registry snapshot
+    try:
+        from app.services.camera_registry import get_camera_registry
+        snap = get_camera_registry().snapshot()
+        base.update({
+            "registered_cameras": snap.get("total", 0),
+            "active_streams": snap.get("online", 0),
+            "offline_cameras": snap.get("offline", 0),
+            "degraded_cameras": snap.get("degraded", 0),
+        })
+    except Exception:
+        pass
+    # Bridge stream/frame metrics from monitoring layer
+    try:
+        from inference.monitoring.metrics import get_metrics as get_mon
+        mon = get_mon().snapshot()
+        base.setdefault("stream_start_failures", mon.get("stream_start_failures", 0))
+        base.setdefault("latest_frame_updates", mon.get("latest_frame_updates", 0))
+    except Exception:
+        pass
+    # Bridge MJPEG metrics from core metrics
+    base.setdefault("active_mjpeg_clients", metrics.active_mjpeg_clients if hasattr(metrics, "active_mjpeg_clients") else 0)
+    base.setdefault("mjpeg_frames_served", metrics.mjpeg_frames_served if hasattr(metrics, "mjpeg_frames_served") else 0)
+    base.setdefault("stale_camera_frames", metrics.stale_camera_frames if hasattr(metrics, "stale_camera_frames") else 0)
+    return base
 
 
 @router.get("/config/{scenario}")
@@ -368,6 +393,122 @@ def get_camera_latest_frame_api(camera_id: str):
     frame = get_frame_snapshot_service().get_latest_frame(camera_id)
     status = frame.get("status", "ok")
     return {"item": frame, "status": status}
+
+
+@router.get("/api/cameras/{camera_id}/latest-frame/image")
+def get_camera_latest_frame_image(camera_id: str):
+    """Serve the latest annotated frame image with path-traversal protection."""
+    from fastapi.responses import FileResponse, JSONResponse
+    from app.services.frame_snapshot_service import get_frame_snapshot_service
+    from app.core.security import safe_frame_path, is_safe_extension
+
+    frame = get_frame_snapshot_service().get_latest_frame(camera_id)
+    if frame.get("status") == "no_frame" or not frame.get("frame_path"):
+        return JSONResponse(
+            status_code=404,
+            content={"status": "not_found", "detail": "No latest frame available"},
+        )
+
+    resolved = safe_frame_path(frame["frame_path"])
+    if resolved is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "not_found", "detail": "Frame file unavailable"},
+        )
+    if not is_safe_extension(resolved):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "detail": "Unsupported frame file type"},
+        )
+
+    media_type = "image/png" if resolved.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(str(resolved), media_type=media_type)
+
+
+@router.get("/api/cameras/{camera_id}/mjpeg")
+async def camera_mjpeg_stream(camera_id: str):
+    """Lightweight MJPEG stream using latest frame snapshots."""
+    import asyncio
+    from fastapi.responses import StreamingResponse, JSONResponse
+    from app.services.frame_snapshot_service import get_frame_snapshot_service
+    from app.core.security import safe_frame_path, is_safe_extension
+
+    # Load streaming config
+    try:
+        from inference.config_runtime import load_runtime_config
+        cfg = load_runtime_config("camera_streaming")
+        mjpeg_cfg = cfg.get("mjpeg", {})
+        enabled = bool(mjpeg_cfg.get("enabled", True))
+        fps = float(mjpeg_cfg.get("fps", 2))
+        max_clients = int(mjpeg_cfg.get("max_clients", 16))
+        stale_seconds = float(mjpeg_cfg.get("stale_frame_seconds", 10))
+    except Exception:
+        enabled, fps, max_clients, stale_seconds = True, 2.0, 16, 10.0
+
+    if not enabled:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "disabled", "detail": "MJPEG streaming is disabled"},
+        )
+
+    # Check client limit
+    current = getattr(metrics, "active_mjpeg_clients", 0)
+    if current >= max_clients:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "capacity", "detail": "MJPEG max client limit reached"},
+        )
+
+    snapshot_svc = get_frame_snapshot_service()
+    interval = max(0.05, 1.0 / fps)
+    boundary = b"--aegisframe"
+
+    metrics.increment("active_mjpeg_clients")
+
+    async def generate():
+        try:
+            while True:
+                frame_meta = snapshot_svc.get_latest_frame(camera_id)
+                frame_path = frame_meta.get("frame_path")
+                age = frame_meta.get("age_seconds")
+
+                img_bytes: bytes | None = None
+                if frame_path and (age is None or age <= stale_seconds):
+                    resolved = safe_frame_path(frame_path)
+                    if resolved is not None and is_safe_extension(resolved):
+                        try:
+                            with open(str(resolved), "rb") as fh:
+                                img_bytes = fh.read()
+                        except OSError:
+                            img_bytes = None
+
+                if img_bytes:
+                    metrics.increment("mjpeg_frames_served")
+                    header = (
+                        boundary + b"\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        b"Content-Length: " + str(len(img_bytes)).encode() + b"\r\n"
+                        b"\r\n"
+                    )
+                    yield header + img_bytes + b"\r\n"
+                else:
+                    # Heartbeat boundary keeps connection alive
+                    metrics.increment("stale_camera_frames")
+                    yield boundary + b"\r\n\r\n"
+
+                await asyncio.sleep(interval)
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+        finally:
+            metrics.increment("mjpeg_client_disconnects")
+            with metrics._lock:
+                metrics.active_mjpeg_clients = max(0, metrics.active_mjpeg_clients - 1)
+
+    return StreamingResponse(
+        generate(),
+        media_type="multipart/x-mixed-replace; boundary=aegisframe",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/cameras/{camera_id}/heatmap")

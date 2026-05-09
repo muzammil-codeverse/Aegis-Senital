@@ -1,5 +1,7 @@
 import AlertFeed from './AlertFeed'
 import CameraGrid from './CameraGrid'
+import CameraDetailPanel from './CameraDetailPanel'
+import LiveVideoSurface from './LiveVideoSurface'
 import IncidentPanel from './IncidentPanel'
 import MetricsPanel from './MetricsPanel'
 import SystemHealthPanel from './SystemHealthPanel'
@@ -11,25 +13,73 @@ import { formatPercent } from '../../utils/formatters'
 import { formatTimestamp } from '../../utils/time'
 
 export default function CommandOverview({
+  // Camera props
+  cameras = [],
+  camerasLoading,
+  camerasError,
+  selectedCamera,
+  framesByCameraId = {},
+  streamStatesByCameraId = {},
+  alertCountByCameraId = {},
+  selectedCameraAlerts = [],
+  onCameraSelect,
+  onCameraRefresh,
+  // Alert props
   alerts,
   alertState,
+  // Incident props
   incidents,
   incidentState,
+  // Metrics / health
   metricsState,
   health,
   websocketStatus,
-  cameras,
+  // Anomalies
   anomalies,
   anomaliesLoading,
   anomaliesError,
   onRefreshAnomalies,
 }) {
+  const selectedFrame = selectedCamera ? framesByCameraId[selectedCamera.camera_id] : null
+  const selectedStreamSession = selectedCamera ? streamStatesByCameraId[selectedCamera.camera_id] : null
+
   return (
-    <div className="command-grid">
+    <div className="command-grid command-grid--camera-console">
+      {/* LEFT: Camera Grid */}
       <div className="grid-left">
-        <CameraGrid cameras={cameras} />
+        <CameraGrid
+          cameras={cameras}
+          framesByCameraId={framesByCameraId}
+          streamStatesByCameraId={streamStatesByCameraId}
+          alertCountByCameraId={alertCountByCameraId}
+          selectedCameraId={selectedCamera?.camera_id}
+          onCameraSelect={onCameraSelect}
+          loading={camerasLoading}
+          error={camerasError}
+          onRefresh={onCameraRefresh}
+        />
       </div>
+
+      {/* CENTER: Live Video + Incidents + Timeline */}
       <div className="grid-center">
+        {/* Live video surface for selected camera */}
+        <div style={{ display: 'flex', gap: 8, flex: '0 0 auto' }}>
+          <LiveVideoSurface
+            camera={selectedCamera}
+            latestFrame={selectedFrame}
+            streamSession={selectedStreamSession}
+            selected
+            onSelect={onCameraSelect}
+          />
+          {selectedCamera && (
+            <CameraDetailPanel
+              camera={selectedCamera}
+              onClose={null}
+              relatedAlerts={selectedCameraAlerts}
+            />
+          )}
+        </div>
+
         <IncidentPanel
           incidents={incidents}
           selectedIncident={incidentState.selectedIncident}
@@ -44,6 +94,8 @@ export default function CommandOverview({
         />
         <TimelinePanel defaultTrackId={firstTrackId(alerts, incidents)} />
       </div>
+
+      {/* RIGHT: Alerts + Health + Anomalies */}
       <div className="grid-right">
         <AlertFeed
           alerts={alerts}
@@ -72,6 +124,8 @@ export default function CommandOverview({
           onRetry={onRefreshAnomalies}
         />
       </div>
+
+      {/* BOTTOM: Metrics */}
       <div className="grid-bottom">
         <MetricsPanel
           metrics={metricsState.metrics}
@@ -114,8 +168,8 @@ function RecentAnomalies({ anomalies = [], loading, error, onRetry }) {
 }
 
 function firstTrackId(alerts, incidents) {
-  const alertTrack = alerts.find(alert => Array.isArray(alert.track_ids) && alert.track_ids.length > 0)?.track_ids?.[0]
+  const alertTrack = alerts?.find(a => Array.isArray(a.track_ids) && a.track_ids.length > 0)?.track_ids?.[0]
   if (alertTrack !== undefined) return String(alertTrack)
-  const incidentTrack = incidents.find(incident => Array.isArray(incident.track_ids) && incident.track_ids.length > 0)?.track_ids?.[0]
+  const incidentTrack = incidents?.find(i => Array.isArray(i.track_ids) && i.track_ids.length > 0)?.track_ids?.[0]
   return incidentTrack !== undefined ? String(incidentTrack) : ''
 }

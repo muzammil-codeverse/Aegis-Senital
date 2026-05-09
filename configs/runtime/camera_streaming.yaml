@@ -1,0 +1,17 @@
+mjpeg:
+  enabled: true
+  fps: 2
+  max_clients: 16
+  stale_frame_seconds: 10
+
+snapshot:
+  allowed_dirs:
+    - output
+    - backend/output
+    - storage/frames
+  max_age_seconds: 10
+
+overlays:
+  enabled: true
+  show_confidence: true
+  show_track_id: true

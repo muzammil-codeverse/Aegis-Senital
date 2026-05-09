@@ -22,6 +22,17 @@ class SystemMetrics:
         self.notification_failures = 0
         self.websocket_clients = 0
         self.websocket_dropped_messages = 0
+        # Phase 15-16: camera registry and streaming metrics
+        self.registered_cameras = 0
+        self.active_streams = 0
+        self.offline_cameras = 0
+        self.degraded_cameras = 0
+        self.stream_start_failures = 0
+        self.latest_frame_updates = 0
+        self.active_mjpeg_clients = 0
+        self.mjpeg_frames_served = 0
+        self.mjpeg_client_disconnects = 0
+        self.stale_camera_frames = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

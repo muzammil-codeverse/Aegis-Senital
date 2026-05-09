@@ -173,17 +173,37 @@ def _process_frame_job(
             pass
         try:
             from app.services.frame_snapshot_service import get_frame_snapshot_service
-            detection_dicts = [
-                {"type": t.class_name, "bbox": list(t.bbox), "confidence": t.confidence, "track_id": t.track_id}
+            track_dicts = [
+                {
+                    "type": t.class_name,
+                    "bbox": list(t.bbox),
+                    "confidence": float(t.confidence),
+                    "track_id": t.track_id,
+                }
                 for t in packet.tracks
                 if t.missed_frames == 0 and len(t.bbox) == 4
             ]
+            detection_dicts = [
+                {
+                    "type": d.class_name,
+                    "bbox": list(d.bbox) if hasattr(d, "bbox") else [],
+                    "confidence": float(d.confidence) if hasattr(d, "confidence") else 0.0,
+                }
+                for d in packet.detections[:32]
+            ]
+            incidents = intelligence_packet.get("incidents", [])[:5] if intelligence_packet else []
+            events_list = intelligence_packet.get("events", [])[:5] if intelligence_packet else []
             get_frame_snapshot_service().update_latest_frame(
                 camera_id=packet.camera_id,
                 frame_path=fname,
                 frame_id=frame_index,
                 timestamp=ts_float,
                 detections=detection_dicts,
+                tracks=track_dicts,
+                events=events_list,
+                incidents=incidents,
+                width=640,
+                height=640,
             )
         except Exception:
             pass

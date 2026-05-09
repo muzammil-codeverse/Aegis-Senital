@@ -633,6 +633,41 @@ class StreamProcessor:
                     f,
                 )
 
+        # Update frame snapshot service with latest detections/tracks (best-effort)
+        try:
+            from app.services.frame_snapshot_service import get_frame_snapshot_service
+            track_dicts = [
+                {
+                    "type": getattr(t, "class_name", ""),
+                    "bbox": list(getattr(t, "bbox", [])),
+                    "confidence": float(getattr(t, "confidence", 0.0)),
+                    "track_id": getattr(t, "track_id", None),
+                }
+                for t in packet.tracks
+                if getattr(t, "missed_frames", 0) == 0 and len(getattr(t, "bbox", [])) == 4
+            ]
+            det_dicts = [
+                {
+                    "type": getattr(d, "class_name", ""),
+                    "bbox": list(getattr(d, "bbox", [])),
+                    "confidence": float(getattr(d, "confidence", 0.0)),
+                }
+                for d in packet.detections[:20]
+            ]
+            incidents = intelligence_packet.get("incidents", [])[:3] if intelligence_packet else []
+            event_dicts = [e.to_dict() if hasattr(e, "to_dict") else dict(e) for e in events[:5]]
+            get_frame_snapshot_service().update_latest_frame(
+                camera_id=packet.camera_id,
+                frame_id=packet.frame_id,
+                timestamp=ts_float,
+                detections=det_dicts,
+                tracks=track_dicts,
+                events=event_dicts,
+                incidents=incidents,
+            )
+        except Exception:
+            pass
+
         # Stage 5: publish to central EventBus
         now = time.monotonic()
         for event in events:
