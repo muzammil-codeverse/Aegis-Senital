@@ -1,4 +1,4 @@
-"""Phase 25 — Benchmark comparison tool (baseline vs candidate)."""
+"""Phase 25/26 — Benchmark comparison tool (baseline vs candidate) with recommendation engine."""
 from __future__ import annotations
 
 import json
@@ -187,6 +187,28 @@ class BenchmarkComparator:
             for w in comparison.warnings:
                 lines.append(f"- {w}")
 
+        # Recommendation table (if present)
+        if comparison.recommendation:
+            rec = comparison.recommendation
+            lines += ["", "## Model Recommendation", ""]
+            if rec.get("recommended_model"):
+                lines.append(f"**Recommended:** `{rec['recommended_model']}`")
+                lines.append(f"**Reason:** {rec.get('reason', '')}")
+                if rec.get("runner_up"):
+                    lines.append(f"**Runner-up:** `{rec['runner_up']}`")
+                lines.append(f"**Confidence:** {rec.get('confidence', 'unknown')}")
+            else:
+                lines.append(f"**No model passed all policy thresholds.**")
+                lines.append(f"Reason: {rec.get('reason', '')}")
+            pf = rec.get("policy_failures", {})
+            if pf:
+                lines += ["", "**Policy failures:**", ""]
+                for mname, issues in pf.items():
+                    if issues:
+                        lines.append(f"- `{mname}`: {'; '.join(issues)}")
+                    else:
+                        lines.append(f"- `{mname}`: passed all thresholds")
+
         with open(output_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
@@ -196,3 +218,20 @@ class BenchmarkComparator:
             json.dump(comparison.to_dict(), f, indent=2, default=str)
 
         logger.info("Comparison report written to %s", output_path)
+
+    def recommend(
+        self,
+        model_metrics: list[dict],
+        policy: dict | None = None,
+        task: str = "weapon",
+    ) -> dict:
+        """
+        Apply model_selection_policy to select the best model from a list.
+
+        model_metrics: [{"model_name": str, "map_50": float, "recall": float,
+                          "false_positives_per_image": float, "p95_latency_ms": float,
+                          "peak_gpu_mb": float}]
+        """
+        from backend.app.evaluation.model_resolver import apply_model_selection_policy
+        effective_policy = policy or self._policy
+        return apply_model_selection_policy(model_metrics, effective_policy, task=task)

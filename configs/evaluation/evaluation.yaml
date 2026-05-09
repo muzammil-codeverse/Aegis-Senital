@@ -1,5 +1,6 @@
-# Phase 25 — Model Evaluation & Benchmarking Configuration
-# Primary evaluation config. Do not hard-code paths here — use environment-specific datasets.yaml.
+# Phase 25/26 — Model Evaluation & Benchmarking Configuration
+# Phase 26 adds real inference wiring, mAP@0.5:0.95, confidence threshold sweeps,
+# model candidate head-to-head benchmarking, and the model selection policy engine.
 
 evaluation:
   output_dir: "storage/evaluation_runs"
@@ -19,16 +20,81 @@ regression_policy:
   latency_p95_increase_fail_percent: 30
   false_positive_increase_warn_percent: 20
 
-# Models (paths must be set per deployment)
+# Phase 26 — inference safety (no silent downloads, warmup, image size)
+inference:
+  allow_weight_downloads: false
+  fail_on_missing_required_model: true
+  default_image_size: 640
+  warmup_runs: 5
+  benchmark_runs: 1
+
+# Phase 26 — model candidates for head-to-head benchmarking
+# Set required: true for models that must exist; required: false for optional candidates.
+# Paths must be set per deployment — do NOT commit real paths to version control.
+model_candidates:
+  weapon:
+    - name: weapon_yolov8_baseline
+      backend: ultralytics_yolo
+      path: ""
+      required: true
+      task: detection
+      classes:
+        - weapon
+
+    - name: weapon_yolo11_candidate
+      backend: ultralytics_yolo
+      path: ""
+      required: false
+      task: detection
+      classes:
+        - weapon
+
+  phone:
+    - name: phone_yolov8_baseline
+      backend: ultralytics_yolo
+      path: ""
+      required: true
+      task: detection
+      classes:
+        - phone
+
+    - name: phone_yolo11_candidate
+      backend: ultralytics_yolo
+      path: ""
+      required: false
+      task: detection
+      classes:
+        - phone
+
+# Phase 26 — confidence threshold sweep for detection models
+detection_threshold_sweep:
+  enabled: true
+  thresholds: [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60, 0.70]
+
+# Phase 26 — model selection policy
+# Used by the recommendation engine to select the best detector per task.
+# Thresholds are deployment targets, not evaluation minimums.
+model_selection_policy:
+  min_map_50: 0.70
+  min_recall: 0.65
+  max_fp_per_image: 0.25
+  max_p95_latency_ms: 50
+  max_gpu_memory_mb: 3000
+  prefer_recall_for_weapon: true
+  prefer_precision_for_phone: false
+
+# Legacy models section (superseded by model_candidates for detection tasks)
 models:
   weapon_yolo:
     path: ""
     task: detection
+    backend: ultralytics_yolo
     version: null
     class_names: ["weapon"]
   phone_yolo:
     path: ""
     task: detection
+    backend: ultralytics_yolo
     version: null
     class_names: ["phone"]
   insightface:

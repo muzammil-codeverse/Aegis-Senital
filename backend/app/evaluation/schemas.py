@@ -30,6 +30,8 @@ class DetectionMetricResult:
     recall: float | None = None
     f1: float | None = None
     per_class_ap: dict[str, float] = field(default_factory=dict)
+    # Phase 26 — full per-class breakdown: ap_50, ap_50_95, precision, recall, f1
+    per_class_metrics: dict[str, dict] = field(default_factory=dict)
     false_positives_per_image: float | None = None
     false_negatives_per_image: float | None = None
     iou_distribution: dict[str, float] = field(default_factory=dict)
@@ -46,6 +48,7 @@ class DetectionMetricResult:
             "recall": self.recall,
             "f1": self.f1,
             "per_class_ap": self.per_class_ap,
+            "per_class_metrics": self.per_class_metrics,
             "false_positives_per_image": self.false_positives_per_image,
             "false_negatives_per_image": self.false_negatives_per_image,
             "iou_distribution": self.iou_distribution,
@@ -299,7 +302,9 @@ class GPUProfileResult:
 @dataclass
 class FailureCase:
     task: str = ""
+    model_name: str = ""
     sample_id: str = ""
+    image_path: str = ""
     frame_id: int = 0
     camera_id: str | None = None
     failure_type: str = ""
@@ -311,7 +316,9 @@ class FailureCase:
     def to_dict(self) -> dict:
         return {
             "task": self.task,
+            "model_name": self.model_name,
             "sample_id": self.sample_id,
+            "image_path": self.image_path,
             "frame_id": self.frame_id,
             "camera_id": self.camera_id,
             "failure_type": self.failure_type,
@@ -407,6 +414,8 @@ class BenchmarkComparison:
     deltas: list[MetricDelta] = field(default_factory=list)
     overall_status: str = "pass"  # pass | warn | fail
     regression_policy: dict = field(default_factory=dict)
+    # Phase 26 — model selection recommendation (populated by BenchmarkComparator.recommend())
+    recommendation: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -417,5 +426,6 @@ class BenchmarkComparison:
             "deltas": [d.to_dict() for d in self.deltas],
             "overall_status": self.overall_status,
             "regression_policy": self.regression_policy,
+            "recommendation": self.recommendation,
             "warnings": self.warnings,
         }
