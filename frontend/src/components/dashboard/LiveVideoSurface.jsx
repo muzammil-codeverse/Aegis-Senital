@@ -152,6 +152,10 @@ export default function LiveVideoSurface({
 
   const hasImage = (latestFrame?.status === 'ok' || replayFrame) && imageUrl && !imgError
   const overlayItems = showOverlays ? (latestFrame?.overlay_items || latestFrame?.overlays || []) : []
+  // Phase 23: open-vocab detections as overlay items (shown in purple)
+  const ovDetections = showOverlays && latestFrame?.open_vocab_detections
+    ? latestFrame.open_vocab_detections.map(d => ({ ...d, color: '#a78bfa' }))
+    : []
 
   return (
     <div
@@ -248,6 +252,14 @@ export default function LiveVideoSurface({
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4 }}>
             {overlayItems.map((item, i) => (
               <OverlayBox key={i} item={item} scaleX={scaleX} scaleY={scaleY} />
+            ))}
+          </div>
+        )}
+        {/* Phase 23: open-vocab detection overlays (purple) */}
+        {ovDetections.length > 0 && (
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
+            {ovDetections.map((item, i) => (
+              <OverlayBox key={`ov-${i}`} item={item} scaleX={scaleX} scaleY={scaleY} />
             ))}
           </div>
         )}

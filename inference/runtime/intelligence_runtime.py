@@ -23,6 +23,14 @@ from inference.identity.temporal_identity_graph import TemporalIdentityGraph
 from inference.reasoning.incident_engine import IncidentEngine
 from inference.trajectory.trajectory_engine import TrajectoryEngine
 
+# Phase 23: open-vocabulary threat scanner (optional, lazy)
+try:
+    from inference.open_vocab.scanner import OpenVocabThreatScanner as _OpenVocabThreatScanner
+    _OPEN_VOCAB_AVAILABLE = True
+except Exception:
+    _OpenVocabThreatScanner = None
+    _OPEN_VOCAB_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +71,8 @@ class IntelligenceRuntime:
             "alerts": 0,
             "handoff_predictions": 0,
         }
+        # Phase 23: open-vocabulary threat scanner
+        self.open_vocab_scanner = _build_open_vocab_scanner()
 
     def process_frame_context(
         self,
@@ -265,6 +275,83 @@ class IntelligenceRuntime:
         history = self.alert_manager.get_alert_history(alert_id)
         return {"items": history, "count": len(history), "status": "ok" if history else "empty"}
 
+    # ── Phase 23: open-vocabulary threat scanner methods ──────────────────────
+
+    def scan_open_vocab_latest(
+        self,
+        camera_id: str,
+        prompts: list[str] | None = None,
+    ) -> dict:
+        """Scan the latest frame for camera_id using open-vocabulary prompts."""
+        if self.open_vocab_scanner is None:
+            return {"status": "unavailable", "reason": "open_vocab_scanner not initialized", "camera_id": camera_id}
+        try:
+            # Try to get the latest frame path from the frame snapshot service
+            frame_path = None
+            try:
+                from app.services.frame_snapshot_service import get_frame_snapshot_service
+                frame = get_frame_snapshot_service().get_latest_frame(camera_id)
+                frame_path = frame.get("frame_path") or frame.get("annotated_frame_path")
+            except Exception:
+                pass
+            if frame_path:
+                return self.open_vocab_scanner.scan_image(
+                    image_path=frame_path,
+                    camera_id=camera_id,
+                    source="latest_frame",
+                    prompts=prompts,
+                )
+            return self.open_vocab_scanner.scan_latest_frame(camera_id, prompts=prompts)
+        except Exception as exc:
+            logger.warning("scan_open_vocab_latest error: %s", exc)
+            return {"status": "error", "camera_id": camera_id, "error": str(exc)}
+
+    def scan_open_vocab_incident(
+        self,
+        incident_id: str,
+        prompts: list[str] | None = None,
+    ) -> dict:
+        """Scan incident frame references using open-vocabulary prompts."""
+        if self.open_vocab_scanner is None:
+            return {"status": "unavailable", "reason": "open_vocab_scanner not initialized", "incident_id": incident_id}
+        try:
+            return self.open_vocab_scanner.scan_incident(incident_id, prompts=prompts)
+        except Exception as exc:
+            logger.warning("scan_open_vocab_incident error: %s", exc)
+            return {"status": "error", "incident_id": incident_id, "error": str(exc)}
+
+    def get_open_vocab_results(
+        self,
+        camera_id: str | None = None,
+        incident_id: str | None = None,
+        limit: int = 100,
+    ) -> dict:
+        """Return recent open-vocab scan results, optionally filtered."""
+        if self.open_vocab_scanner is None:
+            return {"items": [], "count": 0, "status": "unavailable"}
+        try:
+            store = self.open_vocab_scanner.get_result_store()
+            if camera_id:
+                items = store.list_by_camera(camera_id, limit=limit)
+            elif incident_id:
+                items = store.list_by_incident(incident_id, limit=limit)
+            else:
+                items = store.list_recent(limit=limit)
+            return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+        except Exception as exc:
+            logger.warning("get_open_vocab_results error: %s", exc)
+            return {"items": [], "count": 0, "status": "error", "error": str(exc)}
+
+    def get_open_vocab_status(self) -> dict:
+        """Return open-vocab scanner status and metrics."""
+        if self.open_vocab_scanner is None:
+            return {"status": "unavailable", "reason": "open_vocab_scanner not initialized"}
+        try:
+            return self.open_vocab_scanner.get_status()
+        except Exception as exc:
+            logger.warning("get_open_vocab_status error: %s", exc)
+            return {"status": "error", "error": str(exc)}
+
     def cleanup(self) -> None:
         with self._lock:
             self.trajectory_engine.cleanup()
@@ -388,6 +475,29 @@ class IntelligenceRuntime:
         for camera_id, points in list(self._heatmap_points.items()):
             kept = [point for point in points if now - float(point.get("timestamp", now)) <= self._heatmap_ttl]
             self._heatmap_points[camera_id] = deque(kept, maxlen=points.maxlen)
+
+
+def _build_open_vocab_scanner():
+    """Build and return an OpenVocabThreatScanner, or None if unavailable."""
+    if not _OPEN_VOCAB_AVAILABLE or _OpenVocabThreatScanner is None:
+        return None
+    try:
+        ov_config = load_runtime_config("open_vocab")
+    except FileNotFoundError:
+        ov_config = {}
+    if not ov_config.get("enabled", True):
+        return None
+    try:
+        bus = get_event_bus()
+    except Exception:
+        bus = None
+    try:
+        scanner = _OpenVocabThreatScanner(config=ov_config, event_bus=bus)
+        logger.info("OpenVocabThreatScanner initialized (model lazy-loaded on first use)")
+        return scanner
+    except Exception as exc:
+        logger.warning("OpenVocabThreatScanner init failed (non-fatal): %s", exc)
+        return None
 
 
 def _safe_runtime_config() -> dict:

@@ -59,6 +59,9 @@ def _normalize_record(record: dict[str, Any]) -> dict[str, Any]:
         "event_ids": list(record.get("event_ids") or []),
         "incident_ids": list(record.get("incident_ids") or []),
         "snapshot_path": record.get("snapshot_path"),
+        # Phase 23: open-vocabulary scan references
+        "open_vocab_scan_ids": list(record.get("open_vocab_scan_ids") or []),
+        "open_vocab_detections": list(record.get("open_vocab_detections") or []),
         "metadata": dict(record.get("metadata") or {}),
     }
 

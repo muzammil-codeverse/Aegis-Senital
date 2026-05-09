@@ -41,6 +41,8 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
   const frames = replay?.frames || []
   const alerts = replay?.alerts || []
   const handoffs = replay?.handoffs || []
+  // Phase 23: open-vocab results attached to replay
+  const ovResults = replay?.open_vocab_results || []
   const currentFrame = frames[frameIdx]
 
   return (
@@ -185,6 +187,38 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
                       </li>
                     )
                   })}
+                </ol>
+              </section>
+            )}
+
+            {/* Phase 23: open-vocab detections in replay */}
+            {ovResults.length > 0 && (
+              <section style={{ marginBottom: 16 }}>
+                <p style={{ margin: '0 0 6px', fontSize: '0.6rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                  Open-Vocab Detections ({ovResults.reduce((s, r) => s + (r.open_vocab_detections?.length || 0), 0)})
+                </p>
+                <ol style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 160, overflowY: 'auto' }}>
+                  {ovResults.flatMap((r, ri) =>
+                    (r.open_vocab_detections || []).map((det, di) => (
+                      <li key={`${ri}-${di}`} style={{
+                        background: '#0a0f1a', borderRadius: 4, padding: '4px 8px', marginBottom: 4,
+                        borderLeft: '3px solid #a78bfa', fontSize: '0.7rem',
+                      }}>
+                        <strong style={{ color: '#c4b5fd' }}>{det.label || '—'}</strong>
+                        {det.confidence != null && (
+                          <span style={{ color: '#6b7280', marginLeft: 6 }}>
+                            {(det.confidence * 100).toFixed(1)}%
+                          </span>
+                        )}
+                        {det.severity && (
+                          <span style={{ color: '#fbbf24', marginLeft: 6, fontWeight: 600 }}>{det.severity}</span>
+                        )}
+                        <span style={{ color: '#4b5563', marginLeft: 6, fontFamily: 'monospace', fontSize: '0.62rem' }}>
+                          frame #{r.frame_id ?? '—'}
+                        </span>
+                      </li>
+                    ))
+                  )}
                 </ol>
               </section>
             )}

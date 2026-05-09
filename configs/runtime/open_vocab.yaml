@@ -1,0 +1,61 @@
+enabled: true
+model:
+  provider: grounding_dino
+  model_id: grounding_dino_base
+  device_preference: cuda
+  required: false
+  lazy_load: true
+  local_model_path: null
+  local_processor_path: null
+thresholds:
+  default_box_threshold: 0.35
+  default_text_threshold: 0.25
+  high_risk_threshold: 0.55
+  max_detections_per_frame: 20
+scan_policy:
+  run_on_high_risk_frames: true
+  run_on_incident_frames: true
+  run_on_operator_query: true
+  run_on_every_frame: false
+  cooldown_seconds_per_camera: 5
+  max_concurrent_scans: 2
+  scan_timeout_seconds: 15
+prompt_library:
+  - prompt_id: unattended_bag
+    text: "unattended bag or backpack"
+    category: suspicious_object
+    severity: high
+    enabled: true
+    threshold: 0.38
+  - prompt_id: long_object
+    text: "person carrying a long object"
+    category: suspicious_behavior
+    severity: medium
+    enabled: true
+    threshold: 0.40
+  - prompt_id: masked_person
+    text: "masked person"
+    category: identity_obscuration
+    severity: medium
+    enabled: true
+    threshold: 0.40
+  - prompt_id: crowbar
+    text: "crowbar or metal tool"
+    category: forced_entry_tool
+    severity: high
+    enabled: true
+    threshold: 0.35
+  - prompt_id: suspicious_package
+    text: "suspicious package"
+    category: suspicious_object
+    severity: high
+    enabled: true
+    threshold: 0.35
+persistence:
+  storage_dir: storage/open_vocab
+  recent_retention_seconds: 3600
+  max_recent_results: 1000
+uploads:
+  allowed_extensions: [".jpg", ".jpeg", ".png"]
+  max_file_mb: 10
+  temp_dir: storage/open_vocab/uploads

@@ -1687,3 +1687,323 @@ def get_identity_watchlist_api(identity_id: str, request: Request):
         return _filter_watchlist_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+# ============================================================
+# OPEN-VOCABULARY THREAT SCANNER ENDPOINTS (Phase 23)
+# ============================================================
+
+class OpenVocabPromptCreateRequest(BaseModel):
+    text: str
+    category: str
+    severity: str = "medium"
+    threshold: Optional[float] = None
+    metadata: Optional[dict] = None
+
+
+class OpenVocabPromptUpdateRequest(BaseModel):
+    text: Optional[str] = None
+    category: Optional[str] = None
+    severity: Optional[str] = None
+    threshold: Optional[float] = None
+    enabled: Optional[bool] = None
+    metadata: Optional[dict] = None
+
+
+class OpenVocabScanRequest(BaseModel):
+    prompts: Optional[list] = None
+
+
+def _get_open_vocab_scanner():
+    """Return the open-vocab scanner from the intelligence runtime (or None)."""
+    try:
+        return get_intelligence_runtime().open_vocab_scanner
+    except Exception:
+        return None
+
+
+@router.get("/api/open-vocab/status")
+def open_vocab_status_api(
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """Return open-vocabulary scanner status and metrics."""
+    try:
+        runtime = get_intelligence_runtime()
+        status = runtime.get_open_vocab_status()
+        _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="open_vocab", detail="Status read")
+        return {"item": status, "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/open-vocab/prompts")
+def list_open_vocab_prompts_api(
+    request: Request,
+    category: Optional[str] = Query(default=None),
+    enabled: Optional[bool] = Query(default=None),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """List open-vocabulary prompts, optionally filtered by category or enabled."""
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"items": [], "count": 0, "status": "unavailable", "detail": "Open-vocab scanner not initialized"}
+        library = scanner.get_prompt_library()
+        items = library.list_prompts(category=category, enabled=enabled)
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/open-vocab/prompts")
+def create_open_vocab_prompt_api(
+    body: OpenVocabPromptCreateRequest,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Create a new open-vocabulary prompt."""
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"item": None, "status": "unavailable", "detail": "Open-vocab scanner not initialized"}
+        library = scanner.get_prompt_library()
+        prompt = library.add_prompt(
+            text=body.text,
+            category=body.category,
+            severity=body.severity,
+            threshold=body.threshold,
+            metadata=body.metadata or {},
+        )
+        _audit(request, AuditAction.OPEN_VOCAB_PROMPT_CREATED, resource_type="open_vocab_prompt",
+               resource_id=prompt["prompt_id"], metadata={"text": body.text, "category": body.category})
+        return {"item": prompt, "status": "ok"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.patch("/api/open-vocab/prompts/{prompt_id}")
+def update_open_vocab_prompt_api(
+    prompt_id: str,
+    body: OpenVocabPromptUpdateRequest,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Update an existing open-vocabulary prompt."""
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"item": None, "status": "unavailable", "detail": "Open-vocab scanner not initialized"}
+        library = scanner.get_prompt_library()
+        updates = {k: v for k, v in body.model_dump().items() if v is not None}
+        prompt = library.update_prompt(prompt_id, updates)
+        if prompt is None:
+            return {"item": None, "status": "not_found", "detail": f"Prompt '{prompt_id}' not found"}
+        _audit(request, AuditAction.OPEN_VOCAB_PROMPT_UPDATED, resource_type="open_vocab_prompt",
+               resource_id=prompt_id, metadata={"updated_fields": sorted(updates.keys())})
+        return {"item": prompt, "status": "ok"}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/open-vocab/prompts/{prompt_id}/disable")
+def disable_open_vocab_prompt_api(
+    prompt_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Disable an open-vocabulary prompt."""
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"item": None, "status": "unavailable", "detail": "Open-vocab scanner not initialized"}
+        library = scanner.get_prompt_library()
+        ok = library.disable_prompt(prompt_id)
+        if not ok:
+            return {"item": None, "status": "not_found", "detail": f"Prompt '{prompt_id}' not found"}
+        _audit(request, AuditAction.OPEN_VOCAB_PROMPT_UPDATED, resource_type="open_vocab_prompt",
+               resource_id=prompt_id, detail="Prompt disabled")
+        return {"item": library.get_prompt(prompt_id), "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/open-vocab/scan/latest-frame/{camera_id}")
+def open_vocab_scan_latest_frame_api(
+    camera_id: str,
+    request: Request,
+    body: Optional[OpenVocabScanRequest] = None,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Trigger an open-vocabulary scan on the latest frame from a camera."""
+    prompts = (body.prompts if body and body.prompts else None)
+    try:
+        runtime = get_intelligence_runtime()
+        result = runtime.scan_open_vocab_latest(camera_id, prompts=prompts)
+        _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="camera",
+               resource_id=camera_id, metadata={"source": "latest_frame"})
+        scan_status = result.get("status", "ok")
+        if scan_status in ("unavailable", "error"):
+            return {"item": result, "status": scan_status, "detail": result.get("error") or result.get("reason")}
+        return {"item": result, "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/open-vocab/scan/incident/{incident_id}")
+def open_vocab_scan_incident_api(
+    incident_id: str,
+    request: Request,
+    body: Optional[OpenVocabScanRequest] = None,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Trigger an open-vocabulary scan on incident frame references."""
+    prompts = (body.prompts if body and body.prompts else None)
+    try:
+        runtime = get_intelligence_runtime()
+        result = runtime.scan_open_vocab_incident(incident_id, prompts=prompts)
+        _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="incident",
+               resource_id=incident_id, metadata={"source": "incident"})
+        scan_status = result.get("status", "ok")
+        if scan_status in ("unavailable", "error"):
+            return {"item": result, "status": scan_status, "detail": result.get("error") or result.get("reason")}
+        return {"item": result, "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/open-vocab/scan/image")
+async def open_vocab_scan_image_api(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Scan an uploaded image using open-vocabulary prompts."""
+    import json as _json
+
+    # Validate extension
+    allowed_exts = {".jpg", ".jpeg", ".png"}
+    filename = (file.filename or "").lower()
+    ext = os.path.splitext(filename)[1]
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail=f"Unsupported file extension '{ext}'. Allowed: {sorted(allowed_exts)}")
+
+    # Validate size (max 10 MB)
+    max_bytes = 10 * 1024 * 1024
+    content = await file.read()
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail="File exceeds maximum size of 10 MB")
+
+    # Extract prompts from form (may be JSON array or missing)
+    form = await request.form()
+    prompts = None
+    raw_prompts = form.get("prompts")
+    if raw_prompts:
+        try:
+            prompts = _json.loads(raw_prompts)
+            if not isinstance(prompts, list):
+                prompts = None
+        except Exception:
+            prompts = None
+
+    # Save temp file safely
+    upload_dir = "storage/open_vocab/uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    import uuid as _uuid
+    safe_name = f"{_uuid.uuid4().hex}{ext}"
+    temp_path = os.path.join(upload_dir, safe_name)
+    try:
+        with open(temp_path, "wb") as fout:
+            fout.write(content)
+
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"item": None, "status": "unavailable", "detail": "Open-vocab scanner not initialized"}
+
+        result = scanner.scan_image(
+            image_path=temp_path,
+            prompts=prompts,
+            source="upload",
+        )
+        _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="open_vocab",
+               detail="Image scan via upload", metadata={"filename": file.filename})
+        # Do not expose temp path in response
+        result.pop("image_path", None)
+        result.pop("upload_path", None)
+        result.pop("temp_path", None)
+        return {"item": result, "status": result.get("status", "ok")}
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+@router.get("/api/open-vocab/results")
+def list_open_vocab_results_api(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=1000),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """List recent open-vocabulary scan results."""
+    try:
+        runtime = get_intelligence_runtime()
+        response = runtime.get_open_vocab_results(limit=limit)
+        return response
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/open-vocab/results/{scan_id}")
+def get_open_vocab_result_api(
+    scan_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """Get a specific open-vocabulary scan result by scan_id."""
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"item": None, "status": "unavailable", "detail": "Open-vocab scanner not initialized"}
+        result = scanner.get_result_store().get_result(scan_id)
+        if result is None:
+            return {"item": None, "status": "not_found", "detail": f"Scan '{scan_id}' not found"}
+        return {"item": result, "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/open-vocab/results/camera/{camera_id}")
+def get_open_vocab_results_by_camera_api(
+    camera_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=1000),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """List open-vocabulary scan results for a specific camera."""
+    try:
+        runtime = get_intelligence_runtime()
+        response = runtime.get_open_vocab_results(camera_id=camera_id, limit=limit)
+        return response
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/open-vocab/results/incident/{incident_id}")
+def get_open_vocab_results_by_incident_api(
+    incident_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=1000),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """List open-vocabulary scan results for a specific incident."""
+    try:
+        runtime = get_intelligence_runtime()
+        response = runtime.get_open_vocab_results(incident_id=incident_id, limit=limit)
+        return response
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}

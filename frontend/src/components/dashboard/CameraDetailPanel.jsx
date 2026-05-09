@@ -5,6 +5,7 @@ import { useStreamControls } from '../../hooks/useStreamControls'
 import SeverityBadge from '../common/SeverityBadge'
 import LoadingState from '../common/LoadingState'
 import { API_BASE_URL } from '../../config'
+import { scanLatestFrame as openVocabScanCamera } from '../../api/openVocabApi'
 
 const STREAM_STATE_COLOR = {
   running: '#52c41a', starting: '#1890ff', paused: '#fa8c16',
@@ -37,6 +38,8 @@ export default function CameraDetailPanel({ camera, onClose, relatedAlerts = [] 
   const [latestFrame, setLatestFrame] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [ovScanning, setOvScanning] = useState(false)
+  const [ovResult, setOvResult] = useState(null)
 
   const streamControls = useStreamControls({ onSuccess: () => load() })
 
@@ -170,7 +173,35 @@ export default function CameraDetailPanel({ camera, onClose, relatedAlerts = [] 
         <button className="ctrl-btn ctrl-btn-stop"    disabled={isBusy} onClick={() => streamControls.stop(camera.camera_id)} title="Stop">■ Stop</button>
         <button className="ctrl-btn ctrl-btn-pause"   disabled={isBusy} onClick={() => streamControls.pause(camera.camera_id)} title="Pause">⏸ Pause</button>
         <button className="ctrl-btn ctrl-btn-restart" disabled={isBusy} onClick={() => streamControls.restart(camera.camera_id)} title="Restart">↺</button>
+        {/* Phase 23: open-vocabulary scan button */}
+        <button
+          className="ctrl-btn"
+          disabled={ovScanning}
+          title="Scan with Open-Vocab"
+          onClick={async () => {
+            setOvScanning(true)
+            setOvResult(null)
+            try {
+              const res = await openVocabScanCamera(camera.camera_id)
+              setOvResult(res)
+            } catch (_e) {
+              setOvResult({ status: 'error' })
+            } finally {
+              setOvScanning(false)
+            }
+          }}
+          style={{ borderColor: '#6366f1', color: '#a5b4fc' }}
+        >
+          {ovScanning ? 'Scanning…' : 'OV Scan'}
+        </button>
         {streamControls.error && <div style={{ width: '100%', fontSize: '0.68rem', color: '#ff7875', marginTop: 3 }}>{streamControls.error}</div>}
+        {ovResult && (
+          <div style={{ width: '100%', fontSize: '0.68rem', marginTop: 3, color: ovResult.status === 'completed' ? '#34d399' : '#fbbf24' }}>
+            OV Scan: {ovResult.status || '—'}
+            {ovResult.item?.risk_score != null && ` · Risk ${(ovResult.item.risk_score * 100).toFixed(1)}%`}
+            {ovResult.item?.detections != null && ` · ${ovResult.item.detections.length} detections`}
+          </div>
+        )}
       </div>
     </aside>
   )

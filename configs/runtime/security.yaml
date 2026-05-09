@@ -61,6 +61,8 @@ rbac:
     - "metrics:read"
     - "model:read"
     - "audit:read"
+    - "open_vocab:read"
+    - "open_vocab:write"
   analyst:
     - "camera:read"
     - "alert:read"
@@ -71,6 +73,8 @@ rbac:
     - "forensics:read"
     - "map:read"
     - "model:read"
+    - "open_vocab:read"
+    - "open_vocab:write"
   operator:
     - "camera:read"
     - "camera:control"
@@ -79,8 +83,10 @@ rbac:
     - "incident:read"
     - "map:read"
     - "metrics:read"
+    - "open_vocab:read"
   viewer:
     - "camera:read"
     - "alert:read"
     - "incident:read"
     - "map:read"
+    - "open_vocab:read"

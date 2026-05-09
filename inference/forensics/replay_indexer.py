@@ -28,6 +28,9 @@ class ReplayIndexer:
             "identity_ids": list(timeline_record.get("identity_ids", [])),
             "event_ids": list(timeline_record.get("event_ids", [])),
             "incident_ids": list(timeline_record.get("incident_ids", [])),
+            # Phase 23: open-vocabulary scan references
+            "open_vocab_scan_ids": list(timeline_record.get("open_vocab_scan_ids", [])),
+            "open_vocab_detections": list(timeline_record.get("open_vocab_detections", [])),
             "timeline_path": timeline_record.get("metadata", {}).get("timeline_path"),
         }
         path = self._path_for(record["timestamp"])
@@ -41,6 +44,31 @@ class ReplayIndexer:
     def recent(self, limit: int = 100) -> list[dict]:
         with self._lock:
             return list(self._recent)[-max(0, limit):]
+
+    def get_open_vocab_results(self, incident_id: str | None = None, camera_id: str | None = None) -> list[dict]:
+        """Return open_vocab_scan_ids and open_vocab_detections from indexed records.
+
+        Phase 23: used by replay responses to surface open-vocab scan references.
+        """
+        with self._lock:
+            records = list(self._recent)
+        results = []
+        for record in records:
+            if incident_id and incident_id not in record.get("incident_ids", []):
+                continue
+            if camera_id and record.get("camera_id") != camera_id:
+                continue
+            scan_ids = record.get("open_vocab_scan_ids", [])
+            detections = record.get("open_vocab_detections", [])
+            if scan_ids or detections:
+                results.append({
+                    "timestamp": record.get("timestamp"),
+                    "camera_id": record.get("camera_id"),
+                    "frame_id": record.get("frame_id"),
+                    "open_vocab_scan_ids": scan_ids,
+                    "open_vocab_detections": detections,
+                })
+        return results
 
     def _path_for(self, timestamp: float) -> Path:
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)

@@ -99,6 +99,22 @@ export default function CameraTimelinePanel({ cameraId, onSelectFrame }) {
                       {(item.handoff_events || []).length} HO
                     </span>
                   )}
+                  {/* Phase 23: open-vocab scan references in timeline */}
+                  {(item.open_vocab_scan_ids || []).length > 0 && (
+                    <span
+                      style={{
+                        color: '#c4b5fd',
+                        background: '#c4b5fd18',
+                        border: '1px solid #c4b5fd44',
+                        borderRadius: 3,
+                        padding: '0 4px',
+                        fontSize: '0.62rem',
+                      }}
+                      title={`Open-Vocab scans: ${(item.open_vocab_scan_ids || []).join(', ')}`}
+                    >
+                      OV
+                    </span>
+                  )}
                 </span>
               </li>
             )

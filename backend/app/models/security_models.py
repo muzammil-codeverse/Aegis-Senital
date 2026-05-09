@@ -49,6 +49,10 @@ class AuditAction(Enum):
     WEBSOCKET_CONNECTED = "websocket_connected"
     WEBSOCKET_DENIED = "websocket_denied"
     WEBSOCKET_DISCONNECTED = "websocket_disconnected"
+    # Phase 23 — open-vocabulary threat scanner
+    OPEN_VOCAB_SCAN = "open_vocab_scan"
+    OPEN_VOCAB_PROMPT_CREATED = "open_vocab_prompt_created"
+    OPEN_VOCAB_PROMPT_UPDATED = "open_vocab_prompt_updated"
 
 
 SENSITIVE_AUDIT_KEYS = {

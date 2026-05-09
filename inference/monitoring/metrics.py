@@ -101,6 +101,15 @@ class SystemMetrics:
         self.object_authz_denied: int = 0
         self.mfa_challenges_created: int = 0
         self.mfa_challenges_failed: int = 0
+        # Phase 23 — open-vocabulary threat scanner metrics
+        self.open_vocab_scans_requested: int = 0
+        self.open_vocab_scans_completed: int = 0
+        self.open_vocab_scans_failed: int = 0
+        self.open_vocab_threats_found: int = 0
+        self.open_vocab_model_unavailable: int = 0
+        self.open_vocab_prompts_active: int = 0
+        self.open_vocab_scan_latency_ms_avg: float = 0.0
+        self.open_vocab_scan_queue_rejected: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -288,6 +297,15 @@ class SystemMetrics:
                 "object_authz_denied": self.object_authz_denied,
                 "mfa_challenges_created": self.mfa_challenges_created,
                 "mfa_challenges_failed": self.mfa_challenges_failed,
+                # Phase 23 — open-vocabulary threat scanner metrics
+                "open_vocab_scans_requested": self.open_vocab_scans_requested,
+                "open_vocab_scans_completed": self.open_vocab_scans_completed,
+                "open_vocab_scans_failed": self.open_vocab_scans_failed,
+                "open_vocab_threats_found": self.open_vocab_threats_found,
+                "open_vocab_model_unavailable": self.open_vocab_model_unavailable,
+                "open_vocab_prompts_active": self.open_vocab_prompts_active,
+                "open_vocab_scan_latency_ms_avg": self.open_vocab_scan_latency_ms_avg,
+                "open_vocab_scan_queue_rejected": self.open_vocab_scan_queue_rejected,
             }
 
 

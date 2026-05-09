@@ -79,6 +79,15 @@ class SystemMetrics:
         self.object_authz_denied = 0
         self.mfa_challenges_created = 0
         self.mfa_challenges_failed = 0
+        # Phase 23 — open-vocabulary threat scanner metrics
+        self.open_vocab_scans_requested = 0
+        self.open_vocab_scans_completed = 0
+        self.open_vocab_scans_failed = 0
+        self.open_vocab_threats_found = 0
+        self.open_vocab_model_unavailable = 0
+        self.open_vocab_prompts_active = 0
+        self.open_vocab_scan_latency_ms_avg = 0.0
+        self.open_vocab_scan_queue_rejected = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:
