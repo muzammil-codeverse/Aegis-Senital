@@ -2,15 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 import SeverityBadge from '../common/SeverityBadge'
 import { API_BASE_URL } from '../../config'
 
-// Display state labels and styles
 const DISPLAY_STATES = {
-  LIVE:        { label: 'LIVE',        color: '#52c41a', pulse: true },
-  SNAPSHOT:    { label: 'SNAPSHOT',    color: '#1890ff', pulse: false },
-  STALE:       { label: 'STALE',       color: '#fa8c16', pulse: false },
-  OFFLINE:     { label: 'OFFLINE',     color: '#ff7875', pulse: false },
-  ERROR:       { label: 'ERROR',       color: '#ff4d4f', pulse: false },
-  NO_FRAME:    { label: 'NO FRAME',    color: '#6b7280', pulse: false },
-  DISABLED:    { label: 'DISABLED',    color: '#595959', pulse: false },
+  LIVE:           { label: 'LIVE',        color: '#52c41a', pulse: true },
+  LIVE_ANNOTATED: { label: 'LIVE ANN',    color: '#52c41a', pulse: true },
+  SNAPSHOT:       { label: 'SNAPSHOT',    color: '#1890ff', pulse: false },
+  ANNOTATED:      { label: 'ANNOTATED',   color: '#1890ff', pulse: false },
+  REPLAY_FRAME:   { label: 'REPLAY',      color: '#9b59b6', pulse: false },
+  STALE:          { label: 'STALE',       color: '#fa8c16', pulse: false },
+  OFFLINE:        { label: 'OFFLINE',     color: '#ff7875', pulse: false },
+  ERROR:          { label: 'ERROR',       color: '#ff4d4f', pulse: false },
+  NO_FRAME:       { label: 'NO FRAME',    color: '#6b7280', pulse: false },
+  DISABLED:       { label: 'DISABLED',    color: '#595959', pulse: false },
+  PLACEHOLDER:    { label: 'PLACEHOLDER', color: '#374151', pulse: false },
 }
 
 function StatusBanner({ state }) {
@@ -40,11 +43,10 @@ function OverlayBox({ item, scaleX, scaleY }) {
   if (!Array.isArray(bbox) || bbox.length < 4) return null
   const [x1, y1, x2, y2] = bbox
   const left = (x1 * scaleX).toFixed(1)
-  const top = (y1 * scaleY).toFixed(1)
-  const width = ((x2 - x1) * scaleX).toFixed(1)
+  const top  = (y1 * scaleY).toFixed(1)
+  const width  = ((x2 - x1) * scaleX).toFixed(1)
   const height = ((y2 - y1) * scaleY).toFixed(1)
   const color = item.color || (item.severity === 'critical' ? '#ff4d4f' : item.severity === 'high' ? '#fa8c16' : '#52c41a')
-
   return (
     <div style={{
       position: 'absolute',
@@ -58,7 +60,7 @@ function OverlayBox({ item, scaleX, scaleY }) {
         <span style={{
           position: 'absolute', top: -16, left: 0,
           fontSize: '0.58rem', background: 'rgba(0,0,0,0.75)',
-          color: color, padding: '0 3px', whiteSpace: 'nowrap', lineHeight: '16px',
+          color, padding: '0 3px', whiteSpace: 'nowrap', lineHeight: '16px',
         }}>
           {item.label}
         </span>
@@ -67,23 +69,40 @@ function OverlayBox({ item, scaleX, scaleY }) {
   )
 }
 
-function computeDisplayState(camera, latestFrame, streamSession) {
+function computeDisplayState(camera, latestFrame, streamSession, preferAnnotated, replayFrame) {
+  if (replayFrame) return 'REPLAY_FRAME'
   if (!camera) return 'NO_FRAME'
   if (camera.status === 'disabled') return 'DISABLED'
   if (camera.status === 'error') return 'ERROR'
   if (camera.status === 'offline') return 'OFFLINE'
-  if (streamSession?.state === 'running' && latestFrame?.status === 'ok' && !latestFrame.stale) return 'LIVE'
-  if (latestFrame?.status === 'ok' && !latestFrame.stale) return 'SNAPSHOT'
+  const isRunning = streamSession?.state === 'running'
+  const hasGoodFrame = latestFrame?.status === 'ok' && !latestFrame.stale
+  const hasAnnotated = Boolean(latestFrame?.annotated_image_url)
+  if (isRunning && hasGoodFrame) {
+    return preferAnnotated && hasAnnotated ? 'LIVE_ANNOTATED' : 'LIVE'
+  }
+  if (hasGoodFrame) {
+    return preferAnnotated && hasAnnotated ? 'ANNOTATED' : 'SNAPSHOT'
+  }
   if (latestFrame?.status === 'ok' && latestFrame.stale) return 'STALE'
   if (camera.status === 'degraded') return 'STALE'
   return 'NO_FRAME'
 }
 
-export default function LiveVideoSurface({ camera, latestFrame, streamSession, selected, onSelect }) {
+export default function LiveVideoSurface({
+  camera,
+  latestFrame,
+  streamSession,
+  selected,
+  onSelect,
+  replayFrame = null,
+}) {
   const containerRef = useRef(null)
   const [containerSize, setContainerSize] = useState({ w: 640, h: 360 })
   const [imgError, setImgError] = useState(false)
   const [imgKey, setImgKey] = useState(0)
+  const [preferAnnotated, setPreferAnnotated] = useState(true)
+  const [showOverlays, setShowOverlays] = useState(true)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -97,30 +116,42 @@ export default function LiveVideoSurface({ camera, latestFrame, streamSession, s
     return () => obs.disconnect()
   }, [])
 
-  // Refresh image when latestFrame updates
   useEffect(() => {
     setImgError(false)
     setImgKey(k => k + 1)
-  }, [latestFrame?.frame_id, latestFrame?.timestamp])
+  }, [latestFrame?.frame_id, latestFrame?.timestamp, replayFrame])
 
-  if (!camera) return null
+  if (!camera && !replayFrame) return null
 
-  const displayState = computeDisplayState(camera, latestFrame, streamSession)
+  const displayState = computeDisplayState(camera, latestFrame, streamSession, preferAnnotated, replayFrame)
   const frameW = latestFrame?.width || 640
   const frameH = latestFrame?.height || 640
   const scaleX = containerSize.w / frameW
   const scaleY = containerSize.h / frameH
 
-  const isLive = displayState === 'LIVE'
-  const hasImage = latestFrame?.status === 'ok' && latestFrame?.image_url && !imgError
+  const isLive = displayState === 'LIVE' || displayState === 'LIVE_ANNOTATED'
+  const useAnnotated = preferAnnotated && latestFrame?.annotated_image_url
+
+  // Build URLs
   const mjpegUrl = latestFrame?.mjpeg_url
     ? `${API_BASE_URL}${latestFrame.mjpeg_url}`
-    : `${API_BASE_URL}/api/cameras/${encodeURIComponent(camera.camera_id)}/mjpeg`
-  const imageUrl = latestFrame?.image_url
-    ? `${API_BASE_URL}${latestFrame.image_url}`
-    : `${API_BASE_URL}/api/cameras/${encodeURIComponent(camera.camera_id)}/latest-frame/image`
+    : camera ? `${API_BASE_URL}/api/cameras/${encodeURIComponent(camera.camera_id)}/mjpeg` : null
 
-  const overlayItems = latestFrame?.overlay_items || latestFrame?.overlays || []
+  let imageUrl = null
+  if (replayFrame) {
+    imageUrl = replayFrame.snapshot_path
+      ? `${API_BASE_URL}/api/cameras/${encodeURIComponent(replayFrame.camera_id)}/latest-frame/image`
+      : null
+  } else if (useAnnotated && latestFrame?.annotated_image_url) {
+    imageUrl = `${API_BASE_URL}${latestFrame.annotated_image_url}`
+  } else if (latestFrame?.image_url) {
+    imageUrl = `${API_BASE_URL}${latestFrame.image_url}`
+  } else if (camera) {
+    imageUrl = `${API_BASE_URL}/api/cameras/${encodeURIComponent(camera.camera_id)}/latest-frame/image`
+  }
+
+  const hasImage = (latestFrame?.status === 'ok' || replayFrame) && imageUrl && !imgError
+  const overlayItems = showOverlays ? (latestFrame?.overlay_items || latestFrame?.overlays || []) : []
 
   return (
     <div
@@ -144,28 +175,59 @@ export default function LiveVideoSurface({ camera, latestFrame, streamSession, s
         padding: '6px 10px', background: 'rgba(0,0,0,0.5)', zIndex: 5, flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 700, fontSize: '0.8rem', color: '#e6e6e6' }}>{camera.name}</span>
+          <span style={{ fontWeight: 700, fontSize: '0.8rem', color: '#e6e6e6' }}>
+            {camera?.name || replayFrame?.camera_id || 'Camera'}
+          </span>
           <StatusBanner state={displayState} />
         </div>
-        <SeverityBadge severity={camera.riskSeverity || 'info'} compact />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* Toggle overlays */}
+          <button
+            onClick={e => { e.stopPropagation(); setShowOverlays(v => !v) }}
+            title={showOverlays ? 'Hide overlays' : 'Show overlays'}
+            style={{
+              background: showOverlays ? '#1890ff20' : 'none',
+              border: `1px solid ${showOverlays ? '#1890ff' : '#374151'}`,
+              color: showOverlays ? '#1890ff' : '#4b5563',
+              borderRadius: 3, padding: '1px 5px', fontSize: '0.6rem', cursor: 'pointer',
+            }}
+          >
+            OVL
+          </button>
+          {/* Toggle annotated */}
+          {latestFrame?.annotated_image_url && (
+            <button
+              onClick={e => { e.stopPropagation(); setPreferAnnotated(v => !v) }}
+              title={preferAnnotated ? 'Switch to raw frame' : 'Switch to annotated frame'}
+              style={{
+                background: preferAnnotated ? '#52c41a20' : 'none',
+                border: `1px solid ${preferAnnotated ? '#52c41a' : '#374151'}`,
+                color: preferAnnotated ? '#52c41a' : '#4b5563',
+                borderRadius: 3, padding: '1px 5px', fontSize: '0.6rem', cursor: 'pointer',
+              }}
+            >
+              ANN
+            </button>
+          )}
+          {camera && <SeverityBadge severity={camera.riskSeverity || 'info'} compact />}
+        </div>
       </div>
 
       {/* Video / image region */}
       <div ref={containerRef} style={{ position: 'relative', flex: 1, overflow: 'hidden', minHeight: 160 }}>
-        {/* MJPEG or snapshot image */}
         {isLive && mjpegUrl ? (
           <img
-            key={`mjpeg-${camera.camera_id}`}
+            key={`mjpeg-${camera?.camera_id}`}
             src={mjpegUrl}
-            alt={`${camera.name} live`}
+            alt={`${camera?.name} live`}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-            onError={() => {/* MJPEG unavailable — stay in LIVE display state */}}
+            onError={() => {/* MJPEG unavailable — stay in LIVE state */}}
           />
         ) : hasImage ? (
           <img
-            key={`snap-${camera.camera_id}-${imgKey}`}
+            key={`snap-${camera?.camera_id}-${imgKey}`}
             src={imageUrl}
-            alt={`${camera.name} snapshot`}
+            alt={`${camera?.name} snapshot`}
             style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
             onError={() => setImgError(true)}
           />
@@ -181,8 +243,8 @@ export default function LiveVideoSurface({ camera, latestFrame, streamSession, s
           </div>
         )}
 
-        {/* Overlay layer — detection/track boxes */}
-        {overlayItems.length > 0 && (
+        {/* JS overlay layer — detection/track boxes (raw frame only) */}
+        {!useAnnotated && overlayItems.length > 0 && (
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 4 }}>
             {overlayItems.map((item, i) => (
               <OverlayBox key={i} item={item} scaleX={scaleX} scaleY={scaleY} />
@@ -209,6 +271,15 @@ export default function LiveVideoSurface({ camera, latestFrame, streamSession, s
             {latestFrame?.age_seconds != null ? `${latestFrame.age_seconds}s ago` : 'stale'}
           </div>
         )}
+        {displayState === 'REPLAY_FRAME' && replayFrame && (
+          <div style={{
+            position: 'absolute', bottom: 6, left: 6, zIndex: 5,
+            fontSize: '0.6rem', color: '#9b59b6', background: 'rgba(0,0,0,0.7)',
+            padding: '1px 5px', borderRadius: 3,
+          }}>
+            frame #{replayFrame.frame_id ?? '—'}
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -217,8 +288,8 @@ export default function LiveVideoSurface({ camera, latestFrame, streamSession, s
         padding: '4px 10px', background: 'rgba(0,0,0,0.4)', fontSize: '0.62rem', color: '#4b5563',
         flexShrink: 0, zIndex: 5,
       }}>
-        <span>{camera.zone || 'no zone'}</span>
-        <span>{camera.source_type}</span>
+        <span>{camera?.zone || 'no zone'}</span>
+        <span>{camera?.source_type}</span>
         {latestFrame?.detections?.length > 0 && (
           <span style={{ color: '#fa8c16' }}>{latestFrame.detections.length} det</span>
         )}

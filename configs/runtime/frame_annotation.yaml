@@ -1,0 +1,22 @@
+enabled: true
+output_dir: backend/output/annotated
+
+labels:
+  font_scale: 0.45
+  thickness: 1
+  padding: 3
+
+colors:
+  critical: [255, 77, 79]      # red
+  high:     [250, 140, 22]     # orange
+  medium:   [250, 219, 20]     # yellow
+  low:      [82, 196, 26]      # green
+  info:     [24, 144, 255]     # blue
+  default:  [108, 117, 125]    # grey
+
+bbox:
+  thickness: 2
+
+confidence_threshold: 0.0
+show_confidence: true
+show_track_id: true

@@ -1,11 +1,15 @@
+import { useState } from 'react'
 import AlertFeed from './AlertFeed'
 import CameraGrid from './CameraGrid'
 import CameraDetailPanel from './CameraDetailPanel'
+import CameraTimelinePanel from './CameraTimelinePanel'
+import HeatmapPanel from './HeatmapPanel'
 import LiveVideoSurface from './LiveVideoSurface'
 import IncidentPanel from './IncidentPanel'
 import MetricsPanel from './MetricsPanel'
 import SystemHealthPanel from './SystemHealthPanel'
 import TimelinePanel from './TimelinePanel'
+import IncidentReplayDrawer from '../incidents/IncidentReplayDrawer'
 import EmptyState from '../common/EmptyState'
 import ErrorState from '../common/ErrorState'
 import LoadingState from '../common/LoadingState'
@@ -40,102 +44,132 @@ export default function CommandOverview({
   anomaliesError,
   onRefreshAnomalies,
 }) {
+  const [replayIncident, setReplayIncident] = useState(null)
+  const [replayOpen, setReplayOpen] = useState(false)
+  const [timelineFrame, setTimelineFrame] = useState(null)
+
   const selectedFrame = selectedCamera ? framesByCameraId[selectedCamera.camera_id] : null
   const selectedStreamSession = selectedCamera ? streamStatesByCameraId[selectedCamera.camera_id] : null
 
-  return (
-    <div className="command-grid command-grid--camera-console">
-      {/* LEFT: Camera Grid */}
-      <div className="grid-left">
-        <CameraGrid
-          cameras={cameras}
-          framesByCameraId={framesByCameraId}
-          streamStatesByCameraId={streamStatesByCameraId}
-          alertCountByCameraId={alertCountByCameraId}
-          selectedCameraId={selectedCamera?.camera_id}
-          onCameraSelect={onCameraSelect}
-          loading={camerasLoading}
-          error={camerasError}
-          onRefresh={onCameraRefresh}
-        />
-      </div>
+  function openReplay(incident) {
+    setReplayIncident(incident)
+    setReplayOpen(true)
+  }
 
-      {/* CENTER: Live Video + Incidents + Timeline */}
-      <div className="grid-center">
-        {/* Live video surface for selected camera */}
-        <div style={{ display: 'flex', gap: 8, flex: '0 0 auto' }}>
-          <LiveVideoSurface
-            camera={selectedCamera}
-            latestFrame={selectedFrame}
-            streamSession={selectedStreamSession}
-            selected
-            onSelect={onCameraSelect}
+  return (
+    <>
+      <div className="command-grid command-grid--camera-console">
+        {/* LEFT: Camera Grid */}
+        <div className="grid-left">
+          <CameraGrid
+            cameras={cameras}
+            framesByCameraId={framesByCameraId}
+            streamStatesByCameraId={streamStatesByCameraId}
+            alertCountByCameraId={alertCountByCameraId}
+            selectedCameraId={selectedCamera?.camera_id}
+            onCameraSelect={onCameraSelect}
+            loading={camerasLoading}
+            error={camerasError}
+            onRefresh={onCameraRefresh}
           />
-          {selectedCamera && (
-            <CameraDetailPanel
-              camera={selectedCamera}
-              onClose={null}
-              relatedAlerts={selectedCameraAlerts}
-            />
-          )}
         </div>
 
-        <IncidentPanel
-          incidents={incidents}
-          selectedIncident={incidentState.selectedIncident}
-          selectedIncidentId={incidentState.selectedIncident?.incident_id || incidentState.selectedIncident?.id}
-          loading={incidentState.loading}
-          detailLoading={incidentState.detailLoading}
-          error={incidentState.error}
-          detailError={incidentState.detailError}
-          stale={incidentState.stale}
-          onRetry={incidentState.refresh}
-          onSelect={incidentState.selectIncident}
-        />
-        <TimelinePanel defaultTrackId={firstTrackId(alerts, incidents)} />
+        {/* CENTER: Live Video + Incidents + Timeline */}
+        <div className="grid-center">
+          {/* Live video surface for selected camera */}
+          <div style={{ display: 'flex', gap: 8, flex: '0 0 auto' }}>
+            <LiveVideoSurface
+              camera={selectedCamera}
+              latestFrame={selectedFrame}
+              streamSession={selectedStreamSession}
+              replayFrame={timelineFrame}
+              selected
+              onSelect={onCameraSelect}
+            />
+            {selectedCamera && (
+              <CameraDetailPanel
+                camera={selectedCamera}
+                onClose={null}
+                relatedAlerts={selectedCameraAlerts}
+              />
+            )}
+          </div>
+
+          {/* Camera forensic timeline */}
+          {selectedCamera && (
+            <CameraTimelinePanel
+              cameraId={selectedCamera.camera_id}
+              onSelectFrame={frame => setTimelineFrame(frame)}
+            />
+          )}
+
+          <IncidentPanel
+            incidents={incidents}
+            selectedIncident={incidentState.selectedIncident}
+            selectedIncidentId={incidentState.selectedIncident?.incident_id || incidentState.selectedIncident?.id}
+            loading={incidentState.loading}
+            detailLoading={incidentState.detailLoading}
+            error={incidentState.error}
+            detailError={incidentState.detailError}
+            stale={incidentState.stale}
+            onRetry={incidentState.refresh}
+            onSelect={incidentState.selectIncident}
+            onReplay={openReplay}
+          />
+          <TimelinePanel defaultTrackId={firstTrackId(alerts, incidents)} />
+        </div>
+
+        {/* RIGHT: Alerts + Health + Heatmap + Anomalies */}
+        <div className="grid-right">
+          <AlertFeed
+            alerts={alerts}
+            loading={alertState.loading}
+            error={alertState.error}
+            stale={alertState.stale}
+            selectedAlertId={alertState.selectedAlert?.alert_id}
+            actionError={alertState.actionError}
+            onRetry={alertState.refresh}
+            onSelect={alertState.selectAlert}
+            onAcknowledge={alertState.acknowledge}
+            onResolve={alertState.resolve}
+            onEscalate={alertState.escalate}
+            busy={alertState.actionLoading}
+          />
+          <SystemHealthPanel
+            health={health}
+            metrics={metricsState.metrics}
+            error={metricsState.error}
+            websocketStatus={websocketStatus}
+          />
+          {selectedCamera && (
+            <HeatmapPanel defaultCameraId={selectedCamera.camera_id} />
+          )}
+          <RecentAnomalies
+            anomalies={anomalies}
+            loading={anomaliesLoading}
+            error={anomaliesError}
+            onRetry={onRefreshAnomalies}
+          />
+        </div>
+
+        {/* BOTTOM: Metrics */}
+        <div className="grid-bottom">
+          <MetricsPanel
+            metrics={metricsState.metrics}
+            loading={metricsState.loading}
+            error={metricsState.error}
+            stale={metricsState.stale}
+            onRetry={metricsState.refresh}
+          />
+        </div>
       </div>
 
-      {/* RIGHT: Alerts + Health + Anomalies */}
-      <div className="grid-right">
-        <AlertFeed
-          alerts={alerts}
-          loading={alertState.loading}
-          error={alertState.error}
-          stale={alertState.stale}
-          selectedAlertId={alertState.selectedAlert?.alert_id}
-          actionError={alertState.actionError}
-          onRetry={alertState.refresh}
-          onSelect={alertState.selectAlert}
-          onAcknowledge={alertState.acknowledge}
-          onResolve={alertState.resolve}
-          onEscalate={alertState.escalate}
-          busy={alertState.actionLoading}
-        />
-        <SystemHealthPanel
-          health={health}
-          metrics={metricsState.metrics}
-          error={metricsState.error}
-          websocketStatus={websocketStatus}
-        />
-        <RecentAnomalies
-          anomalies={anomalies}
-          loading={anomaliesLoading}
-          error={anomaliesError}
-          onRetry={onRefreshAnomalies}
-        />
-      </div>
-
-      {/* BOTTOM: Metrics */}
-      <div className="grid-bottom">
-        <MetricsPanel
-          metrics={metricsState.metrics}
-          loading={metricsState.loading}
-          error={metricsState.error}
-          stale={metricsState.stale}
-          onRetry={metricsState.refresh}
-        />
-      </div>
-    </div>
+      <IncidentReplayDrawer
+        open={replayOpen}
+        incident={replayIncident}
+        onClose={() => setReplayOpen(false)}
+      />
+    </>
   )
 }
 

@@ -75,6 +75,12 @@ def _safe_image_url(camera_id: str, frame_path: str | None) -> str | None:
     return f"/api/cameras/{camera_id}/latest-frame/image"
 
 
+def _safe_annotated_image_url(camera_id: str, annotated_path: str | None) -> str | None:
+    if not annotated_path:
+        return None
+    return f"/api/cameras/{camera_id}/latest-frame/annotated-image"
+
+
 def _safe_mjpeg_url(camera_id: str) -> str:
     return f"/api/cameras/{camera_id}/mjpeg"
 
@@ -110,9 +116,37 @@ class FrameSnapshotService:
         # Build overlay items from tracks+detections
         overlay_items = overlays or _build_overlay_items(detections, tracks)
 
+        # Annotate frame with bounding boxes
+        annotated_path: str | None = None
+        if frame_path:
+            try:
+                from app.services.frame_annotation_service import get_frame_annotation_service
+                ann_result = get_frame_annotation_service().annotate_for_camera(
+                    camera_id=camera_id,
+                    input_frame_path=frame_path,
+                    overlay_items=overlay_items,
+                    frame_id=frame_id,
+                    frame_size=(width, height) if width and height else None,
+                )
+                if ann_result and ann_result.get("annotated_path"):
+                    annotated_path = ann_result["annotated_path"]
+                    try:
+                        from inference.metrics import metrics as core_metrics
+                        core_metrics.increment("annotated_frames_generated")
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.debug("Frame annotation failed for %s: %s", camera_id, exc)
+                try:
+                    from inference.metrics import metrics as core_metrics
+                    core_metrics.increment("annotation_failures")
+                except Exception:
+                    pass
+
         record = {
             "camera_id": camera_id,
             "frame_path": frame_path,
+            "annotated_frame_path": annotated_path,
             "frame_id": frame_id,
             "timestamp": ts,
             "detections": detections or [],
@@ -125,9 +159,26 @@ class FrameSnapshotService:
             "width": width,
             "height": height,
             "image_url": _safe_image_url(camera_id, frame_path),
+            "annotated_image_url": _safe_annotated_image_url(camera_id, annotated_path),
             "mjpeg_url": _safe_mjpeg_url(camera_id),
             "updated_at": ts,
         }
+
+        # Broadcast to WebSocket frame clients
+        try:
+            from app.services.websocket_frame_service import get_websocket_frame_service
+            get_websocket_frame_service().broadcast_frame_update(
+                camera_id=camera_id,
+                frame_id=frame_id,
+                timestamp=ts,
+                image_url=record["image_url"],
+                annotated_image_url=record["annotated_image_url"],
+                mjpeg_url=record["mjpeg_url"],
+                overlay_count=len(overlay_items),
+                stale=False,
+            )
+        except Exception:
+            pass
 
         with self._lock:
             self._evict_expired(ts)
@@ -162,6 +213,7 @@ class FrameSnapshotService:
             return {
                 "camera_id": camera_id,
                 "frame_path": None,
+                "annotated_frame_path": None,
                 "frame_id": None,
                 "timestamp": None,
                 "detections": [],
@@ -174,6 +226,7 @@ class FrameSnapshotService:
                 "width": None,
                 "height": None,
                 "image_url": None,
+                "annotated_image_url": None,
                 "mjpeg_url": _safe_mjpeg_url(camera_id),
                 "updated_at": None,
                 "stale": True,

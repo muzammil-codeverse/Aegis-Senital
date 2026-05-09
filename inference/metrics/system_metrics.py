@@ -33,6 +33,14 @@ class SystemMetrics:
         self.mjpeg_frames_served = 0
         self.mjpeg_client_disconnects = 0
         self.stale_camera_frames = 0
+        # Phase 17: forensic console and annotated replay metrics
+        self.annotated_frames_generated = 0
+        self.annotation_failures = 0
+        self.websocket_frame_clients = 0
+        self.websocket_frame_messages = 0
+        self.websocket_frame_dropped_messages = 0
+        self.camera_timeline_queries = 0
+        self.incident_replay_queries = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

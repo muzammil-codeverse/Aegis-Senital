@@ -85,6 +85,21 @@ export async function getCameraHeatmap(cameraId) {
   }))
 }
 
+export async function getCameraTimeline(cameraId, { startTime, endTime, limit } = {}) {
+  const params = {}
+  if (startTime != null) params.start_time = startTime
+  if (endTime != null) params.end_time = endTime
+  if (limit != null) params.limit = limit
+  const payload = await request({ url: `/api/cameras/${encodeURIComponent(cameraId)}/timeline`, method: 'GET', params })
+  const items = Array.isArray(payload?.items) ? payload.items : []
+  return { items, count: items.length, camera_id: cameraId }
+}
+
+export async function getIncidentReplay(incidentId) {
+  const payload = await request({ url: `/api/incidents/${encodeURIComponent(incidentId)}/replay`, method: 'GET' })
+  return payload || {}
+}
+
 export async function getLiveAnomalies() {
   const payload = await request({ url: '/api/anomalies/live', method: 'GET' })
   const items = Array.isArray(payload?.items) ? payload.items : []

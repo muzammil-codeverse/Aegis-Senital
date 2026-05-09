@@ -1,0 +1,21 @@
+websocket_frames:
+  enabled: true
+  max_clients: 32
+  heartbeat_interval_seconds: 30
+  queue_size_per_client: 10
+  broadcast_min_interval_seconds: 0.5
+
+camera_timeline:
+  max_results: 500
+  default_limit: 100
+  max_time_range_seconds: 86400   # 24 h
+
+incident_replay:
+  max_frames: 500
+  include_alerts: true
+  include_events: true
+  include_timeline: true
+  max_age_hours: 168              # 7 days
+
+annotated_frame:
+  prefer_annotated: true          # MJPEG and /image endpoints prefer annotated when available

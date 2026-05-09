@@ -48,6 +48,14 @@ class SystemMetrics:
         self.degraded_cameras: int = 0
         self.stream_start_failures: int = 0
         self.latest_frame_updates: int = 0
+        # Phase 17 — forensic console and annotated replay metrics
+        self.annotated_frames_generated: int = 0
+        self.annotation_failures: int = 0
+        self.websocket_frame_clients: int = 0
+        self.websocket_frame_messages: int = 0
+        self.websocket_frame_dropped_messages: int = 0
+        self.camera_timeline_queries: int = 0
+        self.incident_replay_queries: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 

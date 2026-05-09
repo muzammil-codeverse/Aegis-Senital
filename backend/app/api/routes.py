@@ -1,6 +1,6 @@
 import os
 import tempfile
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, WebSocket
 from pydantic import BaseModel
 from app.services.video_service import extract_frames
 from app.core.config import load_scenario_config
@@ -425,9 +425,48 @@ def get_camera_latest_frame_image(camera_id: str):
     return FileResponse(str(resolved), media_type=media_type)
 
 
+@router.get("/api/cameras/{camera_id}/latest-frame/annotated-image")
+def get_camera_latest_frame_annotated_image(camera_id: str):
+    """Serve the latest annotated (bounding-box rendered) frame image."""
+    from fastapi.responses import FileResponse, JSONResponse
+    from app.services.frame_snapshot_service import get_frame_snapshot_service
+    from app.core.security import safe_frame_path, is_safe_extension
+
+    frame = get_frame_snapshot_service().get_latest_frame(camera_id)
+    if frame.get("status") == "no_frame":
+        return JSONResponse(
+            status_code=404,
+            content={"status": "not_found", "detail": "No latest frame available"},
+        )
+
+    # Prefer annotated frame; fall back to raw frame
+    ann_path = frame.get("annotated_frame_path")
+    raw_path = frame.get("frame_path")
+    chosen_path = ann_path or raw_path
+    if not chosen_path:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "not_found", "detail": "No frame file available"},
+        )
+
+    resolved = safe_frame_path(chosen_path)
+    if resolved is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "not_found", "detail": "Frame file unavailable"},
+        )
+    if not is_safe_extension(resolved):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "detail": "Unsupported frame file type"},
+        )
+    media_type = "image/png" if resolved.suffix.lower() == ".png" else "image/jpeg"
+    return FileResponse(str(resolved), media_type=media_type)
+
+
 @router.get("/api/cameras/{camera_id}/mjpeg")
 async def camera_mjpeg_stream(camera_id: str):
-    """Lightweight MJPEG stream using latest frame snapshots."""
+    """Lightweight MJPEG stream using latest frame snapshots (annotated preferred)."""
     import asyncio
     from fastapi.responses import StreamingResponse, JSONResponse
     from app.services.frame_snapshot_service import get_frame_snapshot_service
@@ -469,7 +508,8 @@ async def camera_mjpeg_stream(camera_id: str):
         try:
             while True:
                 frame_meta = snapshot_svc.get_latest_frame(camera_id)
-                frame_path = frame_meta.get("frame_path")
+                # 17D: prefer annotated frame path when available
+                frame_path = frame_meta.get("annotated_frame_path") or frame_meta.get("frame_path")
                 age = frame_meta.get("age_seconds")
 
                 img_bytes: bytes | None = None
@@ -509,6 +549,116 @@ async def camera_mjpeg_stream(camera_id: str):
         media_type="multipart/x-mixed-replace; boundary=aegisframe",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/api/cameras/{camera_id}/timeline")
+def get_camera_timeline_api(
+    camera_id: str,
+    start_time: float | None = Query(default=None),
+    end_time: float | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Return recent timeline entries for a camera, optionally bounded by time range."""
+    import time as _time
+    try:
+        from inference.metrics import metrics as core_metrics
+        core_metrics.increment("camera_timeline_queries")
+    except Exception:
+        pass
+
+    try:
+        from inference.forensics.timeline_store import TimelineStore
+        store = TimelineStore()
+        rows = store.recent(limit=500)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Timeline store unavailable: {exc}")
+
+    filtered = [r for r in rows if r.get("camera_id") == camera_id]
+    if start_time is not None:
+        filtered = [r for r in filtered if (r.get("timestamp") or 0) >= start_time]
+    if end_time is not None:
+        filtered = [r for r in filtered if (r.get("timestamp") or 0) <= end_time]
+    filtered.sort(key=lambda r: r.get("timestamp", 0))
+    items = filtered[-limit:]
+    return {"items": items, "count": len(items), "camera_id": camera_id, "status": "ok"}
+
+
+@router.get("/api/incidents/{incident_id}/replay")
+def get_incident_replay_api(incident_id: str):
+    """Return a replay manifest for an incident: frames, events, alerts, and timeline."""
+    try:
+        from inference.metrics import metrics as core_metrics
+        core_metrics.increment("incident_replay_queries")
+    except Exception:
+        pass
+
+    # Load config
+    try:
+        from inference.config_runtime import load_runtime_config
+        rcfg = load_runtime_config("forensic_console").get("incident_replay", {})
+        max_frames = int(rcfg.get("max_frames", 500))
+        include_alerts = bool(rcfg.get("include_alerts", True))
+        include_events = bool(rcfg.get("include_events", True))
+        include_timeline = bool(rcfg.get("include_timeline", True))
+    except Exception:
+        max_frames, include_alerts, include_events, include_timeline = 500, True, True, True
+
+    runtime = get_intelligence_runtime()
+
+    # Resolve incident
+    incident = None
+    try:
+        incident = runtime.incident_engine.get_incident(incident_id)
+    except Exception:
+        pass
+    if incident is None:
+        raise HTTPException(status_code=404, detail=f"Incident '{incident_id}' not found")
+
+    inc_dict = incident if isinstance(incident, dict) else (incident.to_dict() if hasattr(incident, "to_dict") else vars(incident))
+
+    # Gather timeline entries containing this incident's track ids
+    frames: list[dict] = []
+    if include_timeline:
+        try:
+            from inference.forensics.timeline_store import TimelineStore
+            store = TimelineStore()
+            all_rows = store.recent(limit=max_frames * 2)
+            frames = [
+                r for r in all_rows
+                if incident_id in (r.get("incident_ids") or [])
+            ][:max_frames]
+        except Exception:
+            pass
+
+    # Gather related alerts
+    alert_items: list[dict] = []
+    if include_alerts:
+        try:
+            resp = runtime.get_alerts(limit=200)
+            alert_items = [
+                a for a in (resp.get("items") or [])
+                if incident_id in (a.get("incident_ids") or [])
+                or a.get("incident_id") == incident_id
+            ]
+        except Exception:
+            pass
+
+    return {
+        "incident_id": incident_id,
+        "incident": inc_dict,
+        "frames": frames,
+        "alerts": alert_items,
+        "frame_count": len(frames),
+        "alert_count": len(alert_items),
+        "status": "ok",
+    }
+
+
+@router.websocket("/ws/frames")
+async def websocket_frames_endpoint(websocket: WebSocket):
+    """Real-time frame-update WebSocket stream for all cameras."""
+    from app.services.websocket_frame_service import get_websocket_frame_service
+    await get_websocket_frame_service().handle_connection(websocket)
 
 
 @router.get("/api/cameras/{camera_id}/heatmap")

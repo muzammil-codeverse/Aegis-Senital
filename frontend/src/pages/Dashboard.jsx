@@ -5,8 +5,9 @@ import AlertDetailDrawer from '../components/alerts/AlertDetailDrawer'
 import CommandOverview from '../components/dashboard/CommandOverview'
 import { useCameras } from '../hooks/useCameras'
 import { useLatestFrames } from '../hooks/useLatestFrames'
+import { useFrameUpdates } from '../hooks/useFrameUpdates'
 import { getStreams } from '../api/camerasApi'
-import { compareSeverity, normalizeSeverity } from '../utils/severity'
+import { compareSeverity } from '../utils/severity'
 import { DASHBOARD_POLL_MS } from '../config'
 
 export default function Dashboard({ alertState, incidentState, metricsState, websocketState, health }) {
@@ -16,7 +17,13 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
 
   // Camera state — managed here, passed down to avoid duplicate fetching
   const { cameras, loading: camerasLoading, error: camerasError, refresh: refreshCameras, selectedCamera, setSelectedCamera } = useCameras()
-  const { framesByCameraId, refresh: refreshFrames } = useLatestFrames()
+  const { framesByCameraId: polledFrames, refresh: refreshFrames } = useLatestFrames()
+  const { framesByCameraId: wsFrames } = useFrameUpdates()
+  // Merge WS frame updates (lower latency) with polling fallback
+  const framesByCameraId = useMemo(
+    () => ({ ...polledFrames, ...wsFrames }),
+    [polledFrames, wsFrames],
+  )
   const [streamStatesByCameraId, setStreamStatesByCameraId] = useState({})
 
   // Fetch stream session states
