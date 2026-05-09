@@ -572,17 +572,20 @@ class StreamProcessor:
         scenarios = self._scenario_engine.aggregate(events)
         validate_frame_result(packet, packet.tracks, events)
 
-        os.makedirs("/output/debug_snapshots/", exist_ok=True)
-        with open(f"/output/debug_snapshots/frame_{packet.frame_id}.json", "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "frame_id": packet.frame_id,
-                    "detections": [d.model_dump() for d in packet.detections],
-                    "tracks": [t.model_dump() for t in packet.tracks],
-                    "events": [e.model_dump() for e in events],
-                },
-                f,
-            )
+        _snapshot_dir = os.getenv("AEGIS_DEBUG_SNAPSHOT_DIR", "")
+        if _snapshot_dir:
+            os.makedirs(_snapshot_dir, exist_ok=True)
+            _snap_path = os.path.join(_snapshot_dir, f"frame_{packet.frame_id}.json")
+            with open(_snap_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "frame_id": packet.frame_id,
+                        "detections": [d.to_dict() for d in packet.detections],
+                        "tracks": [t.to_dict() for t in packet.tracks],
+                        "events": [e.to_dict() for e in events],
+                    },
+                    f,
+                )
 
         # Stage 5: publish to central EventBus
         now = time.monotonic()
