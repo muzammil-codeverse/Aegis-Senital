@@ -4,8 +4,12 @@ import asyncio
 import logging
 import threading
 import time
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+
+from app.models.security_models import AuditAction
+from app.services.audit_log_service import get_audit_log_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +29,11 @@ def _load_config() -> dict:
 
 
 class _HandoffClient:
-    def __init__(self, websocket: WebSocket, queue_size: int) -> None:
+    def __init__(self, websocket: WebSocket, queue_size: int, user: Any = None) -> None:
         self.websocket = websocket
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
         self._dropped = 0
+        self.user = user
 
     def enqueue(self, message: dict) -> None:
         try:
@@ -100,13 +105,22 @@ class WebSocketHandoffService:
         except Exception:
             pass
 
-    async def handle_connection(self, websocket: WebSocket) -> None:
+    async def handle_connection(self, websocket: WebSocket, user: Any = None) -> None:
         with self._lock:
             if len(self._clients) >= self._max_clients:
+                get_audit_log_service().record(
+                    AuditAction.WEBSOCKET_DENIED,
+                    user=user,
+                    resource_type="websocket",
+                    resource_id="/ws/handoffs",
+                    success=False,
+                    detail="WebSocket capacity reached",
+                    request=websocket,
+                )
                 await websocket.close(code=1013, reason="capacity")
                 return
             client_id = id(websocket)
-            client = _HandoffClient(websocket, self._queue_size)
+            client = _HandoffClient(websocket, self._queue_size, user=user)
             self._clients[client_id] = client
 
         try:
@@ -149,6 +163,13 @@ class WebSocketHandoffService:
             with self._lock:
                 self._clients.pop(client_id, None)
             logger.debug("ws/handoffs client disconnected id=%s", client_id)
+            get_audit_log_service().record(
+                AuditAction.WEBSOCKET_DISCONNECTED,
+                user=user,
+                resource_type="websocket",
+                resource_id="/ws/handoffs",
+                request=websocket,
+            )
             try:
                 from inference.metrics import metrics as core_metrics
                 with core_metrics._lock:

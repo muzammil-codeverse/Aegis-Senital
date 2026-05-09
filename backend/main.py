@@ -12,9 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.api.routes import router
 from app.api.security_dependencies import enforce_request_security
+from app.api.websocket_security import authenticate_websocket
 from app.models.database import init_db
 from app.services.video_service import bootstrap_inference_runtime
 from app.services.auth_service import get_auth_service
+from app.security.config import get_auth_config
 from app.core.logging_config import logger
 from inference.logging_setup import configure_logging
 from ml.runtime import system_boot_check
@@ -57,12 +59,18 @@ app.include_router(router)
 
 @app.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):
-    await websocket_alert_service.connect(websocket)
+    user = await authenticate_websocket(websocket, required_permission="alert:read")
+    if user is None:
+        return
+    await websocket_alert_service.connect(websocket, user=user)
 
 
 @app.on_event("startup")
 async def startup():
     configure_logging()
+    auth_cfg = get_auth_config()
+    if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} and not bool(auth_cfg.get("cookie_secure", False)):
+        logger.warning("APP_ENV=prod with auth.cookie_secure=false; set cookie_secure=true behind HTTPS")
     get_auth_service().bootstrap()
     system_boot_check()
     bootstrap_inference_runtime()

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
-import { getMe, login as loginRequest, logout as logoutRequest } from '../api/authApi'
+import { changePassword as changePasswordRequest, getMe, login as loginRequest, logout as logoutRequest } from '../api/authApi'
 import { clearStoredToken, getStoredToken, setStoredToken } from '../api/client'
 import { authStore } from '../state/authStore'
 
@@ -46,7 +46,7 @@ export function useAuth() {
       refreshMe()
     }
     function handleUnauthorized() {
-      authStore.clearSession()
+      authStore.expireSession()
       window.location.hash = 'login'
     }
     window.addEventListener('aegis-auth-unauthorized', handleUnauthorized)
@@ -89,6 +89,16 @@ export function useAuth() {
     window.location.hash = 'login'
   }, [])
 
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
+    const payload = await changePasswordRequest(currentPassword, newPassword)
+    authStore.setState({ user: payload.item || snapshot.user, error: null })
+    return payload
+  }, [snapshot.user])
+
+  const clearSessionNotice = useCallback(() => {
+    authStore.clearSessionNotice()
+  }, [])
+
   const hasPermission = useCallback((permission) => {
     if (!permission) return true
     if (permission === 'admin') return snapshot.user?.role === 'admin'
@@ -101,6 +111,8 @@ export function useAuth() {
     login,
     logout,
     refreshMe,
+    changePassword,
+    clearSessionNotice,
     hasPermission,
   }
 }

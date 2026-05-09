@@ -81,6 +81,26 @@ class SystemMetrics:
         self.watchlist_hits: int = 0
         self.watchlist_alerts_created: int = 0
         self.face_enrollment_failures: int = 0
+        # Phase 21/22 — security control plane counters
+        self.auth_logins_success: int = 0
+        self.auth_logins_failed: int = 0
+        self.auth_access_denied: int = 0
+        self.audit_events_written: int = 0
+        self.audit_write_failures: int = 0
+        self.users_active: int = 0
+        self.users_locked: int = 0
+        self.watchlist_sensitive_reads: int = 0
+        self.forensic_sensitive_reads: int = 0
+        self.auth_rate_limited: int = 0
+        self.websocket_auth_success: int = 0
+        self.websocket_auth_failed: int = 0
+        self.password_changes: int = 0
+        self.password_reset_by_admin: int = 0
+        self.audit_integrity_checks: int = 0
+        self.audit_integrity_failures: int = 0
+        self.object_authz_denied: int = 0
+        self.mfa_challenges_created: int = 0
+        self.mfa_challenges_failed: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -249,6 +269,25 @@ class SystemMetrics:
                 "degraded_cameras": self.degraded_cameras,
                 "stream_start_failures": self.stream_start_failures,
                 "latest_frame_updates": self.latest_frame_updates,
+                "auth_logins_success": self.auth_logins_success,
+                "auth_logins_failed": self.auth_logins_failed,
+                "auth_access_denied": self.auth_access_denied,
+                "audit_events_written": self.audit_events_written,
+                "audit_write_failures": self.audit_write_failures,
+                "users_active": self.users_active,
+                "users_locked": self.users_locked,
+                "watchlist_sensitive_reads": self.watchlist_sensitive_reads,
+                "forensic_sensitive_reads": self.forensic_sensitive_reads,
+                "auth_rate_limited": self.auth_rate_limited,
+                "websocket_auth_success": self.websocket_auth_success,
+                "websocket_auth_failed": self.websocket_auth_failed,
+                "password_changes": self.password_changes,
+                "password_reset_by_admin": self.password_reset_by_admin,
+                "audit_integrity_checks": self.audit_integrity_checks,
+                "audit_integrity_failures": self.audit_integrity_failures,
+                "object_authz_denied": self.object_authz_denied,
+                "mfa_challenges_created": self.mfa_challenges_created,
+                "mfa_challenges_failed": self.mfa_challenges_failed,
             }
 
 

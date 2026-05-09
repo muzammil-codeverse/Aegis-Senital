@@ -5,10 +5,13 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from core.event_bus import EventType, EventRecord, get_event_bus
+from app.models.security_models import AuditAction
+from app.services.audit_log_service import get_audit_log_service
 from inference.config_runtime import load_runtime_config
 
 logger = logging.getLogger(__name__)
@@ -19,6 +22,7 @@ class _Client:
     websocket: WebSocket
     queue: asyncio.Queue
     loop: asyncio.AbstractEventLoop
+    user: Any = None
 
 
 class WebSocketAlertService:
@@ -31,12 +35,13 @@ class WebSocketAlertService:
         self._lock = threading.RLock()
         get_event_bus().subscribe(EventType.ALERT_EVENT, self._on_alert_event)
 
-    async def connect(self, websocket: WebSocket) -> None:
+    async def connect(self, websocket: WebSocket, user: Any = None) -> None:
         await websocket.accept()
         client = _Client(
             websocket=websocket,
             queue=asyncio.Queue(maxsize=self._queue_size),
             loop=asyncio.get_running_loop(),
+            user=user,
         )
         with self._lock:
             if len(self._clients) >= self._max_clients:
@@ -48,6 +53,15 @@ class WebSocketAlertService:
         if reject:
             _increment_core_metric("websocket_dropped_messages")
             logger.warning("Rejecting alert websocket client: max client count reached")
+            get_audit_log_service().record(
+                AuditAction.WEBSOCKET_DENIED,
+                user=user,
+                resource_type="websocket",
+                resource_id="/ws/alerts",
+                success=False,
+                detail="WebSocket capacity reached",
+                request=websocket,
+            )
             await websocket.close(code=1013)
             return
         try:
@@ -58,6 +72,13 @@ class WebSocketAlertService:
             with self._lock:
                 self._clients.discard(client)
                 _set_core_metric("websocket_clients", len(self._clients))
+            get_audit_log_service().record(
+                AuditAction.WEBSOCKET_DISCONNECTED,
+                user=user,
+                resource_type="websocket",
+                resource_id="/ws/alerts",
+                request=websocket,
+            )
 
     def _on_alert_event(self, record: EventRecord) -> None:
         payload = record.to_dict()

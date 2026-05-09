@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { WS_BASE_URL } from '../config'
+import { buildWebSocketUrl } from '../config'
+import { useAuth } from './useAuth'
 
 const MAX_BUFFER = 200
 const SLOW_AFTER_MS = 90_000
 const MAX_BACKOFF_MS = 30_000
 
 export function useWebSocketAlerts() {
+  const { token, authRequired } = useAuth()
   const [alertsById, setAlertsById] = useState({})
   const [status, setStatus] = useState('connecting')
   const [lastMessageAt, setLastMessageAt] = useState(null)
@@ -16,10 +18,14 @@ export function useWebSocketAlerts() {
   const reconnectTimerRef = useRef(null)
 
   useEffect(() => {
+    if (authRequired && !token) {
+      setStatus('auth_error')
+      return undefined
+    }
     closeRequestedRef.current = false
 
     function connect() {
-      const url = `${WS_BASE_URL.replace(/\/$/, '')}/ws/alerts`
+      const url = buildWebSocketUrl('/ws/alerts', token)
       setStatus(reconnectRef.current > 0 ? 'reconnecting' : 'connecting')
       const socket = new WebSocket(url)
       socketRef.current = socket
@@ -59,9 +65,13 @@ export function useWebSocketAlerts() {
         setStatus('error')
       }
 
-      socket.onclose = () => {
+      socket.onclose = event => {
         if (closeRequestedRef.current) {
           setStatus('closed')
+          return
+        }
+        if (event.code === 1008) {
+          setStatus('auth_error')
           return
         }
         reconnectRef.current += 1
@@ -79,7 +89,7 @@ export function useWebSocketAlerts() {
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current)
       socketRef.current?.close()
     }
-  }, [])
+  }, [authRequired, token])
 
   useEffect(() => {
     const slowTimer = window.setInterval(() => {

@@ -3,6 +3,14 @@ auth:
   algorithm: HS256
   access_token_minutes: 480
   require_auth: true
+  token_issuer: aegis-sentinel
+  token_audience: aegis-operators
+  set_auth_cookie: true
+  cookie_name: aegis_access_token
+  cookie_secure: false
+  cookie_samesite: lax
+  cookie_httponly: true
+  allow_query_token_for_websocket: true
   bootstrap_admin_username: admin
   bootstrap_admin_password_env: AEGIS_BOOTSTRAP_ADMIN_PASSWORD
 password:
@@ -16,16 +24,26 @@ lockout:
   enabled: true
   max_failed_attempts: 5
   lockout_seconds: 900
+rate_limit:
+  login_attempts_per_minute: 5
+  login_attempts_per_username_per_minute: 5
+  cleanup_interval_seconds: 60
 audit:
   enabled: true
   storage_dir: storage/audit
   rotate_daily: true
   max_recent_entries: 2000
+  hash_chain_enabled: true
 privacy:
   mask_identity_display_for_viewer: true
   hide_watchlist_reason_for_operator: true
   allow_raw_enrollment_image_access: false
   audit_forensic_access: true
+mfa:
+  enabled: false
+  required_roles:
+    - admin
+    - supervisor
 rbac:
   admin:
     - "*"

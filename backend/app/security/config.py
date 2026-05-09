@@ -76,6 +76,10 @@ def get_lockout_config() -> dict[str, Any]:
     return dict(load_security_config().get("lockout") or {})
 
 
+def get_rate_limit_config() -> dict[str, Any]:
+    return dict(load_security_config().get("rate_limit") or {})
+
+
 def get_audit_config() -> dict[str, Any]:
     return dict(load_security_config().get("audit") or {})
 
@@ -86,6 +90,10 @@ def get_privacy_config() -> dict[str, Any]:
 
 def get_rbac_config() -> dict[str, list[str]]:
     return dict(load_security_config().get("rbac") or {})
+
+
+def get_mfa_config() -> dict[str, Any]:
+    return dict(load_security_config().get("mfa") or {})
 
 
 def auth_required() -> bool:

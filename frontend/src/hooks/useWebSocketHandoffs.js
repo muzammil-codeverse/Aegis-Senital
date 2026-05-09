@@ -1,17 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { buildWebSocketUrl } from '../config'
+import { useAuth } from './useAuth'
 
 const BASE_DELAY_MS = 1000
 const MAX_DELAY_MS = 30000
 const BACKOFF_FACTOR = 2
 const MAX_HANDOFFS = 500
 
-function wsUrl(path) {
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host
-  return `${proto}//${host}${path}`
-}
-
 export function useWebSocketHandoffs() {
+  const { token, authRequired } = useAuth()
   const [handoffs, setHandoffs] = useState({})
   const [status, setStatus] = useState('disconnected')
   const [lastMessageAt, setLastMessageAt] = useState(null)
@@ -23,7 +20,12 @@ export function useWebSocketHandoffs() {
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return
-    const ws = new WebSocket(wsUrl('/ws/handoffs'))
+    if (authRequired && !token) {
+      setStatus('auth_error')
+      return
+    }
+    const url = buildWebSocketUrl('/ws/handoffs', token)
+    const ws = new WebSocket(url)
     wsRef.current = ws
     setStatus('connecting')
 
@@ -71,14 +73,18 @@ export function useWebSocketHandoffs() {
       setStatus('error')
     }
 
-    ws.onclose = () => {
+    ws.onclose = event => {
       if (!mountedRef.current) return
+      if (event.code === 1008) {
+        setStatus('auth_error')
+        return
+      }
       setStatus('disconnected')
       const delay = delayRef.current
       delayRef.current = Math.min(delay * BACKOFF_FACTOR, MAX_DELAY_MS)
       retryRef.current = setTimeout(connect, delay)
     }
-  }, [])
+  }, [authRequired, token])
 
   useEffect(() => {
     mountedRef.current = true

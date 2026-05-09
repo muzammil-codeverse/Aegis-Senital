@@ -30,6 +30,14 @@ export async function lockUser(userId) {
   }))
 }
 
+export async function resetUserPassword(userId, payload) {
+  return normalizeItemResponse(await request({
+    url: `/api/security/users/${encodeURIComponent(userId)}/reset-password`,
+    method: 'POST',
+    data: payload,
+  }))
+}
+
 export async function getRoles() {
   return normalizeListResponse(await request({ url: '/api/security/roles', method: 'GET' }))
 }

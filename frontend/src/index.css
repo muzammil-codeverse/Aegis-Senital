@@ -507,6 +507,53 @@ select {
   padding: 8px 10px;
 }
 
+.session-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  z-index: 100;
+  transform: translateX(-50%);
+  border: 1px solid rgba(242, 184, 75, 0.45);
+  background: #1e1708;
+  color: var(--amber);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.62);
+  padding: 18px;
+}
+
+.modal-panel {
+  width: min(420px, 100%);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel), #0f151d);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.modal-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.modal-panel label span {
+  color: var(--muted);
+}
+
 .user-menu {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -611,6 +658,16 @@ select {
 .inline-form.user-form input,
 .inline-form.user-form select {
   max-width: none;
+}
+
+.reset-form {
+  margin-top: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.reset-form input {
+  max-width: 220px;
 }
 
 .severity-badge {

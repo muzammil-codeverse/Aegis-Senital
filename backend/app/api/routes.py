@@ -3,20 +3,27 @@ import tempfile
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query, WebSocket, Request, Depends, Response
 from pydantic import BaseModel
+from app.api.object_authorization import (
+    can_access_alert,
+    can_access_camera,
+    can_access_identity,
+    can_access_incident,
+)
 from app.api.security_dependencies import (
     get_current_user_from_request,
     require_auth as require_api_auth,
     require_permission as require_api_permission,
 )
+from app.api.websocket_security import authenticate_websocket
 from app.services.video_service import extract_frames
 from app.core.config import load_scenario_config
 from app.core.logging_config import logger
 from app.services.intelligence_response_builder import IntelligenceResponseBuilder
 from app.models.security_models import AuditAction, UserAccount
-from app.security.config import auth_required, get_rbac_config
+from app.security.config import auth_required, get_auth_config, get_rbac_config
 from app.security.permissions import permissions_for_role
 from app.services.audit_log_service import get_audit_log_service
-from app.services.auth_service import AuthError, get_auth_service
+from app.services.auth_service import AuthError, AuthRateLimitError, get_auth_service
 from app.services.privacy_filter import (
     filter_alert_payload,
     filter_identity_payload,
@@ -78,12 +85,22 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class UserCreateRequest(BaseModel):
     username: str
     password: str
     display_name: str | None = None
     role: str = "viewer"
     metadata: dict | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+    must_change_password: bool = True
 
 
 class UserUpdateRequest(BaseModel):
@@ -155,21 +172,62 @@ def _filter_watchlist_response(payload: dict, request: Request) -> dict:
     return filter_watchlist_payload(payload, _request_user(request))
 
 
+def _deny_object_access(
+    request: Request,
+    resource_type: str,
+    resource_id: str,
+):
+    try:
+        metrics.increment("object_authz_denied")
+    except Exception:
+        pass
+    _audit(
+        request,
+        AuditAction.ACCESS_DENIED,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        success=False,
+        detail="Object-level access denied",
+    )
+    raise HTTPException(
+        status_code=403,
+        detail={"status": "error", "detail": f"Access denied for {resource_type}"},
+    )
+
+
+def _require_object_access(
+    request: Request,
+    resource_type: str,
+    resource_id: str,
+    allowed: bool,
+) -> None:
+    if not auth_required():
+        return
+    if not allowed:
+        _deny_object_access(request, resource_type, resource_id)
+
+
 @router.post("/api/auth/login")
 def login_api(body: LoginRequest, request: Request, response: Response):
     try:
         payload = get_auth_service().login(body.username, body.password, request=request)
-        response.set_cookie(
-            "aegis_access_token",
-            payload["access_token"],
-            httponly=True,
-            secure=request.url.scheme == "https",
-            samesite="lax",
-            max_age=payload.get("expires_in_seconds", 0),
-        )
+        auth_cfg = get_auth_config()
+        if bool(auth_cfg.get("set_auth_cookie", True)):
+            response.set_cookie(
+                str(auth_cfg.get("cookie_name") or "aegis_access_token"),
+                payload["access_token"],
+                httponly=bool(auth_cfg.get("cookie_httponly", True)),
+                secure=bool(auth_cfg.get("cookie_secure", False)),
+                samesite=str(auth_cfg.get("cookie_samesite") or "lax"),
+                max_age=payload.get("expires_in_seconds", 0),
+            )
         return payload
+    except AuthRateLimitError:
+        raise HTTPException(status_code=429, detail="Too many login attempts")
     except AuthError:
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.post("/api/auth/logout")
@@ -179,13 +237,34 @@ def logout_api(
     current_user: UserAccount = Depends(require_api_auth),
 ):
     payload = get_auth_service().logout(current_user, request=request)
-    response.delete_cookie("aegis_access_token")
+    auth_cfg = get_auth_config()
+    response.delete_cookie(str(auth_cfg.get("cookie_name") or "aegis_access_token"))
     return payload
 
 
 @router.get("/api/auth/me")
 async def me_api(current_user: UserAccount = Depends(require_api_auth)):
     return _current_user_payload(current_user)
+
+
+@router.post("/api/auth/change-password")
+def change_password_api(
+    body: ChangePasswordRequest,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_auth),
+):
+    try:
+        user = get_auth_service().change_password(
+            current_user,
+            body.current_password,
+            body.new_password,
+            request=request,
+        )
+    except AuthError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"item": user.to_dict(), "status": "ok"}
 
 
 @router.get("/api/security/users")
@@ -286,6 +365,28 @@ def lock_security_user_api(
     return {"item": user.to_dict(), "status": "ok"}
 
 
+@router.post("/api/security/users/{user_id}/reset-password")
+def reset_security_user_password_api(
+    user_id: str,
+    body: ResetPasswordRequest,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    try:
+        user = get_auth_service().reset_password_by_admin(
+            current_user,
+            user_id,
+            body.new_password,
+            must_change_password=body.must_change_password,
+            request=request,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    return {"item": user.to_dict(), "status": "ok"}
+
+
 @router.get("/api/security/roles")
 def get_roles_api(current_user: UserAccount = Depends(require_api_auth)):
     rbac = get_rbac_config()
@@ -322,6 +423,13 @@ def recent_audit_logs_api(
 ):
     items = get_audit_log_service().get_recent(limit=limit)
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/audit/integrity")
+def audit_integrity_api(
+    current_user: UserAccount = Depends(require_api_permission("audit:read")),
+):
+    return get_audit_log_service().verify_integrity()
 
 
 @router.get("/health")
@@ -436,6 +544,15 @@ def get_core_metrics():
         mon = get_mon().snapshot()
         base.setdefault("stream_start_failures", mon.get("stream_start_failures", 0))
         base.setdefault("latest_frame_updates", mon.get("latest_frame_updates", 0))
+        for _security_key in (
+            "auth_logins_success", "auth_logins_failed", "auth_access_denied",
+            "audit_events_written", "audit_write_failures", "watchlist_sensitive_reads",
+            "forensic_sensitive_reads", "auth_rate_limited", "websocket_auth_success",
+            "websocket_auth_failed", "password_changes", "password_reset_by_admin",
+            "audit_integrity_checks", "audit_integrity_failures", "object_authz_denied",
+            "mfa_challenges_created", "mfa_challenges_failed",
+        ):
+            base.setdefault(_security_key, mon.get(_security_key, 0))
     except Exception:
         pass
     # Bridge MJPEG metrics from core metrics
@@ -564,6 +681,7 @@ def list_incidents_api(request: Request):
 @router.get("/api/incidents/{incident_id}")
 @router.get("/incidents/{incident_id}")
 def get_incident_api(incident_id: str, request: Request):
+    _require_object_access(request, "incident", incident_id, can_access_incident(_request_user(request), incident_id))
     runtime = get_intelligence_runtime()
     incident = runtime.incident_engine.get_incident(incident_id)
     _audit(request, AuditAction.INCIDENT_VIEWED, resource_type="incident", resource_id=incident_id)
@@ -614,6 +732,7 @@ def operator_queue_api(request: Request, limit: int = Query(default=100, ge=1, l
 
 @router.get("/api/alerts/{alert_id}")
 def get_alert_api(alert_id: str, request: Request):
+    _require_object_access(request, "alert", alert_id, can_access_alert(_request_user(request), alert_id))
     response = get_intelligence_runtime().get_alert(alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
@@ -690,6 +809,7 @@ def list_latest_frames_api(request: Request):
 
 @router.get("/api/cameras/{camera_id}/status")
 def get_camera_status_api(camera_id: str, request: Request):
+    _require_object_access(request, "camera", camera_id, can_access_camera(_request_user(request), camera_id))
     from app.services.camera_registry import get_camera_registry
     from app.services.stream_session_manager import get_stream_session_manager
     camera = get_camera_registry().get_camera(camera_id)
@@ -702,6 +822,7 @@ def get_camera_status_api(camera_id: str, request: Request):
 
 @router.get("/api/cameras/{camera_id}/latest-frame")
 def get_camera_latest_frame_api(camera_id: str, request: Request):
+    _require_object_access(request, "camera", camera_id, can_access_camera(_request_user(request), camera_id))
     from app.services.frame_snapshot_service import get_frame_snapshot_service
     frame = get_frame_snapshot_service().get_latest_frame(camera_id)
     status = frame.get("status", "ok")
@@ -709,8 +830,9 @@ def get_camera_latest_frame_api(camera_id: str, request: Request):
 
 
 @router.get("/api/cameras/{camera_id}/latest-frame/image")
-def get_camera_latest_frame_image(camera_id: str):
+def get_camera_latest_frame_image(camera_id: str, request: Request):
     """Serve the latest annotated frame image with path-traversal protection."""
+    _require_object_access(request, "camera", camera_id, can_access_camera(_request_user(request), camera_id))
     from fastapi.responses import FileResponse, JSONResponse
     from app.services.frame_snapshot_service import get_frame_snapshot_service
     from app.core.security import safe_frame_path, is_safe_extension
@@ -739,8 +861,9 @@ def get_camera_latest_frame_image(camera_id: str):
 
 
 @router.get("/api/cameras/{camera_id}/latest-frame/annotated-image")
-def get_camera_latest_frame_annotated_image(camera_id: str):
+def get_camera_latest_frame_annotated_image(camera_id: str, request: Request):
     """Serve the latest annotated (bounding-box rendered) frame image."""
+    _require_object_access(request, "camera", camera_id, can_access_camera(_request_user(request), camera_id))
     from fastapi.responses import FileResponse, JSONResponse
     from app.services.frame_snapshot_service import get_frame_snapshot_service
     from app.core.security import safe_frame_path, is_safe_extension
@@ -905,6 +1028,7 @@ def get_camera_timeline_api(
 @router.get("/api/incidents/{incident_id}/replay")
 def get_incident_replay_api(incident_id: str, request: Request):
     """Return a replay manifest for an incident: frames, events, alerts, and timeline."""
+    _require_object_access(request, "incident", incident_id, can_access_incident(_request_user(request), incident_id))
     try:
         from inference.metrics import metrics as core_metrics
         core_metrics.increment("incident_replay_queries")
@@ -982,7 +1106,10 @@ def get_incident_replay_api(incident_id: str, request: Request):
 async def websocket_frames_endpoint(websocket: WebSocket):
     """Real-time frame-update WebSocket stream for all cameras."""
     from app.services.websocket_frame_service import get_websocket_frame_service
-    await get_websocket_frame_service().handle_connection(websocket)
+    user = await authenticate_websocket(websocket, required_permission="camera:read")
+    if user is None:
+        return
+    await get_websocket_frame_service().handle_connection(websocket, user=user)
 
 
 @router.get("/api/cameras/{camera_id}/heatmap")
@@ -994,6 +1121,7 @@ def get_camera_heatmap(camera_id: str):
 
 @router.get("/api/cameras/{camera_id}")
 def get_camera_api(camera_id: str, request: Request):
+    _require_object_access(request, "camera", camera_id, can_access_camera(_request_user(request), camera_id))
     from app.services.camera_registry import get_camera_registry
     camera = get_camera_registry().get_camera(camera_id)
     if camera is None:
@@ -1211,7 +1339,8 @@ def list_handoffs_by_identity_api(identity_id: str, limit: int = Query(default=1
 
 
 @router.get("/api/handoffs/camera/{camera_id}")
-def list_handoffs_by_camera_api(camera_id: str, limit: int = Query(default=100, ge=1, le=500)):
+def list_handoffs_by_camera_api(camera_id: str, request: Request, limit: int = Query(default=100, ge=1, le=500)):
+    _require_object_access(request, "camera", camera_id, can_access_camera(_request_user(request), camera_id))
     items = _handoff_store().list_by_camera(camera_id, limit=limit)
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
@@ -1228,7 +1357,10 @@ def get_handoff_api(handoff_id: str):
 async def websocket_handoffs_endpoint(websocket: WebSocket):
     """Real-time cross-camera handoff event stream."""
     from app.services.websocket_handoff_service import get_websocket_handoff_service
-    await get_websocket_handoff_service().handle_connection(websocket)
+    user = await authenticate_websocket(websocket, required_permission=("camera:read", "incident:read"))
+    if user is None:
+        return
+    await get_websocket_handoff_service().handle_connection(websocket, user=user)
 
 
 # ============================================================
@@ -1374,6 +1506,7 @@ async def create_identity_api(payload: dict, request: Request):
 
 @router.get("/api/identities/{identity_id}")
 def get_identity_api(identity_id: str, request: Request):
+    _require_object_access(request, "identity", identity_id, can_access_identity(_request_user(request), identity_id))
     try:
         store = _id_store()
         profile = store.get_identity(identity_id)

@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.models.security_models import AuditAction, UserAccount, UserStatus
-from app.security.config import auth_required, get_rbac_config
+from app.security.config import auth_required, get_auth_config, get_rbac_config
 from app.security.permissions import has_permission
 from app.services.audit_log_service import get_audit_log_service
 from app.services.auth_service import get_auth_service
@@ -27,14 +27,18 @@ PUBLIC_PATHS = {
 def _extract_bearer_token(request: Request) -> str | None:
     header = request.headers.get("authorization") or ""
     if not header.lower().startswith("bearer "):
-        cookie_token = request.cookies.get("aegis_access_token")
+        cookie_name = str(get_auth_config().get("cookie_name") or "aegis_access_token")
+        cookie_token = request.cookies.get(cookie_name)
         return cookie_token or None
     token = header.split(" ", 1)[1].strip()
     return token or None
 
 
-def _structured_error(status_code: int, detail: str) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"status": "error", "detail": detail})
+def _structured_error(status_code: int, detail: str, permission: str | None = None) -> JSONResponse:
+    content = {"status": "error", "detail": detail}
+    if permission:
+        content["permission"] = permission
+    return JSONResponse(status_code=status_code, content=content)
 
 
 def get_current_user_from_request(request: Request) -> UserAccount | None:
@@ -250,6 +254,6 @@ async def enforce_request_security(request: Request, call_next):
             detail=f"Permission required: {required_permission}",
             metadata={"permission": required_permission},
         )
-        return _structured_error(403, "Insufficient permission")
+        return _structured_error(403, "Insufficient permission", required_permission)
 
     return await call_next(request)

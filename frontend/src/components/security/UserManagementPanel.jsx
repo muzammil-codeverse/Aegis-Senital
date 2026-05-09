@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createUser, disableUser, getRoles, getUsers, lockUser, updateUser } from '../../api/securityApi'
+import { createUser, disableUser, getRoles, getUsers, lockUser, resetUserPassword, updateUser } from '../../api/securityApi'
 import { normalizeError } from '../../api/client'
 import RoleBadge from '../auth/RoleBadge'
 
@@ -17,6 +17,9 @@ export default function UserManagementPanel() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [resetTarget, setResetTarget] = useState(null)
+  const [resetPassword, setResetPassword] = useState('')
+  const [mustChangePassword, setMustChangePassword] = useState(true)
 
   async function refresh() {
     setLoading(true)
@@ -67,6 +70,26 @@ export default function UserManagementPanel() {
       await refresh()
     } catch (err) {
       setError(normalizeError(err))
+    }
+  }
+
+  async function submitReset(event) {
+    event.preventDefault()
+    if (!resetTarget) return
+    setSaving(true)
+    try {
+      await resetUserPassword(resetTarget.user_id, {
+        new_password: resetPassword,
+        must_change_password: mustChangePassword,
+      })
+      setResetTarget(null)
+      setResetPassword('')
+      setMustChangePassword(true)
+      await refresh()
+    } catch (err) {
+      setError(normalizeError(err))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -139,6 +162,7 @@ export default function UserManagementPanel() {
                   <td>
                     <div className="button-row">
                       <button type="button" className="text-button" onClick={() => runUserAction('lock', user.user_id)}>Lock</button>
+                      <button type="button" className="text-button" onClick={() => setResetTarget(user)}>Reset Password</button>
                       <button type="button" className="text-button danger" onClick={() => runUserAction('disable', user.user_id)}>Disable</button>
                     </div>
                   </td>
@@ -152,6 +176,28 @@ export default function UserManagementPanel() {
             </tbody>
           </table>
         </div>
+      )}
+      {resetTarget && (
+        <form className="inline-form reset-form" onSubmit={submitReset}>
+          <strong>Reset password for {resetTarget.username}</strong>
+          <input
+            type="password"
+            placeholder="New password"
+            value={resetPassword}
+            onChange={event => setResetPassword(event.target.value)}
+            required
+          />
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={mustChangePassword}
+              onChange={event => setMustChangePassword(event.target.checked)}
+            />
+            <span>Require change at next login</span>
+          </label>
+          <button type="submit" disabled={saving}>{saving ? 'Resetting...' : 'Reset'}</button>
+          <button type="button" className="text-button" onClick={() => { setResetTarget(null); setResetPassword('') }}>Cancel</button>
+        </form>
       )}
     </section>
   )

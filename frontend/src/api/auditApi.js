@@ -11,3 +11,7 @@ export async function getRecentAuditLogs(limit = 100) {
     params: { limit },
   }))
 }
+
+export async function getAuditIntegrity() {
+  return request({ url: '/api/audit/integrity', method: 'GET' })
+}

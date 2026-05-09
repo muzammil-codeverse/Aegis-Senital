@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models.security_models import AuditAction, AuditLogEntry, UserAccount, sanitize_metadata
+from app.security.audit_integrity import compute_entry_hash, verify_audit_chain
 from app.security.config import get_audit_config, project_path
 
 logger = logging.getLogger(__name__)
@@ -24,10 +25,12 @@ class AuditLogService:
         self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._enabled = bool(self._config.get("enabled", True))
         self._rotate_daily = bool(self._config.get("rotate_daily", True))
+        self._hash_chain_enabled = bool(self._config.get("hash_chain_enabled", True))
         self._lock = threading.RLock()
         self._recent: deque[AuditLogEntry] = deque(
             maxlen=int(self._config.get("max_recent_entries", 2000))
         )
+        self._last_hash_by_path: dict[str, str | None] = {}
         self._load_recent()
 
     def _path_for_timestamp(self, timestamp: float | None = None) -> Path:
@@ -52,6 +55,27 @@ class AuditLogService:
                 continue
         for entry in rows[-self._recent.maxlen:]:
             self._recent.append(entry)
+        for path in paths:
+            self._last_hash_by_path[str(path)] = self._latest_hash_for_path(path)
+
+    @staticmethod
+    def _latest_hash_for_path(path: Path) -> str | None:
+        latest_hash = None
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        value = json.loads(line).get("entry_hash")
+                    except json.JSONDecodeError:
+                        continue
+                    if value:
+                        latest_hash = str(value)
+        except OSError:
+            return None
+        return latest_hash
 
     @staticmethod
     def _request_ip(request: Any) -> str | None:
@@ -102,9 +126,15 @@ class AuditLogService:
             return entry
 
         try:
-            payload = json.dumps(entry.to_dict(), sort_keys=True)
             with self._lock:
                 path = self._path_for_timestamp(entry.timestamp)
+                path_key = str(path)
+                if self._hash_chain_enabled:
+                    previous_hash = self._last_hash_by_path.get(path_key)
+                    entry.previous_hash = previous_hash
+                    entry.entry_hash = compute_entry_hash(entry.to_dict(), previous_hash)
+                    self._last_hash_by_path[path_key] = entry.entry_hash
+                payload = json.dumps(entry.to_dict(), sort_keys=True)
                 with path.open("a", encoding="utf-8") as fh:
                     fh.write(payload + "\n")
                 self._recent.append(entry)
@@ -163,6 +193,42 @@ class AuditLogService:
             entries = list(self._recent)[-max(1, int(limit)):]
         entries.sort(key=lambda item: item.timestamp, reverse=True)
         return [entry.to_dict() for entry in entries]
+
+    def verify_integrity(self) -> dict:
+        try:
+            from inference.metrics import metrics
+            metrics.increment("audit_integrity_checks")
+        except Exception:
+            pass
+
+        checked_files = 0
+        broken_files: list[dict] = []
+        latest_hash = None
+        try:
+            paths = sorted(self._storage_dir.glob("audit*.jsonl"))
+            for path in paths:
+                result = verify_audit_chain(str(path))
+                checked_files += 1
+                if result.get("latest_hash"):
+                    latest_hash = result["latest_hash"]
+                if result.get("status") == "broken":
+                    broken_files.append(result)
+        except Exception as exc:
+            broken_files.append({"file": None, "status": "error", "detail": str(exc)})
+
+        if broken_files:
+            try:
+                from inference.metrics import metrics
+                metrics.increment("audit_integrity_failures")
+            except Exception:
+                pass
+
+        return {
+            "status": "ok" if not broken_files else "broken",
+            "checked_files": checked_files,
+            "broken_files": broken_files,
+            "latest_hash": latest_hash,
+        }
 
 
 _audit_log_service: AuditLogService | None = None

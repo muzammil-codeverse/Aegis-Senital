@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { WS_BASE_URL } from '../config'
+import { buildWebSocketUrl } from '../config'
+import { useAuth } from './useAuth'
 
 const RECONNECT_BASE_MS = 1000
 const RECONNECT_MAX_MS = 30000
 const RECONNECT_FACTOR = 2
 
 export function useFrameUpdates() {
+  const { token, authRequired } = useAuth()
   const [framesByCameraId, setFramesByCameraId] = useState({})
   const [status, setStatus] = useState('disconnected')
   const wsRef = useRef(null)
@@ -15,9 +17,13 @@ export function useFrameUpdates() {
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return
+    if (authRequired && !token) {
+      setStatus('auth_error')
+      return
+    }
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return
 
-    const url = `${WS_BASE_URL}/ws/frames`
+    const url = buildWebSocketUrl('/ws/frames', token)
     let ws
     try {
       ws = new WebSocket(url)
@@ -54,12 +60,16 @@ export function useFrameUpdates() {
       setStatus('error')
     }
 
-    ws.onclose = () => {
+    ws.onclose = event => {
       if (!mountedRef.current) return
+      if (event.code === 1008) {
+        setStatus('auth_error')
+        return
+      }
       setStatus('disconnected')
       scheduleReconnect()
     }
-  }, [])
+  }, [authRequired, token])
 
   function scheduleReconnect() {
     if (!mountedRef.current) return

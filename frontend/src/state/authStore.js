@@ -8,6 +8,7 @@ let state = {
   authRequired: true,
   loading: true,
   error: null,
+  sessionExpired: false,
 }
 
 const listeners = new Set()
@@ -39,6 +40,7 @@ export const authStore = {
       authRequired,
       loading: false,
       error: null,
+      sessionExpired: false,
     }
     emit()
   },
@@ -51,7 +53,25 @@ export const authStore = {
       permissions: [],
       authenticated: false,
       loading: false,
+      sessionExpired: false,
     }
+    emit()
+  },
+  expireSession() {
+    clearStoredToken()
+    state = {
+      ...state,
+      token: null,
+      user: null,
+      permissions: [],
+      authenticated: false,
+      loading: false,
+      sessionExpired: true,
+    }
+    emit()
+  },
+  clearSessionNotice() {
+    state = { ...state, sessionExpired: false }
     emit()
   },
 }

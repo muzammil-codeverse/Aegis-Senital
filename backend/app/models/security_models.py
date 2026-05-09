@@ -26,6 +26,8 @@ class AuditAction(Enum):
     LOGIN_SUCCESS = "login_success"
     LOGIN_FAILED = "login_failed"
     LOGOUT = "logout"
+    PASSWORD_CHANGED = "password_changed"
+    PASSWORD_RESET = "password_reset"
     USER_CREATED = "user_created"
     USER_UPDATED = "user_updated"
     CAMERA_VIEWED = "camera_viewed"
@@ -44,6 +46,9 @@ class AuditAction(Enum):
     FORENSIC_REPLAY_VIEWED = "forensic_replay_viewed"
     MAP_VIEWED = "map_viewed"
     ACCESS_DENIED = "access_denied"
+    WEBSOCKET_CONNECTED = "websocket_connected"
+    WEBSOCKET_DENIED = "websocket_denied"
+    WEBSOCKET_DISCONNECTED = "websocket_disconnected"
 
 
 SENSITIVE_AUDIT_KEYS = {
@@ -104,6 +109,8 @@ class UserAccount:
     last_login_at: float | None = None
     failed_login_count: int = 0
     metadata: dict = field(default_factory=dict)
+    must_change_password: bool = False
+    password_changed_at: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -117,6 +124,8 @@ class UserAccount:
             "last_login_at": self.last_login_at,
             "failed_login_count": self.failed_login_count,
             "metadata": sanitize_metadata(self.metadata),
+            "must_change_password": self.must_change_password,
+            "password_changed_at": self.password_changed_at,
         }
 
     def to_record(self) -> dict:
@@ -138,6 +147,8 @@ class UserAccount:
             last_login_at=data.get("last_login_at"),
             failed_login_count=int(data.get("failed_login_count") or 0),
             metadata=dict(data.get("metadata") or {}),
+            must_change_password=bool(data.get("must_change_password", False)),
+            password_changed_at=data.get("password_changed_at"),
         )
 
 
@@ -179,6 +190,8 @@ class AuditLogEntry:
     success: bool
     detail: str | None
     metadata: dict = field(default_factory=dict)
+    previous_hash: str | None = None
+    entry_hash: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -195,6 +208,8 @@ class AuditLogEntry:
             "success": self.success,
             "detail": self.detail,
             "metadata": sanitize_metadata(self.metadata),
+            "previous_hash": self.previous_hash,
+            "entry_hash": self.entry_hash,
         }
 
     @classmethod
@@ -213,6 +228,8 @@ class AuditLogEntry:
             success=bool(data.get("success", True)),
             detail=data.get("detail"),
             metadata=dict(data.get("metadata") or {}),
+            previous_hash=data.get("previous_hash"),
+            entry_hash=data.get("entry_hash"),
         )
 
 

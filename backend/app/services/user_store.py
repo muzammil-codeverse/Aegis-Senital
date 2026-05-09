@@ -108,6 +108,7 @@ class UserStore:
                 created_at=now,
                 updated_at=now,
                 metadata=sanitize_metadata(metadata or {}),
+                password_changed_at=now,
             )
             self._users[user.user_id] = user
             self._by_username[normalized] = user.user_id
@@ -152,7 +153,7 @@ class UserStore:
         return users[: max(1, int(limit))]
 
     def update_user(self, user_id: str, updates: dict[str, Any]) -> UserAccount | None:
-        allowed = {"display_name", "role", "status", "metadata", "password"}
+        allowed = {"display_name", "role", "status", "metadata", "password", "must_change_password"}
         with self._lock:
             user = self._users.get(user_id)
             if user is None:
@@ -174,6 +175,9 @@ class UserStore:
                     if not ok:
                         raise ValueError("; ".join(errors))
                     user.password_hash = hash_password(str(value))
+                    user.password_changed_at = time.time()
+                elif key == "must_change_password":
+                    user.must_change_password = bool(value)
                 else:
                     setattr(user, key, value)
             user.updated_at = time.time()
@@ -185,6 +189,43 @@ class UserStore:
 
     def lock_user(self, user_id: str) -> UserAccount | None:
         return self.update_user(user_id, {"status": UserStatus.LOCKED.value})
+
+    def change_password(self, user_id: str, current_password: str, new_password: str) -> UserAccount | None:
+        with self._lock:
+            user = self._users.get(user_id)
+            if user is None:
+                return None
+            if not verify_password(current_password, user.password_hash):
+                raise PermissionError("Current password is invalid")
+            ok, errors = validate_password_strength(new_password, get_password_config())
+            if not ok:
+                raise ValueError("; ".join(errors))
+            user.password_hash = hash_password(new_password)
+            user.password_changed_at = time.time()
+            user.must_change_password = False
+            user.updated_at = user.password_changed_at
+            self._rewrite()
+            return user
+
+    def reset_password(
+        self,
+        user_id: str,
+        new_password: str,
+        must_change_password: bool = True,
+    ) -> UserAccount | None:
+        with self._lock:
+            user = self._users.get(user_id)
+            if user is None:
+                return None
+            ok, errors = validate_password_strength(new_password, get_password_config())
+            if not ok:
+                raise ValueError("; ".join(errors))
+            user.password_hash = hash_password(new_password)
+            user.password_changed_at = time.time()
+            user.must_change_password = bool(must_change_password)
+            user.updated_at = user.password_changed_at
+            self._rewrite()
+            return user
 
     def record_login_success(self, user_id: str) -> None:
         with self._lock:

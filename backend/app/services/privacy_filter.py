@@ -48,6 +48,8 @@ class PrivacyFilter:
             if lowered.endswith("_path") or lowered == "path":
                 if not self.policy.allow_raw_enrollment_image_access:
                     continue
+            if isinstance(value, str) and self._looks_like_absolute_path(value):
+                continue
             cleaned[key_text] = self._sanitize(value)
         return cleaned
 

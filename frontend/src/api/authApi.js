@@ -15,3 +15,14 @@ export async function logout() {
 export async function getMe() {
   return request({ url: '/api/auth/me', method: 'GET' })
 }
+
+export async function changePassword(currentPassword, newPassword) {
+  return request({
+    url: '/api/auth/change-password',
+    method: 'POST',
+    data: {
+      current_password: currentPassword,
+      new_password: newPassword,
+    },
+  })
+}

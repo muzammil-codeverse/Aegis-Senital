@@ -68,6 +68,17 @@ class SystemMetrics:
         self.users_locked = 0
         self.watchlist_sensitive_reads = 0
         self.forensic_sensitive_reads = 0
+        # Phase 22: security hardening completion
+        self.auth_rate_limited = 0
+        self.websocket_auth_success = 0
+        self.websocket_auth_failed = 0
+        self.password_changes = 0
+        self.password_reset_by_admin = 0
+        self.audit_integrity_checks = 0
+        self.audit_integrity_failures = 0
+        self.object_authz_denied = 0
+        self.mfa_challenges_created = 0
+        self.mfa_challenges_failed = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

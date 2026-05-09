@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import ProtectedRoute from './components/auth/ProtectedRoute'
+import SessionExpiredBanner from './components/auth/SessionExpiredBanner'
 import AppShell from './components/layout/AppShell'
 import { useAlerts } from './hooks/useAlerts'
 import { useAuth } from './hooks/useAuth'
@@ -47,7 +48,14 @@ export default function App() {
       </main>
     )
   }
-  if (!auth.authenticated) return <LoginPage />
+  if (!auth.authenticated) {
+    return (
+      <>
+        <SessionExpiredBanner />
+        <LoginPage />
+      </>
+    )
+  }
   return <AuthenticatedApp />
 }
 
