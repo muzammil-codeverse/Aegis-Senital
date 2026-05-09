@@ -130,6 +130,15 @@ class SystemMetrics:
         self.open_vocab_model_auto_load_timeout_total: int = 0
         self.open_vocab_scan_to_push_latency_ms: float = 0.0
         self.open_vocab_active_stream_subscribers: int = 0
+        # Phase 27 — segmentation refinement metrics
+        self.segmentation_requests_total: int = 0
+        self.segmentation_success_total: int = 0
+        self.segmentation_failures_total: int = 0
+        self.segmentation_skipped_total: int = 0
+        self.segmentation_latency_ms: float = 0.0
+        self.segmentation_masks_generated_total: int = 0
+        self.segmentation_mask_area_ratio: float = 0.0
+        self.segmentation_provider_unavailable_total: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -138,6 +147,10 @@ class SystemMetrics:
             raise ValueError("metrics increments must be non-negative")
         with self._lock:
             setattr(self, counter, getattr(self, counter, 0) + n)
+
+    def record_segmentation_value(self, counter: str, value: int | float) -> None:
+        with self._lock:
+            setattr(self, counter, max(0, value))
 
     # ── timing recorders ──────────────────────────────────────────────────────
 
@@ -346,6 +359,15 @@ class SystemMetrics:
                 "open_vocab_model_auto_load_timeout_total": self.open_vocab_model_auto_load_timeout_total,
                 "open_vocab_scan_to_push_latency_ms": self.open_vocab_scan_to_push_latency_ms,
                 "open_vocab_active_stream_subscribers": self.open_vocab_active_stream_subscribers,
+                # Phase 27 — segmentation refinement metrics
+                "segmentation_requests_total": self.segmentation_requests_total,
+                "segmentation_success_total": self.segmentation_success_total,
+                "segmentation_failures_total": self.segmentation_failures_total,
+                "segmentation_skipped_total": self.segmentation_skipped_total,
+                "segmentation_latency_ms": self.segmentation_latency_ms,
+                "segmentation_masks_generated_total": self.segmentation_masks_generated_total,
+                "segmentation_mask_area_ratio": self.segmentation_mask_area_ratio,
+                "segmentation_provider_unavailable_total": self.segmentation_provider_unavailable_total,
             }
 
 

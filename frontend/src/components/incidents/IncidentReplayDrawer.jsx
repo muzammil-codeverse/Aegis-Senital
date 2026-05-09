@@ -44,6 +44,7 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
   // Phase 23: open-vocab results attached to replay
   const ovResults = replay?.open_vocab_results || []
   const currentFrame = frames[frameIdx]
+  const currentSegmentation = currentFrame?.segmentation
 
   return (
     <aside className="detail-drawer" aria-label="Incident replay">
@@ -120,6 +121,11 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
                     )}
                     {(currentFrame.event_ids || []).length > 0 && (
                       <span style={{ color: '#fa8c16' }}>{currentFrame.event_ids.length} events</span>
+                    )}
+                    {currentSegmentation && (
+                      <span style={{ color: currentSegmentation.status === 'success' ? '#22d3ee' : '#fbbf24' }}>
+                        {currentSegmentation.mask_count || 0} masks · {currentSegmentation.status || 'unknown'}
+                      </span>
                     )}
                   </div>
                 )}
@@ -220,6 +226,25 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
                     ))
                   )}
                 </ol>
+              </section>
+            )}
+
+            {currentSegmentation && (
+              <section style={{ marginBottom: 16 }}>
+                <p style={{ margin: '0 0 6px', fontSize: '0.6rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                  Segmentation ({currentSegmentation.mask_count || 0})
+                </p>
+                <div style={{
+                  background: '#0a0f1a', border: '1px solid #1c2535', borderRadius: 4,
+                  padding: '6px 10px', fontSize: '0.72rem', color: '#9ca3af',
+                }}>
+                  <strong style={{ color: currentSegmentation.status === 'success' ? '#22d3ee' : '#fbbf24' }}>
+                    {currentSegmentation.provider || 'sam2'} · {currentSegmentation.status || 'unknown'}
+                  </strong>
+                  <span style={{ marginLeft: 8 }}>
+                    {Number(currentSegmentation.latency_ms || 0).toFixed(1)} ms
+                  </span>
+                </div>
               </section>
             )}
 

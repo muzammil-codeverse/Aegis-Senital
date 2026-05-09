@@ -103,6 +103,7 @@ export default function LiveVideoSurface({
   const [imgKey, setImgKey] = useState(0)
   const [preferAnnotated, setPreferAnnotated] = useState(true)
   const [showOverlays, setShowOverlays] = useState(true)
+  const [showMasks, setShowMasks] = useState(false)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -155,6 +156,17 @@ export default function LiveVideoSurface({
   // Phase 23: open-vocab detections as overlay items (shown in purple)
   const ovDetections = showOverlays && latestFrame?.open_vocab_detections
     ? latestFrame.open_vocab_detections.map(d => ({ ...d, color: '#a78bfa' }))
+    : []
+  const segmentation = latestFrame?.segmentation
+  const segmentationMasks = showOverlays && showMasks && Array.isArray(segmentation?.masks)
+    ? segmentation.masks
+      .filter(mask => Array.isArray(mask.bbox) && mask.bbox.length >= 4)
+      .map(mask => ({
+        ...mask,
+        label: `${mask.label || 'mask'} seg`,
+        color: '#22d3ee',
+        severity: segmentation.status === 'success' ? 'low' : 'medium',
+      }))
     : []
 
   return (
@@ -213,6 +225,20 @@ export default function LiveVideoSurface({
               ANN
             </button>
           )}
+          {segmentation && (
+            <button
+              onClick={e => { e.stopPropagation(); setShowMasks(v => !v) }}
+              title={showMasks ? 'Hide segmentation mask boxes' : 'Show segmentation mask boxes'}
+              style={{
+                background: showMasks ? '#22d3ee20' : 'none',
+                border: `1px solid ${showMasks ? '#22d3ee' : '#374151'}`,
+                color: showMasks ? '#22d3ee' : '#4b5563',
+                borderRadius: 3, padding: '1px 5px', fontSize: '0.6rem', cursor: 'pointer',
+              }}
+            >
+              MSK
+            </button>
+          )}
           {camera && <SeverityBadge severity={camera.riskSeverity || 'info'} compact />}
         </div>
       </div>
@@ -263,6 +289,13 @@ export default function LiveVideoSurface({
             ))}
           </div>
         )}
+        {segmentationMasks.length > 0 && (
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
+            {segmentationMasks.map((item, i) => (
+              <OverlayBox key={`seg-${i}`} item={item} scaleX={scaleX} scaleY={scaleY} />
+            ))}
+          </div>
+        )}
 
         {/* Status overlays for non-active states */}
         {(displayState === 'OFFLINE' || displayState === 'ERROR' || displayState === 'DISABLED') && (
@@ -304,6 +337,11 @@ export default function LiveVideoSurface({
         <span>{camera?.source_type}</span>
         {latestFrame?.detections?.length > 0 && (
           <span style={{ color: '#fa8c16' }}>{latestFrame.detections.length} det</span>
+        )}
+        {segmentation && (
+          <span style={{ color: segmentation.status === 'success' ? '#22d3ee' : '#fbbf24' }}>
+            {segmentation.mask_count || 0} mask
+          </span>
         )}
         {latestFrame?.age_seconds != null && displayState !== 'STALE' && (
           <span>{latestFrame.age_seconds}s</span>

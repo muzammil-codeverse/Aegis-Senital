@@ -66,6 +66,7 @@ export default function CameraTimelinePanel({ cameraId, onSelectFrame }) {
             const trackCount = (item.track_ids || []).length
             const eventCount = (item.event_ids || []).length
             const incCount = (item.incident_ids || []).length
+            const maskCount = item.segmentation?.mask_count || 0
             const isSelected = selectedIdx === idx
             return (
               <li
@@ -84,6 +85,7 @@ export default function CameraTimelinePanel({ cameraId, onSelectFrame }) {
                   {trackCount > 0 && <span style={{ color: '#1890ff' }}>{trackCount} trk</span>}
                   {eventCount > 0 && <span style={{ color: '#fa8c16' }}>{eventCount} evt</span>}
                   {incCount > 0 && <span style={{ color: '#ff4d4f' }}>{incCount} inc</span>}
+                  {maskCount > 0 && <span style={{ color: '#22d3ee' }}>{maskCount} mask</span>}
                   {(item.handoff_events || []).length > 0 && (
                     <span
                       style={{

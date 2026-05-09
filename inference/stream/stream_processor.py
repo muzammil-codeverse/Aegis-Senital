@@ -599,6 +599,7 @@ class StreamProcessor:
         # Stage 4: buffer + temporal scoring
         self._buffer.add(packet)
         events = self._event_engine.evaluate(self._buffer)
+        segmentation_payload = self._intelligence_runtime.segmentation_service.refine_frame(packet, events=events)
         scenarios = self._scenario_engine.aggregate(events)
         validate_frame_result(packet, packet.tracks, events)
 
@@ -628,6 +629,7 @@ class StreamProcessor:
                         "trajectories": trajectories,
                         "anomalies": anomalies,
                         "events": [e.to_dict() for e in events],
+                        "segmentation": segmentation_payload,
                         "incidents": intelligence_packet.get("incidents", []),
                     },
                     f,
@@ -649,8 +651,10 @@ class StreamProcessor:
             det_dicts = [
                 {
                     "type": getattr(d, "class_name", ""),
+                    "detection_id": getattr(d, "detection_id", None),
                     "bbox": list(getattr(d, "bbox", [])),
                     "confidence": float(getattr(d, "confidence", 0.0)),
+                    "segmentation": getattr(d, "segmentation", None) or getattr(d, "metadata", {}).get("segmentation"),
                 }
                 for d in packet.detections[:20]
             ]
@@ -664,6 +668,7 @@ class StreamProcessor:
                 tracks=track_dicts,
                 events=event_dicts,
                 incidents=incidents,
+                segmentation=segmentation_payload,
             )
         except Exception:
             pass

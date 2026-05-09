@@ -126,6 +126,7 @@ def _process_frame_job(
             )
             buffer.add(packet)
             frame_events = event_engine.evaluate(buffer)
+            segmentation_payload = intelligence_runtime.segmentation_service.refine_frame(packet, events=frame_events)
             frame_scenarios = scenario_engine.aggregate(frame_events)
             intelligence_packet = intelligence_runtime.process_frame_context(
                 camera_id=packet.camera_id,
@@ -186,8 +187,10 @@ def _process_frame_job(
             detection_dicts = [
                 {
                     "type": d.class_name,
+                    "detection_id": d.detection_id,
                     "bbox": list(d.bbox) if hasattr(d, "bbox") else [],
                     "confidence": float(d.confidence) if hasattr(d, "confidence") else 0.0,
+                    "segmentation": getattr(d, "segmentation", None) or getattr(d, "metadata", {}).get("segmentation"),
                 }
                 for d in packet.detections[:32]
             ]
@@ -202,6 +205,7 @@ def _process_frame_job(
                 tracks=track_dicts,
                 events=events_list,
                 incidents=incidents,
+                segmentation=segmentation_payload,
                 width=640,
                 height=640,
             )
@@ -213,6 +217,7 @@ def _process_frame_job(
             "events": [{**e.to_dict(), "frame_id": frame_index} for e in frame_events],
             "scenarios": [{**s.to_dict(), "frame_id": frame_index} for s in frame_scenarios],
             "intelligence": intelligence_packet,
+            "segmentation": segmentation_payload,
             "fname": fname,
             "det_ms": round(det_ms, 2),
         }

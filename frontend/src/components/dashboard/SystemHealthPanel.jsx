@@ -22,9 +22,12 @@ function StatusCheckRow({ name, check }) {
   if (!check) return null
   const statusColors = {
     ok:          '#34d399',
+    healthy:     '#34d399',
     degraded:    '#fbbf24',
     error:       '#f87171',
+    failed:      '#f87171',
     unavailable: '#6b7280',
+    disabled:    '#6b7280',
   }
   const dot = statusColors[check.status] || '#6b7280'
   const label = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
@@ -59,8 +62,9 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
   // Subsystem order for display
   const CHECK_ORDER = [
     'security', 'database', 'redis', 'storage', 'gpu',
-    'model_registry', 'event_bus', 'open_vocab',
+    'model_registry', 'event_bus', 'open_vocab', 'segmentation',
   ]
+  const segmentationCheck = checks.segmentation || {}
 
   return (
     <section className="panel system-health-panel">
@@ -115,6 +119,22 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
         <MetricRow label="Queue overflows" value={metrics.queue_overflows ?? metrics.queue_overflow_count} warn={(metrics.queue_overflows ?? metrics.queue_overflow_count ?? 0) > 10} />
         <MetricRow label="Circuit trips"  value={metrics.circuit_breaker_trips ?? metrics.stream_circuit_breaks} warn={(metrics.circuit_breaker_trips ?? metrics.stream_circuit_breaks ?? 0) > 0} />
         <MetricRow label="Generated"      value={formatDateTime(health?.generatedAt)} />
+      </div>
+
+      <div style={{ marginTop: 10 }}>
+        <p style={{ margin: '0 0 5px', fontSize: '0.62rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+          Segmentation
+        </p>
+        <div className="health-grid">
+          <MetricRow label="Status" value={segmentationCheck.status || 'unknown'} warn={['degraded', 'disabled'].includes(segmentationCheck.status)} alert={['failed', 'error'].includes(segmentationCheck.status)} />
+          <MetricRow label="Provider" value={segmentationCheck.provider || 'sam2'} />
+          <MetricRow label="Loaded" value={segmentationCheck.loaded === true ? 'yes' : 'no'} warn={segmentationCheck.enabled && !segmentationCheck.loaded} />
+          <MetricRow label="Requests" value={metrics.segmentation_requests_total} />
+          <MetricRow label="Masks" value={metrics.segmentation_masks_generated_total} />
+          <MetricRow label="Failures" value={metrics.segmentation_failures_total} warn={(metrics.segmentation_failures_total || 0) > 0} />
+          <MetricRow label="Skipped" value={metrics.segmentation_skipped_total} />
+          <MetricRow label="Latency ms" value={metrics.segmentation_latency_ms != null ? Number(metrics.segmentation_latency_ms).toFixed(1) : null} />
+        </div>
       </div>
 
       {/* Camera health section */}

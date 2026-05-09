@@ -40,6 +40,15 @@ def _try_import(module: str) -> bool:
         return False
 
 
+def _get_nested(data: dict, path: str, default=None):
+    current = data
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return default
+        current = current[part]
+    return current
+
+
 # ---------------------------------------------------------------------------
 # Profile-based dependency validation
 # ---------------------------------------------------------------------------
@@ -88,6 +97,65 @@ def validate_dependencies(profile: str) -> list[dict]:
         r = check(entry["label"], ok, hint, required=True)
         results.append(r)
 
+    results.extend(validate_feature_dependencies(policy, profile))
+
+    return results
+
+
+def validate_feature_dependencies(policy: dict, profile: str) -> list[dict]:
+    results: list[dict] = []
+    feature_cfg = policy.get("feature_dependencies", {}).get("segmentation", {})
+    if not feature_cfg:
+        return results
+
+    print("\n[Feature Dependencies — segmentation]")
+    config_path = ROOT / feature_cfg.get("config_path", "configs/runtime/segmentation.yaml")
+    if not config_path.exists():
+        required = profile == "production"
+        results.append(check("segmentation config", False, str(config_path), required=required))
+        return results
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("segmentation config parseable", False, str(exc), required=True))
+        return results
+
+    enabled = bool(_get_nested(cfg, feature_cfg.get("enabled_path", "segmentation.enabled"), False))
+    provider = str(_get_nested(cfg, feature_cfg.get("provider_path", "segmentation.provider"), "sam2")).lower()
+    results.append(check("segmentation enabled", True, "enabled" if enabled else "disabled", required=False))
+    if not enabled:
+        return results
+    if provider != "sam2":
+        results.append(check("segmentation provider", False, f"unsupported provider: {provider}", required=profile == "production"))
+        return results
+
+    required = profile == "production"
+    module = feature_cfg.get("module", "sam2")
+    module_ok = _try_import(module)
+    detail = "available" if module_ok else f"missing; install: {feature_cfg.get('install_hint', '')}"
+    results.append(check(feature_cfg.get("label", "SAM2 segmentation"), module_ok, detail, required=required))
+
+    checkpoint_value = _get_nested(
+        cfg,
+        "segmentation.sam2.checkpoint_path",
+        feature_cfg.get("checkpoint_path", "models/segmentation/sam2/checkpoint.pt"),
+    )
+    model_config_value = _get_nested(
+        cfg,
+        "segmentation.sam2.model_config",
+        feature_cfg.get("model_config", "configs/segmentation/sam2.yaml"),
+    )
+    checkpoint = ROOT / str(checkpoint_value)
+    model_config = ROOT / str(model_config_value)
+    results.append(check("SAM2 checkpoint", checkpoint.exists(), str(checkpoint), required=required))
+    results.append(check("SAM2 model config", model_config.exists(), str(model_config), required=required))
+    if profile == "development" and (not module_ok or not checkpoint.exists() or not model_config.exists()):
+        results.append(check(
+            "segmentation degraded mode",
+            False,
+            "segmentation enabled but SAM2 assets are incomplete; runtime will fail open loudly",
+            required=False,
+        ))
     return results
 
 

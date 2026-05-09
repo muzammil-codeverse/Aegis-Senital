@@ -108,6 +108,15 @@ class SystemMetrics:
         self.open_vocab_model_auto_load_timeout_total = 0
         self.open_vocab_scan_to_push_latency_ms = 0.0
         self.open_vocab_active_stream_subscribers = 0
+        # Phase 27 — segmentation refinement metrics
+        self.segmentation_requests_total = 0
+        self.segmentation_success_total = 0
+        self.segmentation_failures_total = 0
+        self.segmentation_skipped_total = 0
+        self.segmentation_latency_ms = 0.0
+        self.segmentation_masks_generated_total = 0
+        self.segmentation_mask_area_ratio = 0.0
+        self.segmentation_provider_unavailable_total = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:
@@ -118,6 +127,9 @@ class SystemMetrics:
     def set_value(self, counter: str, value: int | float):
         with self._lock:
             setattr(self, counter, max(0, value))
+
+    def record_segmentation_value(self, counter: str, value: int | float):
+        self.set_value(counter, value)
 
     def to_dict(self):
         with self._lock:
