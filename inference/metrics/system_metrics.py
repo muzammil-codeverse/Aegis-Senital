@@ -41,6 +41,13 @@ class SystemMetrics:
         self.websocket_frame_dropped_messages = 0
         self.camera_timeline_queries = 0
         self.incident_replay_queries = 0
+        # Phase 18: geospatial operations map metrics
+        self.map_state_requests = 0
+        self.map_zone_queries = 0
+        self.map_topology_queries = 0
+        self.geofence_checks = 0
+        self.map_incident_markers = 0
+        self.map_alert_markers = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

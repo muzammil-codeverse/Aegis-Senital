@@ -6,6 +6,7 @@ import CommandOverview from '../components/dashboard/CommandOverview'
 import { useCameras } from '../hooks/useCameras'
 import { useLatestFrames } from '../hooks/useLatestFrames'
 import { useFrameUpdates } from '../hooks/useFrameUpdates'
+import { useMapState } from '../hooks/useMapState'
 import { getStreams } from '../api/camerasApi'
 import { compareSeverity } from '../utils/severity'
 import { DASHBOARD_POLL_MS } from '../config'
@@ -14,6 +15,14 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
+
+  const {
+    mapState,
+    loading: mapLoading,
+    error: mapError,
+    refresh: refreshMap,
+    setSelectedCameraId: setMapSelectedCameraId,
+  } = useMapState({ pollMs: DASHBOARD_POLL_MS })
 
   // Camera state — managed here, passed down to avoid duplicate fetching
   const { cameras, loading: camerasLoading, error: camerasError, refresh: refreshCameras, selectedCamera, setSelectedCamera } = useCameras()
@@ -91,7 +100,8 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
 
   const handleCameraSelect = useCallback(cam => {
     setSelectedCamera(cam)
-  }, [setSelectedCamera])
+    setMapSelectedCameraId(cam?.camera_id || null)
+  }, [setSelectedCamera, setMapSelectedCameraId])
 
   const handleCameraRefresh = useCallback(() => {
     refreshCameras()
@@ -128,6 +138,11 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
         anomaliesLoading={anomaliesLoading}
         anomaliesError={anomaliesError}
         onRefreshAnomalies={refreshAnomalies}
+        // Map
+        mapState={mapState}
+        mapLoading={mapLoading}
+        mapError={mapError}
+        onMapRefresh={refreshMap}
       />
       <AlertDetailDrawer
         open={Boolean(alertState.selectedAlert)}

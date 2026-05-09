@@ -56,6 +56,13 @@ class SystemMetrics:
         self.websocket_frame_dropped_messages: int = 0
         self.camera_timeline_queries: int = 0
         self.incident_replay_queries: int = 0
+        # Phase 18 — geospatial operations map metrics
+        self.map_state_requests: int = 0
+        self.map_zone_queries: int = 0
+        self.map_topology_queries: int = 0
+        self.geofence_checks: int = 0
+        self.map_incident_markers: int = 0
+        self.map_alert_markers: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 

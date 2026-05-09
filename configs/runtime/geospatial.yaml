@@ -1,0 +1,119 @@
+map:
+  provider: local
+  default_site: main_site
+  coordinate_mode: local
+  local_canvas:
+    width: 1600
+    height: 900
+    background: null
+
+sites:
+  - site_id: main_site
+    name: Aegis Sentinel Demo Site
+    bounds:
+      x_min: 0
+      y_min: 0
+      x_max: 1600
+      y_max: 900
+    metadata:
+      city: demo
+      description: Multi-zone security demonstration site
+
+zones:
+  - zone_id: entrance_zone
+    name: Entrance Zone
+    zone_type: entrance
+    priority: high
+    restricted: false
+    polygon:
+      - [60, 80]
+      - [380, 80]
+      - [380, 360]
+      - [60, 360]
+    allowed_objects: ["person", "vehicle"]
+    active_hours: [0, 24]
+
+  - zone_id: corridor_zone
+    name: Main Corridor
+    zone_type: corridor
+    priority: normal
+    restricted: false
+    polygon:
+      - [380, 300]
+      - [900, 300]
+      - [900, 580]
+      - [380, 580]
+    allowed_objects: ["person"]
+    active_hours: [0, 24]
+
+  - zone_id: lobby_zone
+    name: Main Lobby
+    zone_type: lobby
+    priority: high
+    restricted: false
+    polygon:
+      - [700, 80]
+      - [1060, 80]
+      - [1060, 380]
+      - [700, 380]
+    allowed_objects: ["person", "vehicle"]
+    active_hours: [0, 24]
+
+  - zone_id: parking_zone
+    name: Parking Lot
+    zone_type: parking
+    priority: normal
+    restricted: false
+    polygon:
+      - [100, 560]
+      - [600, 560]
+      - [600, 860]
+      - [100, 860]
+    allowed_objects: ["person", "vehicle"]
+    active_hours: [0, 24]
+
+  - zone_id: server_room_zone
+    name: Server Room Restricted
+    zone_type: restricted
+    priority: critical
+    restricted: true
+    polygon:
+      - [1080, 120]
+      - [1500, 120]
+      - [1500, 500]
+      - [1080, 500]
+    allowed_objects: []
+    active_hours: [0, 24]
+
+connections:
+  - from_camera: cam_entrance_01
+    to_camera: cam_corridor_01
+    distance_meters: 30
+    min_travel_seconds: 4
+    max_travel_seconds: 60
+    transition_probability: 0.75
+    bidirectional: true
+
+  - from_camera: cam_corridor_01
+    to_camera: cam_lobby_01
+    distance_meters: 25
+    min_travel_seconds: 3
+    max_travel_seconds: 45
+    transition_probability: 0.65
+    bidirectional: true
+
+  - from_camera: cam_lobby_01
+    to_camera: cam_server_room_01
+    distance_meters: 40
+    min_travel_seconds: 8
+    max_travel_seconds: 90
+    transition_probability: 0.20
+    bidirectional: false
+
+  - from_camera: cam_entrance_01
+    to_camera: cam_parking_01
+    distance_meters: 50
+    min_travel_seconds: 10
+    max_travel_seconds: 120
+    transition_probability: 0.45
+    bidirectional: true

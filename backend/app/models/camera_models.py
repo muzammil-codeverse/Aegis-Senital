@@ -43,6 +43,9 @@ class Camera:
     updated_at: float = field(default_factory=time.time)
     last_frame_at: float | None = None
     last_event_at: float | None = None
+    fov_degrees: float | None = None
+    view_direction_degrees: float | None = None
+    coverage_radius: float | None = None
     metadata: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -60,6 +63,9 @@ class Camera:
             "updated_at": self.updated_at,
             "last_frame_at": self.last_frame_at,
             "last_event_at": self.last_event_at,
+            "fov_degrees": self.fov_degrees,
+            "view_direction_degrees": self.view_direction_degrees,
+            "coverage_radius": self.coverage_radius,
             "metadata": self.metadata or {},
         }
 
@@ -79,5 +85,8 @@ class Camera:
             updated_at=float(data.get("updated_at") or time.time()),
             last_frame_at=data.get("last_frame_at") or None,
             last_event_at=data.get("last_event_at") or None,
+            fov_degrees=float(data["fov_degrees"]) if data.get("fov_degrees") is not None else None,
+            view_direction_degrees=float(data["view_direction_degrees"]) if data.get("view_direction_degrees") is not None else None,
+            coverage_radius=float(data["coverage_radius"]) if data.get("coverage_radius") is not None else None,
             metadata=dict(data.get("metadata") or {}),
         )

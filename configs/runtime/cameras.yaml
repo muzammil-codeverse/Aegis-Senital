@@ -11,7 +11,12 @@ cameras:
     location:
       lat: null
       lng: null
+      x: 180
+      y: 220
       floor: 0
+    fov_degrees: 90
+    view_direction_degrees: 90
+    coverage_radius: 180
     metadata:
       description: Primary entry monitoring camera
 
@@ -25,7 +30,12 @@ cameras:
     location:
       lat: null
       lng: null
+      x: 620
+      y: 440
       floor: 0
+    fov_degrees: 110
+    view_direction_degrees: 0
+    coverage_radius: 200
     metadata:
       description: Main corridor monitoring
 
@@ -39,7 +49,12 @@ cameras:
     location:
       lat: null
       lng: null
+      x: 340
+      y: 700
       floor: -1
+    fov_degrees: 120
+    view_direction_degrees: 270
+    coverage_radius: 220
     metadata:
       description: External parking area camera
 
@@ -53,7 +68,12 @@ cameras:
     location:
       lat: null
       lng: null
+      x: 1260
+      y: 300
       floor: 1
+    fov_degrees: 60
+    view_direction_degrees: 180
+    coverage_radius: 120
     metadata:
       description: Restricted access server room camera
 
@@ -67,6 +87,11 @@ cameras:
     location:
       lat: null
       lng: null
+      x: 870
+      y: 220
       floor: 0
+    fov_degrees: 100
+    view_direction_degrees: 270
+    coverage_radius: 190
     metadata:
       description: Main lobby area camera

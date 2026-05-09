@@ -7,6 +7,7 @@ import HeatmapPanel from './HeatmapPanel'
 import LiveVideoSurface from './LiveVideoSurface'
 import IncidentPanel from './IncidentPanel'
 import MetricsPanel from './MetricsPanel'
+import OperationsMapPanel from './OperationsMapPanel'
 import SystemHealthPanel from './SystemHealthPanel'
 import TimelinePanel from './TimelinePanel'
 import IncidentReplayDrawer from '../incidents/IncidentReplayDrawer'
@@ -43,6 +44,11 @@ export default function CommandOverview({
   anomaliesLoading,
   anomaliesError,
   onRefreshAnomalies,
+  // Map
+  mapState,
+  mapLoading,
+  mapError,
+  onMapRefresh,
 }) {
   const [replayIncident, setReplayIncident] = useState(null)
   const [replayOpen, setReplayOpen] = useState(false)
@@ -54,6 +60,12 @@ export default function CommandOverview({
   function openReplay(incident) {
     setReplayIncident(incident)
     setReplayOpen(true)
+  }
+
+  function handleMapCameraSelect(camNode) {
+    // Find the full Camera object from the camera list
+    const cam = cameras.find(c => c.camera_id === camNode.camera_id)
+    if (cam) onCameraSelect && onCameraSelect(cam)
   }
 
   return (
@@ -94,6 +106,17 @@ export default function CommandOverview({
               />
             )}
           </div>
+
+          {/* Operations map */}
+          <OperationsMapPanel
+            mapState={mapState}
+            loading={mapLoading}
+            error={mapError}
+            onRefresh={onMapRefresh}
+            selectedCameraId={selectedCamera?.camera_id}
+            onCameraSelect={handleMapCameraSelect}
+            onIncidentSelect={inc => openReplay({ incident_id: inc.incident_id, incident_type: inc.incident_type, severity: inc.severity })}
+          />
 
           {/* Camera forensic timeline */}
           {selectedCamera && (

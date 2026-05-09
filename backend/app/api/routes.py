@@ -165,6 +165,10 @@ def get_core_metrics():
     base.setdefault("active_mjpeg_clients", metrics.active_mjpeg_clients if hasattr(metrics, "active_mjpeg_clients") else 0)
     base.setdefault("mjpeg_frames_served", metrics.mjpeg_frames_served if hasattr(metrics, "mjpeg_frames_served") else 0)
     base.setdefault("stale_camera_frames", metrics.stale_camera_frames if hasattr(metrics, "stale_camera_frames") else 0)
+    # Bridge Phase-18 geospatial metrics
+    for _geo_key in ("map_state_requests", "map_zone_queries", "map_topology_queries",
+                     "geofence_checks", "map_incident_markers", "map_alert_markers"):
+        base.setdefault(_geo_key, getattr(metrics, _geo_key, 0))
     return base
 
 
@@ -747,5 +751,97 @@ def get_stream_session_api(camera_id: str):
     from app.services.stream_session_manager import get_stream_session_manager
     item = get_stream_session_manager().get_stream_state(camera_id)
     return {"item": item, "status": "ok"}
+
+
+# ── Geospatial / Map endpoints ────────────────────────────────────────────────
+
+def _geo():
+    from app.services.geospatial_service import get_geospatial_service
+    return get_geospatial_service()
+
+
+def _geo_metric(name: str) -> None:
+    try:
+        metrics.increment(name)
+    except Exception:
+        pass
+
+
+@router.get("/api/map/state")
+def get_map_state_api():
+    _geo_metric("map_state_requests")
+    state = _geo().get_map_state()
+    _geo_metric("map_incident_markers")
+    _geo_metric("map_alert_markers")
+    return {"item": state, "status": "ok"}
+
+
+@router.get("/api/map/sites")
+def list_map_sites_api():
+    items = _geo().list_sites()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/sites/{site_id}")
+def get_map_site_api(site_id: str):
+    site = _geo().get_site(site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail=f"Site '{site_id}' not found")
+    return {"item": site, "status": "ok"}
+
+
+@router.get("/api/map/zones")
+def list_map_zones_api(site_id: str | None = Query(default=None)):
+    _geo_metric("map_zone_queries")
+    items = _geo().list_zones(site_id=site_id)
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/zones/{zone_id}")
+def get_map_zone_api(zone_id: str):
+    _geo_metric("map_zone_queries")
+    zone = _geo().get_zone(zone_id)
+    if zone is None:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found")
+    return {"item": zone, "status": "ok"}
+
+
+@router.get("/api/map/geofences")
+def list_map_geofences_api():
+    items = _geo().list_geofences()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/cameras")
+def list_map_cameras_api():
+    items = _geo().get_camera_nodes()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/connections")
+def list_map_connections_api():
+    items = _geo().get_camera_connections()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/incidents")
+def list_map_incidents_api():
+    _geo_metric("map_incident_markers")
+    items = _geo().get_incident_markers()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/alerts")
+def list_map_alerts_api():
+    _geo_metric("map_alert_markers")
+    items = _geo().get_alert_markers()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/map/topology")
+def get_map_topology_api():
+    _geo_metric("map_topology_queries")
+    topology = _geo().get_camera_topology()
+    return {"item": topology, "status": "ok"}
 
 
