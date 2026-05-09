@@ -1,5 +1,6 @@
 import os
 import tempfile
+from typing import Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query, WebSocket
 from pydantic import BaseModel
 from app.services.video_service import extract_frames
@@ -914,3 +915,305 @@ async def websocket_handoffs_endpoint(websocket: WebSocket):
     await get_websocket_handoff_service().handle_connection(websocket)
 
 
+# ============================================================
+# MODEL REGISTRY ENDPOINTS (Phase 20)
+# ============================================================
+
+def _get_model_registry():
+    from ml.runtime.model_registry import get_model_registry
+    return get_model_registry()
+
+
+@router.get("/api/models")
+def list_models_api(
+    task: Optional[str] = Query(default=None),
+    enabled_only: bool = Query(default=False),
+):
+    """List all models in the registry, optionally filtered by task or enabled state."""
+    try:
+        registry = _get_model_registry()
+        items = registry.list_models(task=task, enabled_only=enabled_only)
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/models/health")
+def get_models_health_api():
+    """Return health and inference stats for all registered models."""
+    try:
+        registry = _get_model_registry()
+        items = registry.list_models()
+        health_summary = [
+            {
+                "model_id": m["model_id"],
+                "health": m["health"],
+                "inference": m["inference"],
+            }
+            for m in items
+        ]
+        return {"items": health_summary, "count": len(health_summary), "status": "ok"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/models/reload")
+def reload_models_api():
+    """Force-reload the model registry from disk."""
+    try:
+        registry = _get_model_registry()
+        registry.reload()
+        items = registry.list_models()
+        return {"status": "ok", "count": len(items), "detail": "Registry reloaded"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+@router.patch("/api/models/{model_id:path}")
+async def patch_model_api(model_id: str, payload: dict):
+    """Patch allowed runtime fields (enabled, confidence_threshold, device_preference)."""
+    try:
+        registry = _get_model_registry()
+        allowed = {
+            k: v
+            for k, v in payload.items()
+            if k in {"enabled", "confidence_threshold", "device_preference"}
+        }
+        ok = registry.patch_model(model_id, allowed)
+        if not ok:
+            return {"status": "not_found", "detail": f"Model {model_id} not found"}
+        item = registry.get_model(model_id)
+        return {"status": "ok", "item": item}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+@router.get("/api/models/{model_id:path}")
+def get_model_api(model_id: str):
+    """Retrieve a single model record by ID."""
+    try:
+        registry = _get_model_registry()
+        item = registry.get_model(model_id)
+        if item is None:
+            return {
+                "item": None,
+                "status": "not_found",
+                "detail": f"Model {model_id} not found",
+            }
+        return {"item": item, "status": "ok", "detail": None}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+# ============================================================
+# IDENTITY PROFILE ENDPOINTS (Phase 20)
+# ============================================================
+
+def _id_store():
+    from inference.identity.identity_profile_store import get_identity_store
+    return get_identity_store()
+
+
+def _wl_store():
+    from inference.identity.watchlist_store import get_watchlist_store
+    return get_watchlist_store()
+
+
+@router.get("/api/identities")
+def list_identities_api(
+    status: Optional[str] = Query(default=None),
+    tag: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+):
+    try:
+        store = _id_store()
+        items = [p.to_dict() for p in store.list_identities(status=status, tag=tag, limit=limit)]
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/identities")
+async def create_identity_api(payload: dict):
+    try:
+        store = _id_store()
+        profile = store.create_identity(
+            display_name=payload.get("display_name"),
+            tags=payload.get("tags", []),
+            notes=payload.get("notes"),
+            metadata=payload.get("metadata", {}),
+        )
+        try:
+            get_metrics().increment("identities_registered")
+        except Exception:
+            pass
+        return {"item": profile.to_dict(), "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identities/{identity_id}")
+def get_identity_api(identity_id: str):
+    try:
+        store = _id_store()
+        profile = store.get_identity(identity_id)
+        if not profile:
+            return {
+                "item": None,
+                "status": "not_found",
+                "detail": f"Identity {identity_id} not found",
+            }
+        return {"item": profile.to_dict(), "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.patch("/api/identities/{identity_id}")
+async def update_identity_api(identity_id: str, payload: dict):
+    try:
+        store = _id_store()
+        profile = store.update_identity(identity_id, payload)
+        if not profile:
+            return {
+                "item": None,
+                "status": "not_found",
+                "detail": f"Identity {identity_id} not found",
+            }
+        return {"item": profile.to_dict(), "status": "ok"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.delete("/api/identities/{identity_id}")
+def archive_identity_api(identity_id: str):
+    try:
+        store = _id_store()
+        ok = store.archive_identity(identity_id)
+        if not ok:
+            return {"status": "not_found", "detail": f"Identity {identity_id} not found"}
+        return {"status": "ok", "detail": "Identity archived"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+@router.post("/api/identities/{identity_id}/enroll-face")
+async def enroll_face_api(
+    identity_id: str,
+    file: UploadFile = File(...),
+    display_name: Optional[str] = Query(default=None),
+):
+    try:
+        from app.services.face_enrollment_service import get_enrollment_service
+        service = get_enrollment_service()
+        data = await file.read()
+        result = service.enroll_face(
+            identity_id=identity_id,
+            display_name=display_name,
+            image_filename=file.filename,
+            image_data=data,
+        )
+        if result.get("code") == 400:
+            raise HTTPException(status_code=400, detail=result.get("detail", "Bad request"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identities/{identity_id}/enrollments")
+def list_identity_enrollments_api(identity_id: str):
+    try:
+        store = _id_store()
+        enrollments = store.list_face_enrollments(identity_id)
+        items = [e.to_public_dict() for e in enrollments]
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identities/{identity_id}/matches")
+def list_identity_matches_api(
+    identity_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    try:
+        store = _id_store()
+        matches = store.list_matches(identity_id=identity_id, limit=limit)
+        items = [m.to_dict() for m in matches]
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+# ============================================================
+# WATCHLIST ENDPOINTS (Phase 20)
+# ============================================================
+
+@router.get("/api/watchlist")
+def list_watchlist_api(
+    active: bool = Query(default=True),
+    severity: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    try:
+        store = _wl_store()
+        entries = store.list_watchlist(active=active, severity=severity, limit=limit)
+        items = [e.to_dict() for e in entries]
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/watchlist")
+async def add_watchlist_entry_api(payload: dict):
+    try:
+        import time as _time
+        store = _wl_store()
+        expires_at = None
+        if payload.get("expires_days"):
+            expires_at = _time.time() + float(payload["expires_days"]) * 86400
+        entry = store.add_to_watchlist(
+            identity_id=payload["identity_id"],
+            severity=payload.get("severity", "medium"),
+            reason=payload.get("reason"),
+            expires_at=expires_at,
+            metadata=payload.get("metadata", {}),
+        )
+        # Reflect watchlisted status on the identity record
+        _id_store().update_identity(entry.identity_id, {"status": "watchlisted"})
+        try:
+            get_metrics().increment("watchlist_entries_active")
+        except Exception:
+            pass
+        return {"item": entry.to_dict(), "status": "ok"}
+    except KeyError as exc:
+        return {"item": None, "status": "error", "detail": f"Missing required field: {exc}"}
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.delete("/api/watchlist/{watchlist_id}")
+def remove_watchlist_entry_api(watchlist_id: str):
+    try:
+        store = _wl_store()
+        ok = store.remove_from_watchlist(watchlist_id)
+        if not ok:
+            return {
+                "status": "not_found",
+                "detail": f"Watchlist entry {watchlist_id} not found",
+            }
+        return {"status": "ok", "detail": "Entry removed"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+@router.get("/api/watchlist/identity/{identity_id}")
+def get_identity_watchlist_api(identity_id: str):
+    try:
+        store = _wl_store()
+        entries = store.get_identity_watchlist(identity_id)
+        items = [e.to_dict() for e in entries]
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}

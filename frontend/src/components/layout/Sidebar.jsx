@@ -4,6 +4,9 @@ const NAV_ITEMS = [
   { id: 'incidents', label: 'Incidents' },
   { id: 'system', label: 'System' },
   { id: 'forensics', label: 'Forensics' },
+  { id: 'identities', label: 'Identities' },
+  { id: 'watchlist', label: 'Watchlist' },
+  { id: 'models', label: 'Models' },
 ]
 
 export default function Sidebar({ currentPage, onNavigate }) {

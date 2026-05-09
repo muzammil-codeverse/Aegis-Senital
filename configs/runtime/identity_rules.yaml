@@ -1,0 +1,19 @@
+face_enrollment:
+  allowed_extensions: [".jpg", ".jpeg", ".png"]
+  max_file_mb: 8
+  min_quality_score: 0.40
+
+matching:
+  min_watchlist_confidence: 0.72
+  min_identity_confidence: 0.60
+  match_retention_seconds: 3600
+
+watchlist:
+  default_expiry_days: null
+  high_severity_alert: true
+  critical_auto_escalate: true
+
+storage:
+  enrollment_image_dir: storage/enrollments/images
+  identity_store_dir: storage/identities
+  watchlist_store_dir: storage/watchlists

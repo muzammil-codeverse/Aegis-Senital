@@ -8,10 +8,15 @@ import { useWebSocketAlerts } from './hooks/useWebSocketAlerts'
 import AlertsPage from './pages/AlertsPage'
 import Dashboard from './pages/Dashboard'
 import ForensicsPage from './pages/ForensicsPage'
+import IdentityPage from './pages/IdentityPage'
 import IncidentsPage from './pages/IncidentsPage'
+import ModelsPage from './pages/ModelsPage'
 import SystemHealthPage from './pages/SystemHealthPage'
 
-const VALID_PAGES = new Set(['dashboard', 'alerts', 'incidents', 'system', 'forensics'])
+const VALID_PAGES = new Set([
+  'dashboard', 'alerts', 'incidents', 'system', 'forensics',
+  'identities', 'watchlist', 'models',
+])
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState(pageFromHash())
@@ -62,6 +67,9 @@ function renderPage(page, props) {
   if (page === 'incidents') return <IncidentsPage {...props} />
   if (page === 'system') return <SystemHealthPage {...props} />
   if (page === 'forensics') return <ForensicsPage {...props} />
+  if (page === 'identities') return <IdentityPage />
+  if (page === 'watchlist') return <IdentityPage />
+  if (page === 'models') return <ModelsPage />
   return <Dashboard {...props} />
 }
 

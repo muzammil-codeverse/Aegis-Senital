@@ -92,6 +92,63 @@ class AlertManager:
         )
         return self._register_alert(alert)
 
+    def create_watchlist_alert(self, event: Any) -> Alert | None:
+        """
+        Create a WATCHLIST_ALERT from a WATCHLIST_HIT event payload.
+
+        Severity mapping mirrors the watchlist entry severity so critical
+        watchlist hits produce critical alerts without going through the
+        generic router.
+        """
+        payload = _to_dict(event)
+        severity_map = {
+            "critical": AlertSeverity.CRITICAL,
+            "high": AlertSeverity.HIGH,
+            "medium": AlertSeverity.MEDIUM,
+            "low": AlertSeverity.LOW,
+        }
+        wl_severity = str(payload.get("severity", "medium")).lower()
+        severity = severity_map.get(wl_severity, AlertSeverity.MEDIUM)
+
+        identity_id = payload.get("identity_id")
+        camera_ids = payload.get("camera_ids", [])
+        if not camera_ids and payload.get("camera_id"):
+            camera_ids = [str(payload["camera_id"])]
+        track_ids = payload.get("track_ids", [])
+        confidence = float(payload.get("confidence", 0.0) or 0.0)
+
+        alert = Alert(
+            incident_id=None,
+            event_ids=[],
+            camera_ids=[str(c) for c in camera_ids],
+            track_ids=[int(t) for t in track_ids],
+            identity_ids=[str(identity_id)] if identity_id else [],
+            severity=severity,
+            state=AlertState.NEW,
+            title=f"{severity.value.upper()} watchlist hit: identity {str(identity_id or 'unknown')[:12]}",
+            description=(
+                f"Watchlisted identity detected — severity: {wl_severity}, "
+                f"confidence: {confidence:.1%}, "
+                f"cameras: {', '.join(str(c) for c in camera_ids) or 'unknown'}."
+            ),
+            risk_score=confidence,
+            confidence=confidence,
+            metadata={
+                "source": "watchlist_hit",
+                "alert_type": "watchlist_alert",
+                "identity_id": identity_id,
+                "watchlist_severity": wl_severity,
+                "event": payload,
+            },
+        )
+        result = self._register_alert(alert)
+        if result is not None:
+            try:
+                _increment_metric("watchlist_alerts_created")
+            except Exception:
+                pass
+        return result
+
     def acknowledge_alert(self, alert_id: str, operator_id: str | None = None) -> Alert | None:
         return self._transition(alert_id, AlertState.ACKNOWLEDGED, {"operator_id": operator_id, "action": "acknowledge"})
 

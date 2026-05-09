@@ -73,6 +73,14 @@ class SystemMetrics:
         self.websocket_handoff_clients: int = 0
         self.websocket_handoff_messages: int = 0
         self.websocket_handoff_dropped_messages: int = 0
+        # Phase 20 — identity intelligence and model registry metrics
+        self.identities_registered: int = 0
+        self.face_enrollments_created: int = 0
+        self.identity_matches_recorded: int = 0
+        self.watchlist_entries_active: int = 0
+        self.watchlist_hits: int = 0
+        self.watchlist_alerts_created: int = 0
+        self.face_enrollment_failures: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 

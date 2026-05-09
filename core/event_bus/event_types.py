@@ -16,3 +16,5 @@ class EventType(str, Enum):
     HANDOFF_CONFIRMED = "HANDOFF_CONFIRMED"
     HANDOFF_REJECTED = "HANDOFF_REJECTED"
     HANDOFF_EXPIRED = "HANDOFF_EXPIRED"
+    # Phase 20 — identity intelligence
+    WATCHLIST_HIT = "watchlist_hit"

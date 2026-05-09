@@ -201,6 +201,32 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
                       <span style={{ color: '#9ca3af' }}>{formatTimestamp(alert.created_at)}</span>
                       <strong style={{ color: '#e6e6e6' }}>{alert.title || alert.alert_id}</strong>
                       <SeverityBadge severity={alert.severity} compact />
+                      {/* Phase 20 — identity / watchlist signals in replay */}
+                      {alert.metadata?.identity_id && (
+                        <div style={{ marginTop: 2, display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: '0.65rem' }}>
+                          <span style={{ color: '#8b949e', fontFamily: 'monospace' }}>
+                            ID: {String(alert.metadata.identity_id).slice(0, 12)}…
+                          </span>
+                          {alert.metadata.display_name && (
+                            <span style={{ color: '#3fb950' }}>{alert.metadata.display_name}</span>
+                          )}
+                          {alert.metadata.watchlist_severity && (
+                            <span style={{
+                              padding: '1px 5px',
+                              borderRadius: '8px',
+                              background: '#21262d',
+                              color: {
+                                critical: '#f85149', high: '#f0883e',
+                                medium: '#e3b341', low: '#8b949e',
+                              }[alert.metadata.watchlist_severity] || '#8b949e',
+                              fontWeight: 600,
+                              textTransform: 'uppercase',
+                            }}>
+                              {alert.metadata.watchlist_severity}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </li>
                   ))}
                 </ol>
