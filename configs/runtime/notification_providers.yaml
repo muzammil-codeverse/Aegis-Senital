@@ -1,0 +1,12 @@
+webhook:
+  enabled: false
+  url: ""
+  timeout_seconds: 3
+
+simulated_sms:
+  enabled: true
+  recipients:
+    - "+920000000000"
+
+console:
+  enabled: true

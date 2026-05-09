@@ -9,6 +9,10 @@ from typing import Any
 
 from core.event_bus import EventType, get_event_bus
 from core.runtime import get_runtime_supervisor
+from inference.alerts.alert_manager import AlertManager
+from inference.alerts.alert_router import AlertRouter
+from inference.alerts.alert_store import AlertStore
+from inference.alerts.notification.dispatcher import NotificationDispatcher
 from inference.anomaly.anomaly_engine import AnomalyEngine
 from inference.config_runtime import load_runtime_config
 from inference.correlation.handoff_predictor import HandoffPredictor
@@ -31,6 +35,10 @@ class IntelligenceRuntime:
         self.handoff_predictor = HandoffPredictor()
         self.timeline_builder = TimelineBuilder()
         self.replay_indexer = ReplayIndexer()
+        self.alert_store = AlertStore()
+        self.alert_router = AlertRouter()
+        self.alert_manager = AlertManager(store=self.alert_store, router=self.alert_router)
+        self.notification_dispatcher = NotificationDispatcher(router=self.alert_router)
         self.identity_graph = TemporalIdentityGraph(cfg.get("identity_graph", {}))
         self.context_engine = _optional_context_engine()
         self._packet_history = deque(maxlen=int(cfg.get("packet_history_size", 1_000)))
@@ -49,6 +57,7 @@ class IntelligenceRuntime:
             "trajectories": 0,
             "anomalies": 0,
             "incidents": 0,
+            "alerts": 0,
             "handoff_predictions": 0,
         }
 
@@ -95,6 +104,7 @@ class IntelligenceRuntime:
             ]
             self._update_identity_graph(camera_id, ts, tracks, trajectories, events, anomalies)
             incidents = self.incident_engine.process(events=events, anomalies=anomalies, timeline_ref=None)
+            alerts = self._process_alerts(incidents, events)
             timeline_record = self.timeline_builder.record_frame(
                 timestamp=ts,
                 camera_id=camera_id,
@@ -103,7 +113,7 @@ class IntelligenceRuntime:
                 events=events,
                 incidents=incidents,
                 anomalies=anomalies,
-                metadata={"handoffs": handoffs},
+                metadata={"handoffs": handoffs, "alert_ids": [alert["alert_id"] for alert in alerts]},
             )
             replay_path = self.replay_indexer.append(timeline_record)
             self.incident_engine.attach_timeline_ref(
@@ -121,11 +131,16 @@ class IntelligenceRuntime:
                 "anomalies": anomalies,
                 "events": [_to_dict(item) for item in events],
                 "incidents": incidents,
+                "alerts": alerts,
                 "metrics": {
                     "runtime": dict(self._metrics),
                     "trajectory": self.trajectory_engine.get_metrics(),
                     "anomaly": self.anomaly_engine.get_metrics(),
                     "incident": self.incident_engine.get_metrics(),
+                    "alert": {
+                        "active_alerts": len(self.alert_manager.list_alerts(limit=2_000)),
+                        "new_alerts": len(alerts),
+                    },
                     "handoff_predictions": len(handoffs),
                 },
             }
@@ -197,13 +212,75 @@ class IntelligenceRuntime:
             "supervisor": get_runtime_supervisor().get_health_snapshot(),
         }
 
+    def get_alerts(
+        self,
+        state: str | None = None,
+        severity: str | None = None,
+        limit: int = 100,
+    ) -> dict:
+        alerts = [alert.to_dict() for alert in self.alert_manager.list_alerts(state=state, severity=severity, limit=limit)]
+        return {"items": alerts, "count": len(alerts), "status": "ok" if alerts else "empty"}
+
+    def get_alert(self, alert_id: str) -> dict:
+        alert = self.alert_manager.get_alert(alert_id)
+        return {"item": alert.to_dict() if alert else None, "status": "ok" if alert else "not_found"}
+
+    def acknowledge_alert(self, alert_id: str, operator_id: str | None = None) -> dict:
+        alert = self.alert_manager.acknowledge_alert(alert_id, operator_id=operator_id)
+        return {"item": alert.to_dict() if alert else None, "status": "ok" if alert else "not_found"}
+
+    def resolve_alert(self, alert_id: str, operator_id: str | None = None) -> dict:
+        alert = self.alert_manager.resolve_alert(alert_id, operator_id=operator_id)
+        return {"item": alert.to_dict() if alert else None, "status": "ok" if alert else "not_found"}
+
+    def escalate_alert(self, alert_id: str, reason: str | None = None) -> dict:
+        alert = self.alert_manager.escalate_alert(alert_id, reason=reason)
+        return {"item": alert.to_dict() if alert else None, "status": "ok" if alert else "not_found"}
+
+    def get_live_alert_feed(self, limit: int = 100) -> dict:
+        items = self.alert_manager.get_live_alert_feed(limit=limit)
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+    def get_alert_history(self, alert_id: str) -> dict:
+        history = self.alert_manager.get_alert_history(alert_id)
+        return {"items": history, "count": len(history), "status": "ok" if history else "empty"}
+
     def cleanup(self) -> None:
         with self._lock:
             self.trajectory_engine.cleanup()
             self.anomaly_engine.cleanup()
             self.incident_engine.cleanup()
+            self.alert_manager.expire_stale_alerts()
             self.identity_graph.prune_expired()
             self._cleanup_heatmap_locked(time.time())
+
+    def _process_alerts(self, incidents: list[dict], events: list[Any]) -> list[dict]:
+        alerts = []
+        incident_alert_created = False
+        for incident in incidents:
+            alert = self.alert_manager.create_alert_from_incident(incident)
+            if alert is None:
+                continue
+            incident_alert_created = True
+            if alert.state.value != "suppressed":
+                self._dispatch_alert(alert)
+            alerts.append(alert.to_dict())
+
+        if not incident_alert_created:
+            for event in events:
+                alert = self.alert_manager.create_alert_from_event(event)
+                if alert is None:
+                    continue
+                if alert.state.value != "suppressed":
+                    self._dispatch_alert(alert)
+                alerts.append(alert.to_dict())
+        return alerts
+
+    def _dispatch_alert(self, alert: Any) -> None:
+        results = self.notification_dispatcher.dispatch(alert)
+        for result in results:
+            self.alert_manager.record_dispatch_attempt(alert.alert_id, str(result.get("channel", "unknown")), result)
+        self.alert_manager.mark_dispatched(alert.alert_id, {"dispatch_results": results})
 
     def _record_packet(
         self,
@@ -220,7 +297,8 @@ class IntelligenceRuntime:
         self._metrics["trajectories"] += len(trajectories)
         self._metrics["anomalies"] += len(anomalies)
         self._metrics["incidents"] += len(incidents)
-        self._metrics["handoff_predictions"] += len(packet["metrics"].get("handoffs", []))
+        self._metrics["alerts"] += len(packet.get("alerts", []))
+        self._metrics["handoff_predictions"] += int(packet["metrics"].get("handoff_predictions", 0))
         for track in tracks:
             track_id = _get(track, "track_id")
             if track_id is None:

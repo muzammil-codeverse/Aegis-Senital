@@ -27,6 +27,11 @@ class StreamRemoveRequest(BaseModel):
     stream_id: str
 
 
+class AlertActionRequest(BaseModel):
+    operator_id: str | None = None
+    reason: str | None = None
+
+
 @router.get("/health")
 def health_check():
     from app.services.video_service import _engine, _runtime_db, _identity_fusion
@@ -240,3 +245,58 @@ def get_live_anomalies():
 def get_camera_heatmap(camera_id: str):
     heatmap = get_intelligence_runtime().get_camera_heatmap(camera_id)
     return IntelligenceResponseBuilder.heatmap(heatmap, camera_id)
+
+
+@router.get("/api/alerts")
+def list_alerts_api(
+    state: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=1000),
+):
+    response = get_intelligence_runtime().get_alerts(state=state, severity=severity, limit=limit)
+    return IntelligenceResponseBuilder.build_alert_feed_payload(response["items"])
+
+
+@router.get("/api/alerts/live")
+def live_alerts_api(limit: int = Query(default=100, ge=1, le=1000)):
+    response = get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    return IntelligenceResponseBuilder.build_alert_feed_payload(response["items"])
+
+
+@router.get("/api/alerts/operator-queue")
+def operator_queue_api(limit: int = Query(default=100, ge=1, le=1000)):
+    response = get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    return IntelligenceResponseBuilder.build_operator_queue_payload(response["items"])
+
+
+@router.get("/api/alerts/{alert_id}")
+def get_alert_api(alert_id: str):
+    response = get_intelligence_runtime().get_alert(alert_id)
+    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+
+
+@router.post("/api/alerts/{alert_id}/acknowledge")
+def acknowledge_alert_api(alert_id: str, body: AlertActionRequest | None = None):
+    operator_id = body.operator_id if body else None
+    response = get_intelligence_runtime().acknowledge_alert(alert_id, operator_id=operator_id)
+    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+
+
+@router.post("/api/alerts/{alert_id}/resolve")
+def resolve_alert_api(alert_id: str, body: AlertActionRequest | None = None):
+    operator_id = body.operator_id if body else None
+    response = get_intelligence_runtime().resolve_alert(alert_id, operator_id=operator_id)
+    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+
+
+@router.post("/api/alerts/{alert_id}/escalate")
+def escalate_alert_api(alert_id: str, body: AlertActionRequest | None = None):
+    reason = body.reason if body else None
+    response = get_intelligence_runtime().escalate_alert(alert_id, reason=reason)
+    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+
+
+@router.get("/api/alerts/{alert_id}/history")
+def alert_history_api(alert_id: str):
+    response = get_intelligence_runtime().get_alert_history(alert_id)
+    return IntelligenceResponseBuilder.build_alert_history_payload(response["items"])

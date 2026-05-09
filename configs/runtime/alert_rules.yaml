@@ -1,0 +1,56 @@
+max_alerts: 2000
+
+deduplication:
+  duplicate_window_seconds: 20
+  similarity_threshold: 0.80
+
+expiry:
+  default_expiry_seconds: 600
+  resolved_retention_seconds: 1800
+
+escalation:
+  unresolved_high_seconds: 60
+  unresolved_critical_seconds: 30
+  max_escalation_count: 3
+  cooldown_seconds: 20
+
+routing:
+  critical:
+    channels: ["websocket", "webhook", "simulated_sms"]
+  high:
+    channels: ["websocket", "webhook"]
+  medium:
+    channels: ["websocket"]
+  low:
+    channels: ["websocket"]
+  info:
+    channels: ["websocket"]
+
+suppression:
+  low_priority_burst_limit: 10
+  burst_window_seconds: 30
+
+websocket:
+  heartbeat_seconds: 30
+  outbound_queue_size: 100
+  max_clients: 100
+
+severity_thresholds:
+  critical_risk_score: 0.80
+  high_risk_score: 0.60
+  medium_risk_score: 0.40
+  low_risk_score: 0.20
+
+event_rules:
+  weapon_threat:
+    severity: high
+  geofence_violation:
+    critical_zone_priorities: ["critical", "high"]
+    critical_risk_score: 0.80
+  loitering:
+    repeated_count: 3
+    repeated_severity: high
+    default_severity: medium
+  unattended_object:
+    min_persistence_seconds: 10
+    default_severity: high

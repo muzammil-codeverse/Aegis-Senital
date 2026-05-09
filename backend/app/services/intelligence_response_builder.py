@@ -66,6 +66,34 @@ class IntelligenceResponseBuilder:
     def anomalies(anomalies: list[dict]) -> dict:
         return {"items": anomalies, "count": len(anomalies), "status": "ok" if anomalies else "empty"}
 
+    @staticmethod
+    def build_alert_feed_payload(alerts: list[dict]) -> dict:
+        now = time.time()
+        items = [_alert_feed_item(alert, now) for alert in alerts]
+        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+    @staticmethod
+    def build_alert_detail_payload(alert: dict | None) -> dict:
+        if alert is None:
+            return {"item": None, "status": "not_found"}
+        return {"item": alert, "status": "ok"}
+
+    @staticmethod
+    def build_alert_history_payload(history: list[dict]) -> dict:
+        return {"items": history, "count": len(history), "status": "ok" if history else "empty"}
+
+    @staticmethod
+    def build_operator_queue_payload(alerts: list[dict]) -> dict:
+        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        ordered = sorted(
+            alerts,
+            key=lambda alert: (
+                priority_order.get(str(alert.get("severity", "info")).lower(), 5),
+                float(alert.get("created_at", 0.0)),
+            ),
+        )
+        return IntelligenceResponseBuilder.build_alert_feed_payload(ordered)
+
 
 def _incident_summary(item: dict) -> str:
     incident_type = item.get("incident_type", "INCIDENT")
@@ -101,3 +129,22 @@ def _risk_timeline(events: list[dict]) -> list[dict]:
         }
         for event in events
     ]
+
+
+def _alert_feed_item(alert: dict, now: float) -> dict:
+    created_at = float(alert.get("created_at", now) or now)
+    return {
+        "alert_id": str(alert.get("alert_id", "")),
+        "severity": str(alert.get("severity", "info")),
+        "state": str(alert.get("state", "new")),
+        "title": str(alert.get("title", "")),
+        "description": str(alert.get("description", "")),
+        "risk_score": float(alert.get("risk_score", 0.0) or 0.0),
+        "confidence": float(alert.get("confidence", 0.0) or 0.0),
+        "camera_ids": list(alert.get("camera_ids", [])),
+        "track_ids": list(alert.get("track_ids", [])),
+        "identity_ids": list(alert.get("identity_ids", [])),
+        "created_at": created_at,
+        "updated_at": float(alert.get("updated_at", created_at) or created_at),
+        "age_seconds": max(0.0, round(now - created_at, 3)),
+    }

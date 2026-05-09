@@ -45,6 +45,8 @@ class SystemMetrics:
     # ── counter increments ────────────────────────────────────────────────────
 
     def increment(self, counter: str, n: int = 1) -> None:
+        if n < 0:
+            raise ValueError("metrics increments must be non-negative")
         with self._lock:
             setattr(self, counter, getattr(self, counter, 0) + n)
 

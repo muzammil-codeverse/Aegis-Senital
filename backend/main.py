@@ -7,7 +7,7 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.models.database import init_db
@@ -15,6 +15,7 @@ from app.services.video_service import bootstrap_inference_runtime
 from app.core.logging_config import logger
 from inference.logging_setup import configure_logging
 from ml.runtime import system_boot_check
+from app.services.websocket_alert_service import websocket_alert_service
 
 app = FastAPI(title="Sentinel AI System", version="1.0.0")
 
@@ -40,6 +41,11 @@ async def log_requests(request: Request, call_next):
 
 
 app.include_router(router)
+
+
+@app.websocket("/ws/alerts")
+async def websocket_alerts(websocket: WebSocket):
+    await websocket_alert_service.connect(websocket)
 
 
 @app.on_event("startup")
