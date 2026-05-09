@@ -203,6 +203,10 @@ def main() -> int:
         print(f"  Reason: {recommendation.get('reason', '')}")
         print(f"  Confidence: {recommendation.get('confidence', 'low')}")
 
+    if args.task == "detection" and not model_metric_summaries:
+        logger.error("No real detection benchmark runs completed; refusing to report detector metrics")
+        return 1
+
     return 0
 
 
@@ -212,10 +216,17 @@ def _run_detection(
 ):
     from backend.app.evaluation.runners.detection_benchmark_runner import DetectionBenchmarkRunner
     from backend.app.evaluation.datasets.coco_yolo_loader import CocoYoloLoader
+    from backend.app.evaluation.datasets.yolo_validation import (
+        YoloDatasetValidationError,
+        validate_yolo_detection_dataset,
+    )
 
     dataset_name = args.dataset or config.get("evaluation", {}).get("default_detection_dataset", "weapon_eval")
     effective_model = model_name or "weapon_yolo"
     dataset_cfg = config.get("datasets", {}).get(dataset_name, {})
+    model_cfg = _find_model_cfg(config, effective_model) or {}
+    class_names = dataset_cfg.get("class_names") or model_cfg.get("classes", [])
+    model_path = _resolve_model_path(config, effective_model)
 
     try:
         dataset_entry = registry.get_required(dataset_name)
@@ -223,12 +234,34 @@ def _run_detection(
         logger.error("%s", exc)
         from backend.app.evaluation.schemas import BenchmarkTaskResult
         return BenchmarkTaskResult(
-            task="detection", model_name=effective_model, dataset_name=dataset_name,
+            task="detection", model_name=effective_model, model_path=model_path,
+            device=device, dataset_name=dataset_name, class_names=class_names,
             skipped=True, skip_reason=str(exc),
         )
 
-    model_cfg = _find_model_cfg(config, effective_model) or {}
-    class_names = dataset_cfg.get("class_names") or model_cfg.get("classes", [])
+    try:
+        validation_summary = validate_yolo_detection_dataset(
+            images_dir=dataset_entry.images_dir or "",
+            labels_dir=dataset_entry.labels_dir or "",
+            class_names=class_names,
+        )
+        logger.info(
+            "Dataset '%s' validation passed: %s images, %s labels, %s positive, %s negative",
+            dataset_name,
+            validation_summary.images_count,
+            validation_summary.labels_count,
+            validation_summary.positive_images_count,
+            validation_summary.negative_images_count,
+        )
+    except YoloDatasetValidationError as exc:
+        logger.error("%s", exc)
+        from backend.app.evaluation.schemas import BenchmarkTaskResult
+        return BenchmarkTaskResult(
+            task="detection", model_name=effective_model, model_path=model_path,
+            device=device, dataset_name=dataset_name, class_names=class_names,
+            skipped=True, skip_reason=str(exc),
+        )
+
     loader = CocoYoloLoader(
         dataset_entry.path,
         class_names=class_names,
@@ -240,25 +273,27 @@ def _run_detection(
     if not samples:
         from backend.app.evaluation.schemas import BenchmarkTaskResult
         return BenchmarkTaskResult(
-            task="detection", model_name=effective_model, dataset_name=dataset_name,
+            task="detection", model_name=effective_model, model_path=model_path,
+            device=device, dataset_name=dataset_name, class_names=class_names,
             skipped=True, skip_reason="No samples loaded from dataset path",
         )
 
-    model_path = _resolve_model_path(config, effective_model)
     try:
         predict_fn, adapter = _make_predict_fn(config, effective_model, device)
     except OptionalModelUnavailable as exc:
         logger.warning("%s", exc)
         from backend.app.evaluation.schemas import BenchmarkTaskResult
         return BenchmarkTaskResult(
-            task="detection", model_name=effective_model, dataset_name=dataset_name,
+            task="detection", model_name=effective_model, model_path=model_path,
+            device=device, dataset_name=dataset_name, class_names=class_names,
             skipped=True, skip_reason=str(exc),
         )
     except (FileNotFoundError, ImportError, RuntimeError, ValueError) as exc:
         logger.error("%s", exc)
         from backend.app.evaluation.schemas import BenchmarkTaskResult
         return BenchmarkTaskResult(
-            task="detection", model_name=effective_model, dataset_name=dataset_name,
+            task="detection", model_name=effective_model, model_path=model_path,
+            device=device, dataset_name=dataset_name, class_names=class_names,
             skipped=True, skip_reason=str(exc),
         )
     sweep_cfg = config.get("detection_threshold_sweep", {})
@@ -284,6 +319,7 @@ def _run_detection(
         compute_map_50_95=compute_map_50_95,
         threshold_sweep_config=sweep_cfg,
     )
+    result.metrics["dataset_validation"] = validation_summary.to_dict()
     try:
         from backend.app.evaluation.metrics.gpu_metrics import profile_gpu
         result.metrics["gpu_profile"] = profile_gpu(
