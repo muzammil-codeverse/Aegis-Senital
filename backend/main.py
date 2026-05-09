@@ -7,11 +7,14 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.api.routes import router
+from app.api.security_dependencies import enforce_request_security
 from app.models.database import init_db
 from app.services.video_service import bootstrap_inference_runtime
+from app.services.auth_service import get_auth_service
 from app.core.logging_config import logger
 from inference.logging_setup import configure_logging
 from ml.runtime import system_boot_check
@@ -32,12 +35,21 @@ app.add_middleware(
 async def log_requests(request: Request, call_next):
     start = time.time()
     logger.info(f"→ {request.method} {request.url.path}")
-    response = await call_next(request)
+    response = await enforce_request_security(request, call_next)
     elapsed_ms = (time.time() - start) * 1000
     logger.info(
         f"← {request.method} {request.url.path} {response.status_code} ({elapsed_ms:.1f}ms)"
     )
     return response
+
+
+@app.exception_handler(HTTPException)
+async def structured_http_exception(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict) and exc.detail.get("status"):
+        content = exc.detail
+    else:
+        content = {"status": "error", "detail": exc.detail or "Request failed"}
+    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
 
 app.include_router(router)
@@ -51,6 +63,7 @@ async def websocket_alerts(websocket: WebSocket):
 @app.on_event("startup")
 async def startup():
     configure_logging()
+    get_auth_service().bootstrap()
     system_boot_check()
     bootstrap_inference_runtime()
     init_db()

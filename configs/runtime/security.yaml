@@ -1,0 +1,68 @@
+auth:
+  jwt_secret_env: AEGIS_JWT_SECRET
+  algorithm: HS256
+  access_token_minutes: 480
+  require_auth: true
+  bootstrap_admin_username: admin
+  bootstrap_admin_password_env: AEGIS_BOOTSTRAP_ADMIN_PASSWORD
+password:
+  min_length: 10
+  require_uppercase: true
+  require_lowercase: true
+  require_number: true
+  require_symbol: false
+  bcrypt_rounds: 12
+lockout:
+  enabled: true
+  max_failed_attempts: 5
+  lockout_seconds: 900
+audit:
+  enabled: true
+  storage_dir: storage/audit
+  rotate_daily: true
+  max_recent_entries: 2000
+privacy:
+  mask_identity_display_for_viewer: true
+  hide_watchlist_reason_for_operator: true
+  allow_raw_enrollment_image_access: false
+  audit_forensic_access: true
+rbac:
+  admin:
+    - "*"
+  supervisor:
+    - "camera:read"
+    - "camera:control"
+    - "alert:read"
+    - "alert:write"
+    - "incident:read"
+    - "incident:write"
+    - "identity:read"
+    - "watchlist:read"
+    - "forensics:read"
+    - "map:read"
+    - "metrics:read"
+    - "model:read"
+    - "audit:read"
+  analyst:
+    - "camera:read"
+    - "alert:read"
+    - "incident:read"
+    - "incident:write"
+    - "identity:read"
+    - "watchlist:read"
+    - "forensics:read"
+    - "map:read"
+    - "model:read"
+  operator:
+    - "camera:read"
+    - "camera:control"
+    - "alert:read"
+    - "alert:write"
+    - "incident:read"
+    - "map:read"
+    - "metrics:read"
+  viewer:
+    - "camera:read"
+    - "alert:read"
+    - "incident:read"
+    - "map:read"

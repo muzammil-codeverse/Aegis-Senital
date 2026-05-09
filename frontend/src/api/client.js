@@ -1,6 +1,27 @@
 import axios from 'axios'
 import { API_BASE_URL, REQUEST_TIMEOUT_MS } from '../config'
 
+export const AUTH_TOKEN_KEY = 'aegis.accessToken'
+
+export function getStoredToken() {
+  return window.localStorage.getItem(AUTH_TOKEN_KEY) || window.sessionStorage.getItem(AUTH_TOKEN_KEY)
+}
+
+export function setStoredToken(token, { session = false } = {}) {
+  if (!token) return clearStoredToken()
+  const target = session ? window.sessionStorage : window.localStorage
+  const other = session ? window.localStorage : window.sessionStorage
+  other.removeItem(AUTH_TOKEN_KEY)
+  target.setItem(AUTH_TOKEN_KEY, token)
+  window.dispatchEvent(new CustomEvent('aegis-auth-change'))
+}
+
+export function clearStoredToken() {
+  window.localStorage.removeItem(AUTH_TOKEN_KEY)
+  window.sessionStorage.removeItem(AUTH_TOKEN_KEY)
+  window.dispatchEvent(new CustomEvent('aegis-auth-change'))
+}
+
 /**
  * @typedef {Object} ApiListResponse
  * @property {Array} items
@@ -28,16 +49,31 @@ export class ApiError extends Error {
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: REQUEST_TIMEOUT_MS,
+  withCredentials: true,
   headers: { Accept: 'application/json' },
+})
+
+apiClient.interceptors.request.use(config => {
+  const token = getStoredToken()
+  if (token) {
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
 })
 
 apiClient.interceptors.response.use(
   response => response,
   error => {
     const status = error.response?.status
+    if (status === 401) {
+      clearStoredToken()
+      window.dispatchEvent(new CustomEvent('aegis-auth-unauthorized'))
+    }
     const message =
       error.response?.data?.detail ||
       error.response?.data?.error ||
+      (status === 403 ? 'Access denied' : null) ||
       error.message ||
       'Backend request failed'
     throw new ApiError(message, {

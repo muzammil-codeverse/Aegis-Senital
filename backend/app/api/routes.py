@@ -1,12 +1,29 @@
 import os
 import tempfile
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query, WebSocket
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query, WebSocket, Request, Depends, Response
 from pydantic import BaseModel
+from app.api.security_dependencies import (
+    get_current_user_from_request,
+    require_auth as require_api_auth,
+    require_permission as require_api_permission,
+)
 from app.services.video_service import extract_frames
 from app.core.config import load_scenario_config
 from app.core.logging_config import logger
 from app.services.intelligence_response_builder import IntelligenceResponseBuilder
+from app.models.security_models import AuditAction, UserAccount
+from app.security.config import auth_required, get_rbac_config
+from app.security.permissions import permissions_for_role
+from app.services.audit_log_service import get_audit_log_service
+from app.services.auth_service import AuthError, get_auth_service
+from app.services.privacy_filter import (
+    filter_alert_payload,
+    filter_identity_payload,
+    filter_incident_payload,
+    filter_watchlist_payload,
+)
+from app.services.user_store import get_user_store
 from inference.identity_db import get_db
 from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
@@ -54,6 +71,257 @@ class CameraUpdateRequest(BaseModel):
     priority: str | None = None
     enabled: bool | None = None
     metadata: dict | None = None
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    display_name: str | None = None
+    role: str = "viewer"
+    metadata: dict | None = None
+
+
+class UserUpdateRequest(BaseModel):
+    display_name: str | None = None
+    role: str | None = None
+    status: str | None = None
+    password: str | None = None
+    metadata: dict | None = None
+
+
+def _request_user(request: Request) -> UserAccount | None:
+    return get_current_user_from_request(request)
+
+
+def _audit(
+    request: Request,
+    action: AuditAction,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    success: bool = True,
+    detail: str | None = None,
+    metadata: dict | None = None,
+):
+    return get_audit_log_service().record(
+        action,
+        user=_request_user(request),
+        resource_type=resource_type,
+        resource_id=resource_id,
+        success=success,
+        detail=detail,
+        request=request,
+        metadata=metadata,
+    )
+
+
+def _role_permissions(role: str | None) -> list[str]:
+    if not role:
+        return []
+    return permissions_for_role(role, get_rbac_config())
+
+
+def _current_user_payload(user: UserAccount | None) -> dict:
+    if user is None:
+        return {
+            "user": None,
+            "permissions": [],
+            "auth_required": auth_required(),
+        }
+    return {
+        "user": user.to_dict(),
+        "permissions": _role_permissions(user.role),
+        "auth_required": auth_required(),
+    }
+
+
+def _filter_alert_response(payload: dict, request: Request) -> dict:
+    return filter_alert_payload(payload, _request_user(request))
+
+
+def _filter_incident_response(payload: dict, request: Request) -> dict:
+    return filter_incident_payload(payload, _request_user(request))
+
+
+def _filter_identity_response(payload: dict, request: Request) -> dict:
+    return filter_identity_payload(payload, _request_user(request))
+
+
+def _filter_watchlist_response(payload: dict, request: Request) -> dict:
+    return filter_watchlist_payload(payload, _request_user(request))
+
+
+@router.post("/api/auth/login")
+def login_api(body: LoginRequest, request: Request, response: Response):
+    try:
+        payload = get_auth_service().login(body.username, body.password, request=request)
+        response.set_cookie(
+            "aegis_access_token",
+            payload["access_token"],
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="lax",
+            max_age=payload.get("expires_in_seconds", 0),
+        )
+        return payload
+    except AuthError:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+
+@router.post("/api/auth/logout")
+def logout_api(
+    request: Request,
+    response: Response,
+    current_user: UserAccount = Depends(require_api_auth),
+):
+    payload = get_auth_service().logout(current_user, request=request)
+    response.delete_cookie("aegis_access_token")
+    return payload
+
+
+@router.get("/api/auth/me")
+async def me_api(current_user: UserAccount = Depends(require_api_auth)):
+    return _current_user_payload(current_user)
+
+
+@router.get("/api/security/users")
+def list_security_users_api(
+    role: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    users = get_auth_service().list_users(role=role, status=status, limit=limit)
+    return {"items": [user.to_dict() for user in users], "count": len(users), "status": "ok" if users else "empty"}
+
+
+@router.post("/api/security/users")
+def create_security_user_api(
+    body: UserCreateRequest,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    try:
+        user = get_auth_service().create_user(
+            username=body.username,
+            password=body.password,
+            display_name=body.display_name,
+            role=body.role,
+            metadata=body.metadata or {},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    _audit(
+        request,
+        AuditAction.USER_CREATED,
+        resource_type="user",
+        resource_id=user.user_id,
+        metadata={"username": user.username, "role": user.role},
+    )
+    return {"item": user.to_dict(), "status": "ok"}
+
+
+@router.get("/api/security/users/{user_id}")
+def get_security_user_api(
+    user_id: str,
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    user = get_auth_service().get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    return {"item": user.to_dict(), "status": "ok"}
+
+
+@router.patch("/api/security/users/{user_id}")
+def update_security_user_api(
+    user_id: str,
+    body: UserUpdateRequest,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    updates = {key: value for key, value in body.model_dump().items() if value is not None}
+    try:
+        user = get_auth_service().update_user(user_id, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    _audit(
+        request,
+        AuditAction.USER_UPDATED,
+        resource_type="user",
+        resource_id=user.user_id,
+        metadata={"updated_fields": sorted(updates.keys())},
+    )
+    return {"item": user.to_dict(), "status": "ok"}
+
+
+@router.post("/api/security/users/{user_id}/disable")
+def disable_security_user_api(
+    user_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    user = get_auth_service().disable_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    _audit(request, AuditAction.USER_UPDATED, resource_type="user", resource_id=user.user_id, detail="User disabled")
+    return {"item": user.to_dict(), "status": "ok"}
+
+
+@router.post("/api/security/users/{user_id}/lock")
+def lock_security_user_api(
+    user_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("admin")),
+):
+    user = get_auth_service().lock_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    _audit(request, AuditAction.USER_UPDATED, resource_type="user", resource_id=user.user_id, detail="User locked")
+    return {"item": user.to_dict(), "status": "ok"}
+
+
+@router.get("/api/security/roles")
+def get_roles_api(current_user: UserAccount = Depends(require_api_auth)):
+    rbac = get_rbac_config()
+    if current_user.role in {"admin", "supervisor"}:
+        return {"items": [{"role": role, "permissions": perms} for role, perms in rbac.items()], "status": "ok"}
+    return {"items": [{"role": current_user.role, "permissions": _role_permissions(current_user.role)}], "status": "ok"}
+
+
+@router.get("/api/audit/logs")
+def list_audit_logs_api(
+    user_id: str | None = Query(default=None),
+    action: str | None = Query(default=None),
+    resource_type: str | None = Query(default=None),
+    start_time: float | None = Query(default=None),
+    end_time: float | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=2000),
+    current_user: UserAccount = Depends(require_api_permission("audit:read")),
+):
+    items = get_audit_log_service().list_logs(
+        user_id=user_id,
+        action=action,
+        resource_type=resource_type,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/audit/recent")
+def recent_audit_logs_api(
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: UserAccount = Depends(require_api_permission("audit:read")),
+):
+    items = get_audit_log_service().get_recent(limit=limit)
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/health")
@@ -142,6 +410,14 @@ def get_metrics_snapshot():
 @router.get("/metrics/core")
 def get_core_metrics():
     base = metrics.to_dict()
+    # Phase 21: auth/user gauges from the local security store.
+    try:
+        counts = get_user_store().counts()
+        base["users_active"] = counts.get("users_active", 0)
+        base["users_locked"] = counts.get("users_locked", 0)
+    except Exception:
+        base.setdefault("users_active", 0)
+        base.setdefault("users_locked", 0)
     # Bridge Phase-15/16 camera metrics from registry snapshot
     try:
         from app.services.camera_registry import get_camera_registry
@@ -240,7 +516,7 @@ def list_streams():
 
 
 @router.post("/streams/add")
-def add_stream(body: StreamAddRequest):
+def add_stream(body: StreamAddRequest, request: Request):
     """
     Register and start a new stream.
 
@@ -259,11 +535,12 @@ def add_stream(body: StreamAddRequest):
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="stream", resource_id=assigned_id, detail="Stream added")
     return {"stream_id": assigned_id, "status": "started"}
 
 
 @router.post("/streams/remove")
-def remove_stream(body: StreamRemoveRequest):
+def remove_stream(body: StreamRemoveRequest, request: Request):
     """Stop and deregister a stream by its stream_id."""
     from inference.stream.stream_manager import get_stream_manager
     logger.info("Remove stream requested: stream_id=%s", body.stream_id)
@@ -273,29 +550,36 @@ def remove_stream(body: StreamRemoveRequest):
             status_code=404,
             detail=f"Stream '{body.stream_id}' not found",
         )
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="stream", resource_id=body.stream_id, detail="Stream removed")
     return {"stream_id": body.stream_id, "status": "stopped"}
 
 
 @router.get("/api/incidents")
 @router.get("/incidents")
-def list_incidents_api():
+def list_incidents_api(request: Request):
     incidents = get_intelligence_runtime().get_incidents()
-    return IntelligenceResponseBuilder.incident_feed(incidents)
+    return _filter_incident_response(IntelligenceResponseBuilder.incident_feed(incidents), request)
 
 
 @router.get("/api/incidents/{incident_id}")
 @router.get("/incidents/{incident_id}")
-def get_incident_api(incident_id: str):
+def get_incident_api(incident_id: str, request: Request):
     runtime = get_intelligence_runtime()
     incident = runtime.incident_engine.get_incident(incident_id)
-    return IntelligenceResponseBuilder.incident_detail(incident)
+    _audit(request, AuditAction.INCIDENT_VIEWED, resource_type="incident", resource_id=incident_id)
+    return _filter_incident_response(IntelligenceResponseBuilder.incident_detail(incident), request)
 
 
 @router.get("/api/timeline/{track_id}")
 @router.get("/timeline/{track_id}")
-def get_timeline(track_id: str):
+def get_timeline(track_id: str, request: Request):
     events = get_intelligence_runtime().get_track_timeline(track_id)
-    return IntelligenceResponseBuilder.timeline(track_id, events)
+    try:
+        metrics.increment("forensic_sensitive_reads")
+    except Exception:
+        pass
+    _audit(request, AuditAction.FORENSIC_REPLAY_VIEWED, resource_type="track", resource_id=track_id)
+    return _filter_incident_response(IntelligenceResponseBuilder.timeline(track_id, events), request)
 
 
 @router.get("/api/anomalies/live")
@@ -307,57 +591,67 @@ def get_live_anomalies():
 
 @router.get("/api/alerts")
 def list_alerts_api(
+    request: Request,
     state: str | None = Query(default=None),
     severity: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
 ):
     response = get_intelligence_runtime().get_alerts(state=state, severity=severity, limit=limit)
-    return IntelligenceResponseBuilder.build_alert_feed_payload(response["items"])
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_feed_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/live")
-def live_alerts_api(limit: int = Query(default=100, ge=1, le=1000)):
+def live_alerts_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
     response = get_intelligence_runtime().get_live_alert_feed(limit=limit)
-    return IntelligenceResponseBuilder.build_alert_feed_payload(response["items"])
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_feed_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/operator-queue")
-def operator_queue_api(limit: int = Query(default=100, ge=1, le=1000)):
+def operator_queue_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
     response = get_intelligence_runtime().get_live_alert_feed(limit=limit)
-    return IntelligenceResponseBuilder.build_operator_queue_payload(response["items"])
+    return _filter_alert_response(IntelligenceResponseBuilder.build_operator_queue_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/{alert_id}")
-def get_alert_api(alert_id: str):
+def get_alert_api(alert_id: str, request: Request):
     response = get_intelligence_runtime().get_alert(alert_id)
-    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
 
 @router.post("/api/alerts/{alert_id}/acknowledge")
-def acknowledge_alert_api(alert_id: str, body: AlertActionRequest | None = None):
+def acknowledge_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
     operator_id = body.operator_id if body else None
     response = get_intelligence_runtime().acknowledge_alert(alert_id, operator_id=operator_id)
-    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+    _audit(request, AuditAction.ALERT_ACKNOWLEDGED, resource_type="alert", resource_id=alert_id)
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
 
 @router.post("/api/alerts/{alert_id}/resolve")
-def resolve_alert_api(alert_id: str, body: AlertActionRequest | None = None):
+def resolve_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
     operator_id = body.operator_id if body else None
     response = get_intelligence_runtime().resolve_alert(alert_id, operator_id=operator_id)
-    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+    _audit(request, AuditAction.ALERT_RESOLVED, resource_type="alert", resource_id=alert_id)
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
 
 @router.post("/api/alerts/{alert_id}/escalate")
-def escalate_alert_api(alert_id: str, body: AlertActionRequest | None = None):
+def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
     reason = body.reason if body else None
     response = get_intelligence_runtime().escalate_alert(alert_id, reason=reason)
-    return IntelligenceResponseBuilder.build_alert_detail_payload(response["item"])
+    _audit(
+        request,
+        AuditAction.ALERT_ESCALATED,
+        resource_type="alert",
+        resource_id=alert_id,
+        detail="Alert escalated",
+    )
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
 
 @router.get("/api/alerts/{alert_id}/history")
-def alert_history_api(alert_id: str):
+def alert_history_api(alert_id: str, request: Request):
     response = get_intelligence_runtime().get_alert_history(alert_id)
-    return IntelligenceResponseBuilder.build_alert_history_payload(response["items"])
+    return _filter_alert_response(IntelligenceResponseBuilder.build_alert_history_payload(response["items"]), request)
 
 
 # ── Camera registry endpoints ─────────────────────────────────────────────────
@@ -375,7 +669,7 @@ def list_cameras_api(
 
 
 @router.post("/api/cameras")
-def create_camera_api(body: CameraCreateRequest):
+def create_camera_api(body: CameraCreateRequest, request: Request):
     from app.services.camera_registry import get_camera_registry
     try:
         camera = get_camera_registry().register_camera(body.model_dump(exclude_none=False))
@@ -383,33 +677,35 @@ def create_camera_api(body: CameraCreateRequest):
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=507, detail=str(exc))
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera.camera_id, detail="Camera registered")
     return {"item": camera.to_dict(), "status": "ok"}
 
 
 @router.get("/api/cameras/latest-frames")
-def list_latest_frames_api():
+def list_latest_frames_api(request: Request):
     from app.services.frame_snapshot_service import get_frame_snapshot_service
     items = get_frame_snapshot_service().list_latest_frames()
-    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+    return _filter_incident_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
 
 
 @router.get("/api/cameras/{camera_id}/status")
-def get_camera_status_api(camera_id: str):
+def get_camera_status_api(camera_id: str, request: Request):
     from app.services.camera_registry import get_camera_registry
     from app.services.stream_session_manager import get_stream_session_manager
     camera = get_camera_registry().get_camera(camera_id)
     if camera is None:
         return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
     stream_state = get_stream_session_manager().get_stream_state(camera_id)
+    _audit(request, AuditAction.CAMERA_VIEWED, resource_type="camera", resource_id=camera_id)
     return {"item": {**camera.to_dict(), "stream_session": stream_state}, "status": "ok"}
 
 
 @router.get("/api/cameras/{camera_id}/latest-frame")
-def get_camera_latest_frame_api(camera_id: str):
+def get_camera_latest_frame_api(camera_id: str, request: Request):
     from app.services.frame_snapshot_service import get_frame_snapshot_service
     frame = get_frame_snapshot_service().get_latest_frame(camera_id)
     status = frame.get("status", "ok")
-    return {"item": frame, "status": status}
+    return _filter_incident_response({"item": frame, "status": status}, request)
 
 
 @router.get("/api/cameras/{camera_id}/latest-frame/image")
@@ -571,6 +867,7 @@ async def camera_mjpeg_stream(camera_id: str):
 @router.get("/api/cameras/{camera_id}/timeline")
 def get_camera_timeline_api(
     camera_id: str,
+    request: Request,
     start_time: float | None = Query(default=None),
     end_time: float | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
@@ -597,11 +894,16 @@ def get_camera_timeline_api(
         filtered = [r for r in filtered if (r.get("timestamp") or 0) <= end_time]
     filtered.sort(key=lambda r: r.get("timestamp", 0))
     items = filtered[-limit:]
-    return {"items": items, "count": len(items), "camera_id": camera_id, "status": "ok"}
+    try:
+        metrics.increment("forensic_sensitive_reads")
+    except Exception:
+        pass
+    _audit(request, AuditAction.FORENSIC_REPLAY_VIEWED, resource_type="camera", resource_id=camera_id)
+    return _filter_incident_response({"items": items, "count": len(items), "camera_id": camera_id, "status": "ok"}, request)
 
 
 @router.get("/api/incidents/{incident_id}/replay")
-def get_incident_replay_api(incident_id: str):
+def get_incident_replay_api(incident_id: str, request: Request):
     """Return a replay manifest for an incident: frames, events, alerts, and timeline."""
     try:
         from inference.metrics import metrics as core_metrics
@@ -660,7 +962,12 @@ def get_incident_replay_api(incident_id: str):
         except Exception:
             pass
 
-    return {
+    try:
+        metrics.increment("forensic_sensitive_reads")
+    except Exception:
+        pass
+    _audit(request, AuditAction.FORENSIC_REPLAY_VIEWED, resource_type="incident", resource_id=incident_id)
+    return _filter_incident_response({
         "incident_id": incident_id,
         "incident": inc_dict,
         "frames": frames,
@@ -668,7 +975,7 @@ def get_incident_replay_api(incident_id: str):
         "frame_count": len(frames),
         "alert_count": len(alert_items),
         "status": "ok",
-    }
+    }, request)
 
 
 @router.websocket("/ws/frames")
@@ -686,67 +993,75 @@ def get_camera_heatmap(camera_id: str):
 
 
 @router.get("/api/cameras/{camera_id}")
-def get_camera_api(camera_id: str):
+def get_camera_api(camera_id: str, request: Request):
     from app.services.camera_registry import get_camera_registry
     camera = get_camera_registry().get_camera(camera_id)
     if camera is None:
         return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    _audit(request, AuditAction.CAMERA_VIEWED, resource_type="camera", resource_id=camera_id)
     return {"item": camera.to_dict(), "status": "ok"}
 
 
 @router.patch("/api/cameras/{camera_id}")
-def update_camera_api(camera_id: str, body: CameraUpdateRequest):
+def update_camera_api(camera_id: str, body: CameraUpdateRequest, request: Request):
     from app.services.camera_registry import get_camera_registry
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     camera = get_camera_registry().update_camera(camera_id, updates)
     if camera is None:
         return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, metadata={"updated_fields": sorted(updates.keys())})
     return {"item": camera.to_dict(), "status": "ok"}
 
 
 @router.delete("/api/cameras/{camera_id}")
-def delete_camera_api(camera_id: str):
+def delete_camera_api(camera_id: str, request: Request):
     from app.services.camera_registry import get_camera_registry
     removed = get_camera_registry().remove_camera(camera_id)
     if not removed:
         return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Camera removed")
     return {"item": None, "status": "ok", "detail": f"Camera '{camera_id}' removed"}
 
 
 # ── Stream session control endpoints ─────────────────────────────────────────
 
 @router.post("/api/cameras/{camera_id}/start")
-def start_camera_stream_api(camera_id: str):
+def start_camera_stream_api(camera_id: str, request: Request):
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().start_stream(camera_id)
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream start requested")
     return {"item": result, "status": "ok"}
 
 
 @router.post("/api/cameras/{camera_id}/stop")
-def stop_camera_stream_api(camera_id: str):
+def stop_camera_stream_api(camera_id: str, request: Request):
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().stop_stream(camera_id)
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream stop requested")
     return {"item": result, "status": "ok"}
 
 
 @router.post("/api/cameras/{camera_id}/pause")
-def pause_camera_stream_api(camera_id: str):
+def pause_camera_stream_api(camera_id: str, request: Request):
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().pause_stream(camera_id)
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream pause requested")
     return {"item": result, "status": "ok"}
 
 
 @router.post("/api/cameras/{camera_id}/resume")
-def resume_camera_stream_api(camera_id: str):
+def resume_camera_stream_api(camera_id: str, request: Request):
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().resume_stream(camera_id)
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream resume requested")
     return {"item": result, "status": "ok"}
 
 
 @router.post("/api/cameras/{camera_id}/restart")
-def restart_camera_stream_api(camera_id: str):
+def restart_camera_stream_api(camera_id: str, request: Request):
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().restart_stream(camera_id)
+    _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream restart requested")
     return {"item": result, "status": "ok"}
 
 
@@ -781,7 +1096,7 @@ def _geo_metric(name: str) -> None:
 
 
 @router.get("/api/map/state")
-def get_map_state_api():
+def get_map_state_api(request: Request):
     _geo_metric("map_state_requests")
     state = _geo().get_map_state()
     _geo_metric("map_incident_markers")
@@ -793,6 +1108,7 @@ def get_map_state_api():
         state["handoffs"] = handoffs
     except Exception:
         state["handoffs"] = []
+    _audit(request, AuditAction.MAP_VIEWED, resource_type="map", resource_id="state")
     return {"item": state, "status": "ok"}
 
 
@@ -958,19 +1274,20 @@ def get_models_health_api():
 
 
 @router.post("/api/models/reload")
-def reload_models_api():
+def reload_models_api(request: Request):
     """Force-reload the model registry from disk."""
     try:
         registry = _get_model_registry()
         registry.reload()
         items = registry.list_models()
+        _audit(request, AuditAction.MODEL_UPDATED, resource_type="model_registry", resource_id="registry", detail="Registry reloaded")
         return {"status": "ok", "count": len(items), "detail": "Registry reloaded"}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
 
 
 @router.patch("/api/models/{model_id:path}")
-async def patch_model_api(model_id: str, payload: dict):
+async def patch_model_api(model_id: str, payload: dict, request: Request):
     """Patch allowed runtime fields (enabled, confidence_threshold, device_preference)."""
     try:
         registry = _get_model_registry()
@@ -983,6 +1300,7 @@ async def patch_model_api(model_id: str, payload: dict):
         if not ok:
             return {"status": "not_found", "detail": f"Model {model_id} not found"}
         item = registry.get_model(model_id)
+        _audit(request, AuditAction.MODEL_UPDATED, resource_type="model", resource_id=model_id, metadata={"updated_fields": sorted(allowed.keys())})
         return {"status": "ok", "item": item}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
@@ -1021,6 +1339,7 @@ def _wl_store():
 
 @router.get("/api/identities")
 def list_identities_api(
+    request: Request,
     status: Optional[str] = Query(default=None),
     tag: Optional[str] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
@@ -1028,13 +1347,13 @@ def list_identities_api(
     try:
         store = _id_store()
         items = [p.to_dict() for p in store.list_identities(status=status, tag=tag, limit=limit)]
-        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+        return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
 
 
 @router.post("/api/identities")
-async def create_identity_api(payload: dict):
+async def create_identity_api(payload: dict, request: Request):
     try:
         store = _id_store()
         profile = store.create_identity(
@@ -1047,13 +1366,14 @@ async def create_identity_api(payload: dict):
             get_metrics().increment("identities_registered")
         except Exception:
             pass
-        return {"item": profile.to_dict(), "status": "ok"}
+        _audit(request, AuditAction.IDENTITY_CREATED, resource_type="identity", resource_id=profile.identity_id)
+        return _filter_identity_response({"item": profile.to_dict(), "status": "ok"}, request)
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
 
 
 @router.get("/api/identities/{identity_id}")
-def get_identity_api(identity_id: str):
+def get_identity_api(identity_id: str, request: Request):
     try:
         store = _id_store()
         profile = store.get_identity(identity_id)
@@ -1063,13 +1383,14 @@ def get_identity_api(identity_id: str):
                 "status": "not_found",
                 "detail": f"Identity {identity_id} not found",
             }
-        return {"item": profile.to_dict(), "status": "ok"}
+        _audit(request, AuditAction.IDENTITY_VIEWED, resource_type="identity", resource_id=identity_id)
+        return _filter_identity_response({"item": profile.to_dict(), "status": "ok"}, request)
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
 
 
 @router.patch("/api/identities/{identity_id}")
-async def update_identity_api(identity_id: str, payload: dict):
+async def update_identity_api(identity_id: str, payload: dict, request: Request):
     try:
         store = _id_store()
         profile = store.update_identity(identity_id, payload)
@@ -1079,18 +1400,20 @@ async def update_identity_api(identity_id: str, payload: dict):
                 "status": "not_found",
                 "detail": f"Identity {identity_id} not found",
             }
-        return {"item": profile.to_dict(), "status": "ok"}
+        _audit(request, AuditAction.IDENTITY_UPDATED, resource_type="identity", resource_id=identity_id, metadata={"updated_fields": sorted(payload.keys())})
+        return _filter_identity_response({"item": profile.to_dict(), "status": "ok"}, request)
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
 
 
 @router.delete("/api/identities/{identity_id}")
-def archive_identity_api(identity_id: str):
+def archive_identity_api(identity_id: str, request: Request):
     try:
         store = _id_store()
         ok = store.archive_identity(identity_id)
         if not ok:
             return {"status": "not_found", "detail": f"Identity {identity_id} not found"}
+        _audit(request, AuditAction.IDENTITY_UPDATED, resource_type="identity", resource_id=identity_id, detail="Identity archived")
         return {"status": "ok", "detail": "Identity archived"}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
@@ -1099,6 +1422,7 @@ def archive_identity_api(identity_id: str):
 @router.post("/api/identities/{identity_id}/enroll-face")
 async def enroll_face_api(
     identity_id: str,
+    request: Request,
     file: UploadFile = File(...),
     display_name: Optional[str] = Query(default=None),
 ):
@@ -1114,7 +1438,8 @@ async def enroll_face_api(
         )
         if result.get("code") == 400:
             raise HTTPException(status_code=400, detail=result.get("detail", "Bad request"))
-        return result
+        _audit(request, AuditAction.FACE_ENROLLED, resource_type="identity", resource_id=identity_id)
+        return _filter_identity_response(result, request)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1122,12 +1447,12 @@ async def enroll_face_api(
 
 
 @router.get("/api/identities/{identity_id}/enrollments")
-def list_identity_enrollments_api(identity_id: str):
+def list_identity_enrollments_api(identity_id: str, request: Request):
     try:
         store = _id_store()
         enrollments = store.list_face_enrollments(identity_id)
         items = [e.to_public_dict() for e in enrollments]
-        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+        return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
 
@@ -1135,13 +1460,14 @@ def list_identity_enrollments_api(identity_id: str):
 @router.get("/api/identities/{identity_id}/matches")
 def list_identity_matches_api(
     identity_id: str,
+    request: Request,
     limit: int = Query(default=100, ge=1, le=500),
 ):
     try:
         store = _id_store()
         matches = store.list_matches(identity_id=identity_id, limit=limit)
         items = [m.to_dict() for m in matches]
-        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+        return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
 
@@ -1152,6 +1478,7 @@ def list_identity_matches_api(
 
 @router.get("/api/watchlist")
 def list_watchlist_api(
+    request: Request,
     active: bool = Query(default=True),
     severity: Optional[str] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
@@ -1160,13 +1487,17 @@ def list_watchlist_api(
         store = _wl_store()
         entries = store.list_watchlist(active=active, severity=severity, limit=limit)
         items = [e.to_dict() for e in entries]
-        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+        try:
+            metrics.increment("watchlist_sensitive_reads")
+        except Exception:
+            pass
+        return _filter_watchlist_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
 
 
 @router.post("/api/watchlist")
-async def add_watchlist_entry_api(payload: dict):
+async def add_watchlist_entry_api(payload: dict, request: Request):
     try:
         import time as _time
         store = _wl_store()
@@ -1186,7 +1517,8 @@ async def add_watchlist_entry_api(payload: dict):
             get_metrics().increment("watchlist_entries_active")
         except Exception:
             pass
-        return {"item": entry.to_dict(), "status": "ok"}
+        _audit(request, AuditAction.WATCHLIST_UPDATED, resource_type="watchlist", resource_id=entry.watchlist_id, detail="Watchlist entry added")
+        return _filter_watchlist_response({"item": entry.to_dict(), "status": "ok"}, request)
     except KeyError as exc:
         return {"item": None, "status": "error", "detail": f"Missing required field: {exc}"}
     except Exception as exc:
@@ -1194,7 +1526,7 @@ async def add_watchlist_entry_api(payload: dict):
 
 
 @router.delete("/api/watchlist/{watchlist_id}")
-def remove_watchlist_entry_api(watchlist_id: str):
+def remove_watchlist_entry_api(watchlist_id: str, request: Request):
     try:
         store = _wl_store()
         ok = store.remove_from_watchlist(watchlist_id)
@@ -1203,17 +1535,22 @@ def remove_watchlist_entry_api(watchlist_id: str):
                 "status": "not_found",
                 "detail": f"Watchlist entry {watchlist_id} not found",
             }
+        _audit(request, AuditAction.WATCHLIST_UPDATED, resource_type="watchlist", resource_id=watchlist_id, detail="Watchlist entry removed")
         return {"status": "ok", "detail": "Entry removed"}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
 
 
 @router.get("/api/watchlist/identity/{identity_id}")
-def get_identity_watchlist_api(identity_id: str):
+def get_identity_watchlist_api(identity_id: str, request: Request):
     try:
         store = _wl_store()
         entries = store.get_identity_watchlist(identity_id)
         items = [e.to_dict() for e in entries]
-        return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+        try:
+            metrics.increment("watchlist_sensitive_reads")
+        except Exception:
+            pass
+        return _filter_watchlist_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}

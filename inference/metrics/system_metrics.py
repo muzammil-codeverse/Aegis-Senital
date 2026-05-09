@@ -58,6 +58,16 @@ class SystemMetrics:
         self.websocket_handoff_clients = 0
         self.websocket_handoff_messages = 0
         self.websocket_handoff_dropped_messages = 0
+        # Phase 21: security, RBAC, audit, and privacy controls
+        self.auth_logins_success = 0
+        self.auth_logins_failed = 0
+        self.auth_access_denied = 0
+        self.audit_events_written = 0
+        self.audit_write_failures = 0
+        self.users_active = 0
+        self.users_locked = 0
+        self.watchlist_sensitive_reads = 0
+        self.forensic_sensitive_reads = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

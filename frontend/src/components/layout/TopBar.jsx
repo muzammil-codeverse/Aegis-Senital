@@ -1,4 +1,5 @@
 import { formatDateTime } from '../../utils/time'
+import UserMenu from '../auth/UserMenu'
 
 export default function TopBar({ websocketStatus, lastMessageAt, reconnectCount }) {
   const wsLabel = websocketStatus || 'unknown'
@@ -20,6 +21,7 @@ export default function TopBar({ websocketStatus, lastMessageAt, reconnectCount 
           <span>Reconnects</span>
           <strong>{reconnectCount ?? 0}</strong>
         </div>
+        <UserMenu />
       </div>
     </header>
   )

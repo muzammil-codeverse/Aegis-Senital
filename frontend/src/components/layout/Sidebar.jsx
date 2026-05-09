@@ -1,15 +1,21 @@
+import { useAuth } from '../../hooks/useAuth'
+
 const NAV_ITEMS = [
-  { id: 'dashboard', label: 'Command' },
-  { id: 'alerts', label: 'Alerts' },
-  { id: 'incidents', label: 'Incidents' },
-  { id: 'system', label: 'System' },
-  { id: 'forensics', label: 'Forensics' },
-  { id: 'identities', label: 'Identities' },
-  { id: 'watchlist', label: 'Watchlist' },
-  { id: 'models', label: 'Models' },
+  { id: 'dashboard', label: 'Command', permission: 'camera:read' },
+  { id: 'alerts', label: 'Alerts', permission: 'alert:read' },
+  { id: 'incidents', label: 'Incidents', permission: 'incident:read' },
+  { id: 'system', label: 'System', permission: 'metrics:read' },
+  { id: 'forensics', label: 'Forensics', permission: 'forensics:read' },
+  { id: 'identities', label: 'Identities', permission: 'identity:read' },
+  { id: 'watchlist', label: 'Watchlist', permission: 'watchlist:read' },
+  { id: 'models', label: 'Models', permission: 'model:read' },
+  { id: 'audit', label: 'Audit Logs', permission: 'audit:read' },
+  { id: 'security', label: 'Security', permission: 'admin' },
 ]
 
 export default function Sidebar({ currentPage, onNavigate }) {
+  const { hasPermission } = useAuth()
+  const visibleItems = NAV_ITEMS.filter(item => hasPermission(item.permission))
   return (
     <aside className="sidebar">
       <div className="brand-block">
@@ -20,7 +26,7 @@ export default function Sidebar({ currentPage, onNavigate }) {
         </div>
       </div>
       <nav className="nav-stack" aria-label="Primary navigation">
-        {NAV_ITEMS.map(item => (
+        {visibleItems.map(item => (
           <button
             key={item.id}
             type="button"
