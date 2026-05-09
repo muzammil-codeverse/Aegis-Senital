@@ -3,3 +3,17 @@ weights:
   GEOFENCE_VIOLATION: 0.3
   pursuit_behavior: 0.2
 dedup_seconds: 20
+thresholds:
+  escalated: 0.85
+  open: 0.60
+scenario_engine:
+  identity_history_len: 20
+  escalation_patterns:
+    - events: [WEAPON_THREAT, ARMED_CROWD_THREAT]
+      level: CRITICAL
+    - events: [WEAPON_THREAT, PHONE_USAGE_RISK, ARMED_CROWD_THREAT]
+      level: CRITICAL
+    - events: [WEAPON_THREAT, PHONE_USAGE_RISK]
+      level: HIGH
+    - events: [WEAPON_THREAT]
+      level: MEDIUM

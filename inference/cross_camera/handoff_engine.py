@@ -1,10 +1,10 @@
 from __future__ import annotations
-from inference.cross_camera.transition_predictor import predict_next
-from inference.config_runtime import load_runtime_config
+
+from inference.correlation.handoff_predictor import HandoffPredictor
 
 class HandoffEngine:
     def __init__(self) -> None:
-        self._graph = load_runtime_config("camera_graph")
+        self._predictor = HandoffPredictor()
 
-    def predict_handoff(self, camera_id: str) -> dict:
-        return predict_next(camera_id, self._graph.get("edges", {}))
+    def predict_handoff(self, camera_id: str, track: object | None = None, identity_id: str | None = None) -> dict:
+        return self._predictor.predict_best(camera_id, track=track, identity_id=identity_id)

@@ -9,7 +9,9 @@ from typing import List
 
 from cachetools import TTLCache
 
+from core.event_bus import EventType, get_event_bus
 from inference.event_buffer import EventBuffer
+from inference.config_runtime import load_runtime_config
 from inference.identity_db import IdentityDB, get_db
 from inference.monitoring.metrics import get_metrics
 from inference.schemas import DetectionResult, Event, FramePacket, Track
@@ -113,6 +115,24 @@ class EventEngine:
         restricted_zones: list | None = None,
     ) -> None:
         self._db = db or get_db()
+        cfg = _event_engine_config()
+        self._class_weights = dict(cfg.get("class_weights", _CLASS_WEIGHTS))
+        self._default_class_weight = float(cfg.get("default_class_weight", _DEFAULT_CLASS_WEIGHT))
+        thresholds = cfg.get("thresholds", {})
+        self._base_threshold = float(thresholds.get("base", _BASE_THRESHOLD))
+        self._weapon_threshold = float(thresholds.get("weapon", _WEAPON_THRESHOLD))
+        self._phone_threshold = float(thresholds.get("phone", _PHONE_THRESHOLD))
+        self._decay_lambda = float(thresholds.get("decay_lambda", _DECAY_LAMBDA))
+        self._weapon_confirmation = int(thresholds.get("weapon_confirmation_frames", _WEAPON_CONFIRMATION))
+        self._phone_confirmation = int(thresholds.get("phone_confirmation_frames", _PHONE_CONFIRMATION))
+        self._unattended_frame_threshold = int(thresholds.get("unattended_frame_threshold", _UNATTENDED_FRAME_THRESHOLD))
+        self._person_proximity_iou = float(thresholds.get("person_proximity_iou", _PERSON_PROXIMITY_IOU))
+        self._scoring_weights = dict(cfg.get("scoring_weights", {
+            "persistence": 0.30,
+            "spatial": 0.25,
+            "motion": 0.20,
+            "class": 0.25,
+        }))
 
         # TTL-bounded score memory prevents unbounded growth.
         # Entries expire after 300 s of inactivity; max 10 000 live entries.
@@ -161,6 +181,7 @@ class EventEngine:
                     logger.error("Invalid event: track not found")
             self._db.persist_event(event, frame_id=packet.frame_id)
             self._recent_event_scores.append(event.risk_score)
+            get_event_bus().publish(EventType.THREAT_EVENT, event, source=packet.camera_id, priority=_event_priority_value(event))
 
         if events:
             _m = get_metrics()
@@ -200,12 +221,12 @@ class EventEngine:
             if track.class_name not in WEAPON_LABELS:
                 continue
             series = buffer.get_track_series(track.track_id)
-            if series is None or series.duration_frames < _WEAPON_CONFIRMATION:
+            if series is None or series.duration_frames < self._weapon_confirmation:
                 continue
             score, components = self._score_track(packet, track, track.class_name)
             if series.threat_score_series:
                 series.threat_score_series[-1] = score
-            if score < max(threshold, _WEAPON_THRESHOLD):
+            if score < max(threshold, self._weapon_threshold):
                 continue
             events.append(self._build_event(packet, track, score, "WEAPON_THREAT", components))
         return events
@@ -222,14 +243,14 @@ class EventEngine:
         person_tracks = [track for track in tracks if track.class_name == "person"]
         for track in phone_tracks:
             series = buffer.get_track_series(track.track_id)
-            if series is None or series.duration_frames < _PHONE_CONFIRMATION:
+            if series is None or series.duration_frames < self._phone_confirmation:
                 continue
             base_score, components = self._score_track(packet, track, "phone")
             if series.threat_score_series:
                 series.threat_score_series[-1] = base_score
             proximity = max((_iou(track.bbox, person.bbox) for person in person_tracks), default=0.0)
             final_score = min(1.0, base_score + 0.20 * proximity)
-            if final_score < min(max(0.24, threshold - 0.05), _PHONE_THRESHOLD):
+            if final_score < min(max(0.24, threshold - 0.05), self._phone_threshold):
                 continue
             components["proximity"] = round(proximity, 4)
             events.append(self._build_event(packet, track, final_score, "PHONE_USAGE_RISK", components))
@@ -412,7 +433,7 @@ class EventEngine:
                 # No owner assigned (object appeared without any nearby person).
                 # Fall back to per-frame IoU proximity check.
                 nearby = any(
-                    _iou(track.bbox, p.bbox) > _PERSON_PROXIMITY_IOU
+                    _iou(track.bbox, p.bbox) > self._person_proximity_iou
                     for p in person_tracks
                 )
                 if nearby:
@@ -423,10 +444,10 @@ class EventEngine:
                 )
 
             count = self._unattended_registry.get(track.track_id, 0)
-            if count < _UNATTENDED_FRAME_THRESHOLD:
+            if count < self._unattended_frame_threshold:
                 continue
 
-            score = min(1.0, 0.40 + 0.20 * min(1.0, count / (3 * _UNATTENDED_FRAME_THRESHOLD)))
+            score = min(1.0, 0.40 + 0.20 * min(1.0, count / (3 * self._unattended_frame_threshold)))
             events.append(Event(
                 event_type="UNATTENDED_OBJECT",
                 severity=_severity(score),
@@ -445,7 +466,7 @@ class EventEngine:
                     "object_class": track.class_name,
                     "owner_track_id": owner_id,
                     "unattended_frames": count,
-                    "threshold_frames": _UNATTENDED_FRAME_THRESHOLD,
+                    "threshold_frames": self._unattended_frame_threshold,
                 },
             ))
 
@@ -521,7 +542,7 @@ class EventEngine:
                 if not self._point_in_polygon((cx, cy), polygon):
                     continue
 
-                class_w = _CLASS_WEIGHTS.get(track.class_name, _DEFAULT_CLASS_WEIGHT)
+                class_w = self._class_weights.get(track.class_name, self._default_class_weight)
                 score = min(1.0, 0.55 + 0.20 * class_w)
                 events.append(Event(
                     event_type="GEOFENCE_VIOLATION",
@@ -599,12 +620,16 @@ class EventEngine:
         persistence = track.stability_score
         spatial_risk = self._spatial_risk(track, width, height)
         motion_anomaly = self._motion_anomaly(track)
-        class_weight = _CLASS_WEIGHTS.get(label, _DEFAULT_CLASS_WEIGHT)
+        class_weight = self._class_weights.get(label, self._default_class_weight)
+        persistence_w = float(self._scoring_weights.get("persistence", 0.30))
+        spatial_w = float(self._scoring_weights.get("spatial", 0.25))
+        motion_w = float(self._scoring_weights.get("motion", 0.20))
+        class_w = float(self._scoring_weights.get("class", 0.25))
         raw_score = (
-            0.30 * persistence
-            + 0.25 * spatial_risk
-            + 0.20 * motion_anomaly
-            + 0.25 * class_weight
+            persistence_w * persistence
+            + spatial_w * spatial_risk
+            + motion_w * motion_anomaly
+            + class_w * class_weight
         )
         score = self._apply_decay(track, packet.timestamp, raw_score)
         components = {
@@ -620,7 +645,7 @@ class EventEngine:
         current_time = _parse_timestamp(timestamp)
         previous_score, previous_time = self._score_memory.get(key, (0.0, current_time))
         delta_seconds = max(0.0, (current_time - previous_time).total_seconds())
-        decayed_score = previous_score * math.exp(-_DECAY_LAMBDA * delta_seconds)
+        decayed_score = previous_score * math.exp(-self._decay_lambda * delta_seconds)
         blended = min(1.0, max(raw_score, raw_score + 0.25 * decayed_score))
         self._score_memory[key] = (blended, current_time)
         return blended
@@ -645,11 +670,11 @@ class EventEngine:
 
     def _adaptive_threshold(self, scene_density: float, track_count: int) -> float:
         if scene_density >= 0.60:
-            base = min(0.75, _BASE_THRESHOLD + 0.10 + 0.01 * track_count)
+            base = min(0.75, self._base_threshold + 0.10 + 0.01 * track_count)
         elif scene_density <= 0.20:
-            base = max(0.22, _BASE_THRESHOLD - 0.08)
+            base = max(0.22, self._base_threshold - 0.08)
         else:
-            base = min(0.70, _BASE_THRESHOLD + 0.04 * scene_density + 0.004 * track_count)
+            base = min(0.70, self._base_threshold + 0.04 * scene_density + 0.004 * track_count)
 
         noise = self._noise_factor()
         load = self._stream_load_factor()
@@ -660,7 +685,7 @@ class EventEngine:
             return 0.0
         low_band = sum(
             1 for s in self._recent_event_scores
-            if _BASE_THRESHOLD <= s < _BASE_THRESHOLD + 0.15
+            if self._base_threshold <= s < self._base_threshold + 0.15
         )
         ratio = low_band / len(self._recent_event_scores)
         return round(min(0.08, ratio * 0.12), 4)
@@ -709,6 +734,22 @@ class EventEngine:
             timestamp=packet.timestamp,
             metadata=components,
         )
+
+
+def _event_engine_config() -> dict:
+    try:
+        cfg = load_runtime_config("incident_rules")
+    except FileNotFoundError:
+        return {}
+    event_cfg = cfg.get("event_engine", {})
+    return event_cfg if isinstance(event_cfg, dict) else {}
+
+
+def _event_priority_value(event: Event) -> int:
+    return {"CRITICAL": 1, "HIGH": 3, "MEDIUM": 5, "LOW": 7}.get(
+        str(event.priority_level or event.severity or "LOW").upper(),
+        7,
+    )
 
 
 # ── legacy function interface ─────────────────────────────────────────────────

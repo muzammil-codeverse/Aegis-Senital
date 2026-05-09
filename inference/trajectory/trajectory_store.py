@@ -43,3 +43,6 @@ class TrajectoryStore:
 
     def get(self, track_id: int) -> TrajectoryRecord | None:
         return self._records.get(track_id)
+
+    def items(self) -> list[tuple[int, TrajectoryRecord]]:
+        return list(self._records.items())

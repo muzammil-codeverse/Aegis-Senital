@@ -1,9 +1,42 @@
-edges:
-  cam_a:
-    cam_b:
-      weight: 0.8
-      eta_seconds: 4
-  cam_b:
-    cam_c:
-      weight: 0.7
-      eta_seconds: 6
+cameras:
+  cam_1:
+    location: [0, 0]
+    fov_degrees: 90
+    priority: high
+  cam_2:
+    location: [35, 0]
+    fov_degrees: 90
+    priority: medium
+  cam_3:
+    location: [80, 15]
+    fov_degrees: 100
+    priority: medium
+
+connections:
+  - from: cam_1
+    to: cam_2
+    distance_meters: 35
+    min_travel_seconds: 5
+    max_travel_seconds: 60
+    transition_probability: 0.75
+    heading: 0
+  - from: cam_2
+    to: cam_1
+    distance_meters: 35
+    min_travel_seconds: 5
+    max_travel_seconds: 60
+    transition_probability: 0.65
+    heading: 180
+  - from: cam_2
+    to: cam_3
+    distance_meters: 48
+    min_travel_seconds: 8
+    max_travel_seconds: 90
+    transition_probability: 0.60
+    heading: 18
+
+handoff:
+  fps: 30
+  meters_per_pixel: 0.05
+  default_speed_mps: 1.4
+  max_predictions: 3

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from inference.camera_graph import CameraGraph
+from inference.config_runtime import load_runtime_config
 from inference.identity_db import IdentityDB, get_db
 from inference.identity_fusion_engine import IdentityFusionEngine
 from inference.monitoring.metrics import get_metrics
@@ -255,17 +256,18 @@ class MultiObjectTracker:
 
     def __init__(
         self,
-        max_age: int = _MAX_AGE_DEFAULT,
-        match_threshold: float = _MATCH_THRESHOLD,
+        max_age: int | None = None,
+        match_threshold: float | None = None,
         db: IdentityDB | None = None,
         identity_fusion: IdentityFusionEngine | None = None,
         camera_graph: CameraGraph | None = None,
     ) -> None:
+        cfg = _tracker_config()
         self.active_tracks: dict[int, _TrackState] = {}
         self.lost_tracks: dict[int, _TrackState] = {}
         self.next_track_id = 1
-        self._max_age = max_age
-        self._match_threshold = match_threshold
+        self._max_age = int(max_age if max_age is not None else cfg.get("max_age", _MAX_AGE_DEFAULT))
+        self._match_threshold = float(match_threshold if match_threshold is not None else cfg.get("match_threshold", _MATCH_THRESHOLD))
         self._db = db or get_db()
         self._identity_fusion = identity_fusion or IdentityFusionEngine(self._db)
         self._camera_graph = camera_graph
@@ -452,6 +454,15 @@ class MultiObjectTracker:
             from inference.metrics import metrics
             metrics.id_switches += 1
         self.previous_assignments[sig] = track_id
+
+
+def _tracker_config() -> dict:
+    try:
+        cfg = load_runtime_config("trajectory_rules")
+    except FileNotFoundError:
+        return {}
+    tracker_cfg = cfg.get("tracker", {})
+    return tracker_cfg if isinstance(tracker_cfg, dict) else {}
 
 
 @dataclass

@@ -11,7 +11,7 @@ from ultralytics import YOLO
 
 from inference.monitoring.metrics import get_metrics
 from inference.schemas import Detection, DetectedObject, DetectionResult, FramePacket
-from ml.runtime import ModelRouter, system_boot_check
+from ml.runtime import ModelRouter, get_best_device, system_boot_check
 
 # TYPE_CHECKING guard avoids a circular-import at runtime
 from typing import TYPE_CHECKING
@@ -107,15 +107,13 @@ class DetectionEngine:
     def _resolve_device(device: str) -> str:
         if device != "auto":
             return device
-        import torch
-
-        if not torch.cuda.is_available():
+        resolved = get_best_device(prefer_gpu=True)
+        if resolved == "cpu":
             logger.warning(
                 "CUDA not available — DetectionEngine falling back to CPU. "
                 "Inference performance will be degraded."
             )
-            return "cpu"
-        return "cuda"
+        return resolved
 
     def _load_models(self) -> None:
         self._weapon_model = self._load_one(self._weapon_path, "weapon_model")

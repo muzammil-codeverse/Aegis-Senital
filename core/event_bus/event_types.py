@@ -1,0 +1,14 @@
+from __future__ import annotations
+
+from enum import Enum
+
+
+class EventType(str, Enum):
+    TRACK_EVENT = "TRACK_EVENT"
+    DETECTION_EVENT = "DETECTION_EVENT"
+    ANOMALY_EVENT = "ANOMALY_EVENT"
+    THREAT_EVENT = "THREAT_EVENT"
+    INCIDENT_EVENT = "INCIDENT_EVENT"
+    ALERT_EVENT = "ALERT_EVENT"
+    SYSTEM_EVENT = "SYSTEM_EVENT"
+    FORENSIC_EVENT = "FORENSIC_EVENT"

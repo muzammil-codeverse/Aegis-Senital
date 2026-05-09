@@ -53,9 +53,9 @@ def validate_dependencies() -> None:
 
 def validate_cuda_availability() -> None:
     import logging
-    import torch
+    from ml.runtime.device_manager import is_cuda_available
 
-    if not torch.cuda.is_available():
+    if not is_cuda_available():
         logging.getLogger(__name__).warning(
             "CUDA not available — inference will run on CPU. "
             "Performance will be significantly degraded."
@@ -138,6 +138,12 @@ def system_boot_check() -> None:
         if _BOOT_VALIDATED:
             return
         validate_dependencies()
+        try:
+            from inference.config_runtime import load_runtime_config
+            from ml.runtime.device_manager import require_cuda_if_configured
+            require_cuda_if_configured(load_runtime_config("runtime_health"))
+        except FileNotFoundError:
+            pass
         validate_cuda_availability()
         registry = validate_registry_exists()
         validate_model_files_exist(registry)

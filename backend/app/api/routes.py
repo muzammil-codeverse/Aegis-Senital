@@ -5,18 +5,11 @@ from pydantic import BaseModel
 from app.services.video_service import extract_frames
 from app.core.config import load_scenario_config
 from app.core.logging_config import logger
+from app.services.intelligence_response_builder import IntelligenceResponseBuilder
 from inference.identity_db import get_db
 from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
-
-from inference.reasoning.incident_engine import IncidentEngine
-from inference.forensics.timeline_builder import build_timeline
-from inference.anomaly.anomaly_engine import AnomalyEngine
-from inference.cross_camera.handoff_engine import HandoffEngine
-
-_incident_engine = IncidentEngine()
-_anomaly_engine = AnomalyEngine()
-_handoff_engine = HandoffEngine()
+from inference.runtime import get_intelligence_runtime
 
 router = APIRouter()
 
@@ -45,17 +38,18 @@ def health_check():
     if _runtime_db is not None:
         try:
             db_connected = _runtime_db.db_healthy
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("DB health check failed: %s", exc)
 
     identity_status: dict = {}
     if _identity_fusion is not None:
         try:
             identity_status = _identity_fusion.get_status()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Identity status check failed: %s", exc)
 
     stream_health = get_stream_manager().health_summary()
+    intelligence_health = get_intelligence_runtime().get_health()
 
     return {
         "status": "ok",
@@ -66,6 +60,7 @@ def health_check():
         "active_streams": stream_health["active_streams"],
         "total_streams": stream_health["total_streams"],
         "stream_metrics": stream_health["stream_metrics"],
+        "intelligence_runtime": intelligence_health,
     }
 
 
@@ -211,38 +206,37 @@ def remove_stream(body: StreamRemoveRequest):
     return {"stream_id": body.stream_id, "status": "stopped"}
 
 
+@router.get("/api/incidents")
 @router.get("/incidents")
 def list_incidents_api():
-    return _incident_engine.list_incidents()
+    incidents = get_intelligence_runtime().get_incidents()
+    return IntelligenceResponseBuilder.incident_feed(incidents)
 
 
+@router.get("/api/incidents/{incident_id}")
 @router.get("/incidents/{incident_id}")
 def get_incident_api(incident_id: str):
-    for inc in _incident_engine.list_incidents():
-        if inc.get("id") == incident_id:
-            return inc
-    raise HTTPException(status_code=404, detail="Incident not found")
+    runtime = get_intelligence_runtime()
+    incident = runtime.incident_engine.get_incident(incident_id)
+    return IntelligenceResponseBuilder.incident_detail(incident)
 
 
+@router.get("/api/timeline/{track_id}")
 @router.get("/timeline/{track_id}")
 def get_timeline(track_id: str):
-    events = get_db().get_events(limit=500)
-    return {"track_id": track_id, "timeline": build_timeline(events, track_id)}
+    events = get_intelligence_runtime().get_track_timeline(track_id)
+    return IntelligenceResponseBuilder.timeline(track_id, events)
 
 
+@router.get("/api/anomalies/live")
 @router.get("/anomalies/live")
-def get_live_anomalies(speed: float = Query(default=0.0), accel: float = Query(default=0.0), track_id: int = Query(default=0)):
-    anomaly = _anomaly_engine.evaluate_motion(speed=speed, accel=accel, track_id=track_id)
-    return {"anomaly": anomaly}
+def get_live_anomalies():
+    anomalies = get_intelligence_runtime().get_live_anomalies()
+    return IntelligenceResponseBuilder.anomalies(anomalies)
 
 
+@router.get("/api/cameras/{camera_id}/heatmap")
 @router.get("/cameras/{camera_id}/heatmap")
 def get_camera_heatmap(camera_id: str):
-    tracks = [t for t in get_db().get_tracks(limit=500) if t.get("camera_id", "default") == camera_id]
-    bins = {}
-    for t in tracks:
-        b = t.get("bbox") or [0,0,0,0]
-        cx, cy = int((b[0] + b[2]) / 2 // 50), int((b[1] + b[3]) / 2 // 50)
-        key = f"{cx}:{cy}"
-        bins[key] = bins.get(key, 0) + 1
-    return {"camera_id": camera_id, "occupancy_heatmap": bins, "handoff_prediction": _handoff_engine.predict_handoff(camera_id)}
+    heatmap = get_intelligence_runtime().get_camera_heatmap(camera_id)
+    return IntelligenceResponseBuilder.heatmap(heatmap, camera_id)

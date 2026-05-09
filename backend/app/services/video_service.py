@@ -16,6 +16,7 @@ from inference.identity_db import IdentityDB, get_db
 from inference.identity_fusion_engine import IdentityFusionEngine
 from inference.model_fusion_engine import ModelFusionEngine
 from inference.monitoring.metrics import get_metrics
+from inference.runtime import get_intelligence_runtime
 from inference.scenario_engine import ScenarioEngine
 from inference.schemas import FramePacket
 from inference.system_state import record_latency, update_state
@@ -110,9 +111,32 @@ def _process_frame_job(
                 active_tracks=tracker.get_active_tracks(packet.camera_id),
             )
             packet.tracks = tracker.update(packet)
+            ts_float = time.time()
+            intelligence_runtime = get_intelligence_runtime()
+            trajectories = [
+                intelligence_runtime.trajectory_engine.update(track, timestamp=ts_float)
+                for track in packet.tracks
+                if track.missed_frames == 0
+            ]
+            anomalies = intelligence_runtime.anomaly_engine.evaluate_trajectories(
+                trajectories,
+                camera_id=packet.camera_id,
+                frame_id=packet.frame_id,
+                timestamp=ts_float,
+            )
             buffer.add(packet)
             frame_events = event_engine.evaluate(buffer)
             frame_scenarios = scenario_engine.aggregate(frame_events)
+            intelligence_packet = intelligence_runtime.process_frame_context(
+                camera_id=packet.camera_id,
+                frame_id=packet.frame_id,
+                timestamp=ts_float,
+                detections=packet.detections,
+                tracks=packet.tracks,
+                trajectories=trajectories,
+                anomalies=anomalies,
+                events=frame_events,
+            )
 
             update_state(
                 frames_delta=1,
@@ -144,6 +168,7 @@ def _process_frame_job(
             "frame_result": _to_legacy_frame_result(packet),
             "events": [{**e.to_dict(), "frame_id": frame_index} for e in frame_events],
             "scenarios": [{**s.to_dict(), "frame_id": frame_index} for s in frame_scenarios],
+            "intelligence": intelligence_packet,
             "fname": fname,
             "det_ms": round(det_ms, 2),
         }

@@ -13,14 +13,16 @@ from typing import List
 import cv2
 import numpy as np
 
+from core.event_bus import get_event_bus
+from core.runtime import get_runtime_supervisor
 from inference.context.context_engine import ContextEngine
 from inference.detection_engine import DetectionEngine
 from inference.event_buffer import EventBuffer
-from inference.event_bus import get_event_bus
 from inference.event_engine import EventEngine
 from inference.metrics import metrics
 from inference.model_pool import ModelPool
 from inference.monitoring.metrics import register_stream, get_stream_metrics, get_metrics
+from inference.runtime import get_intelligence_runtime
 from inference.scenario_engine import ScenarioEngine
 from inference.schemas import FramePacket
 from inference.tracker import MultiObjectTracker
@@ -71,6 +73,17 @@ def _frame_priority(packet: FramePacket) -> int:
     if "person" in classes:
         return _PRIORITY_PERSON
     return _PRIORITY_EMPTY
+
+
+def _packet_timestamp_float(packet: FramePacket) -> float:
+    try:
+        return float(packet.timestamp)
+    except (TypeError, ValueError):
+        pass
+    try:
+        return datetime.fromisoformat(str(packet.timestamp)).timestamp()
+    except ValueError:
+        return time.time()
 
 
 # ── Circuit Breaker ───────────────────────────────────────────────────────────
@@ -214,6 +227,8 @@ class StreamProcessor:
         self._fusion_engine = ModelFusionEngine()
         self._scenario_engine = ScenarioEngine(db=_db)
         self._context_engine = ContextEngine()
+        self._intelligence_runtime = get_intelligence_runtime()
+        self._runtime_supervisor = get_runtime_supervisor()
 
         # ── 3-thread pipeline queues ──────────────────────────────────────────
         self._ingest_queue: queue.Queue = queue.Queue(maxsize=_INGEST_QUEUE_MAXSIZE)
@@ -498,6 +513,7 @@ class StreamProcessor:
             sm = get_stream_metrics(self.stream_id)
             if sm is not None:
                 sm.record_frame(batch_ms / 1000.0)
+            self._runtime_supervisor.report_inference_latency(per_frame_ms)
 
             self._circuit_breaker.record_success()
             self._cb_frame_results.append(True)
@@ -546,7 +562,7 @@ class StreamProcessor:
 
     def _process_packet(self, packet: FramePacket, bus: object) -> None:
         """
-        Run the tracking → event → scenario pipeline for one FramePacket whose
+        Run the tracking → trajectory → anomaly → event → incident pipeline for one FramePacket whose
         detections have already been populated by predict_batch().
         """
         # Stage 2: model-level fusion (NMS across weapon+phone detections)
@@ -559,6 +575,20 @@ class StreamProcessor:
 
         # Stage 3: per-stream tracking
         packet.tracks = self._tracker.update(packet)
+        ts_float = _packet_timestamp_float(packet)
+
+        # Stage 3a: trajectory intelligence and anomaly analysis
+        trajectories = [
+            self._intelligence_runtime.trajectory_engine.update(track, timestamp=ts_float)
+            for track in packet.tracks
+            if track.missed_frames == 0
+        ]
+        anomalies = self._intelligence_runtime.anomaly_engine.evaluate_trajectories(
+            trajectories,
+            camera_id=packet.camera_id,
+            frame_id=packet.frame_id,
+            timestamp=ts_float,
+        )
 
         # Stage 3b: context annotation — suppressed when pipeline is over budget
         if not self._skip_context_next:
@@ -572,6 +602,19 @@ class StreamProcessor:
         scenarios = self._scenario_engine.aggregate(events)
         validate_frame_result(packet, packet.tracks, events)
 
+        # Stage 6: incident reasoning, cross-camera handoff, forensic metadata
+        intelligence_packet = self._intelligence_runtime.process_frame_context(
+            camera_id=packet.camera_id,
+            frame_id=packet.frame_id,
+            timestamp=ts_float,
+            detections=packet.detections,
+            tracks=packet.tracks,
+            trajectories=trajectories,
+            anomalies=anomalies,
+            events=events,
+        )
+        packet.metadata["intelligence"] = intelligence_packet
+
         _snapshot_dir = os.getenv("AEGIS_DEBUG_SNAPSHOT_DIR", "")
         if _snapshot_dir:
             os.makedirs(_snapshot_dir, exist_ok=True)
@@ -582,7 +625,10 @@ class StreamProcessor:
                         "frame_id": packet.frame_id,
                         "detections": [d.to_dict() for d in packet.detections],
                         "tracks": [t.to_dict() for t in packet.tracks],
+                        "trajectories": trajectories,
+                        "anomalies": anomalies,
                         "events": [e.to_dict() for e in events],
+                        "incidents": intelligence_packet.get("incidents", []),
                     },
                     f,
                 )
@@ -601,6 +647,8 @@ class StreamProcessor:
                 "detections": len(packet.detections),
                 "tracks": len(packet.tracks),
                 "events": len(events),
+                "anomalies": len(anomalies),
+                "incidents": len(intelligence_packet.get("incidents", [])),
                 "scenarios": len(scenarios),
                 "context_skipped": self._skip_context_next,
                 "circuit_state": self._circuit_breaker.state,
@@ -642,6 +690,7 @@ class StreamProcessor:
 
     def _trip_circuit_breaker(self, reason: str) -> None:
         self._circuit_breaker.force_open()
+        self._runtime_supervisor.report_circuit_breaker(self.stream_id, self._circuit_breaker.state)
         get_metrics().record_circuit_break()
         metrics.circuit_breaker_trips += 1
         logger.critical(

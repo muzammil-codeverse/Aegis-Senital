@@ -16,6 +16,7 @@ from inference.identity_db import (
     SCENARIO_RESOLVED,
     get_db,
 )
+from inference.config_runtime import load_runtime_config
 from inference.schemas import DetectionResult, Event, Scenario
 from ml.llm.external_reasoning import ExternalReasoningEngine
 
@@ -109,6 +110,13 @@ class ScenarioEngine:
         self._known_signatures: dict[str, str] = {}
         # Phase 5 — per-identity event history for temporal reasoning
         self._identity_event_history: dict[str, deque[str]] = {}
+        cfg = _scenario_config()
+        self._escalation_patterns = [
+            (list(item.get("events", [])), str(item.get("level", "NONE")))
+            for item in cfg.get("escalation_patterns", [])
+            if item.get("events")
+        ] or list(_ESCALATION_PATTERNS)
+        self._identity_history_len = int(cfg.get("identity_history_len", _IDENTITY_HISTORY_LEN))
 
     def aggregate(self, event_list: list[Event]) -> list[Scenario]:
         persisted_events = [event for event in event_list if getattr(event, "persisted", False)]
@@ -188,7 +196,7 @@ class ScenarioEngine:
             for identity_id in event.identity_ids:
                 history = self._identity_event_history.setdefault(
                     identity_id,
-                    deque(maxlen=_IDENTITY_HISTORY_LEN),
+                    deque(maxlen=self._identity_history_len),
                 )
                 history.append(event.event_type)
 
@@ -211,7 +219,7 @@ class ScenarioEngine:
         combined.extend(current_event_types)  # include current frame events
 
         combined_set = set(combined)
-        for required_types, level in _ESCALATION_PATTERNS:
+        for required_types, level in self._escalation_patterns:
             if all(rtype in combined_set for rtype in required_types):
                 return level
         return "NONE"
@@ -466,3 +474,12 @@ def get_scenario(name: str) -> SecurityScenario | ClassroomScenario | TrafficSce
     if cls is None:
         raise ValueError(f"Unknown scenario '{name}'. Valid: {VALID_SCENARIOS}")
     return cls()
+
+
+def _scenario_config() -> dict:
+    try:
+        cfg = load_runtime_config("escalation_rules")
+    except FileNotFoundError:
+        return {}
+    scenario_cfg = cfg.get("scenario_engine", {})
+    return scenario_cfg if isinstance(scenario_cfg, dict) else {}

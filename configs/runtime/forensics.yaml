@@ -1,0 +1,17 @@
+timeline_dir: storage/forensics/timelines
+replay_index_dir: storage/forensics/replay_index
+recent_records: 5000
+
+runtime:
+  packet_history_size: 1000
+  track_timeline_size: 500
+  heatmap_points: 2000
+  heatmap_ttl_seconds: 600
+  heatmap_grid_size: [16, 9]
+  cleanup_interval_seconds: 30
+  identity_graph:
+    ttl_seconds: 3600
+    time_bucket_seconds: 60
+    history_limit: 200
+    prune_interval_seconds: 60
+    snapshot_dir: storage/identity_graph

@@ -1,0 +1,11 @@
+require_gpu: false
+latency_window: 100
+event_lag_window: 100
+queue_warning_ratio: 0.75
+queue_critical_ratio: 0.95
+latency_warning_ms: 150
+latency_critical_ms: 500
+thread_stale_seconds: 30
+stream_stall_seconds: 10
+event_lag_warning_seconds: 2
+event_lag_critical_seconds: 10

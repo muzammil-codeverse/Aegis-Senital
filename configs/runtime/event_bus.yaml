@@ -1,0 +1,8 @@
+backend: memory
+max_recent_events: 10000
+dead_letter_max: 1000
+priority:
+  critical: 1
+  high: 3
+  medium: 5
+  low: 7

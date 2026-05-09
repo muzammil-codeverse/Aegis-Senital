@@ -1,5 +1,11 @@
 baseline_window: 120
+live_ttl_seconds: 120
+max_live_anomalies: 500
 motion:
   panic_zscore: 3.0
   erratic_zscore: 2.0
+  acceleration_threshold: 8.0
+  panic_scale: 6.0
+  acceleration_scale: 15.0
+  erratic_scale: 5.0
 smoothing_alpha: 0.2

@@ -1,0 +1,40 @@
+max_events: 2000
+max_incidents: 1000
+risk_decay_per_second: 0.001
+resolve_below_risk: 0.10
+anomaly_incident_threshold: 0.65
+
+suppression:
+  duplicate_window_seconds: 15
+  incident_expiry_seconds: 300
+  escalation_cooldown_seconds: 20
+
+event_engine:
+  default_class_weight: 0.25
+  class_weights:
+    weapon: 0.95
+    pistol: 0.95
+    rifle: 0.95
+    knife: 0.85
+    grenade: 0.98
+    gun: 0.95
+    shotgun: 0.95
+    sword: 0.80
+    phone: 0.45
+    tablet: 0.40
+    cell phone: 0.45
+    person: 0.15
+  thresholds:
+    base: 0.30
+    weapon: 0.40
+    phone: 0.36
+    decay_lambda: 0.35
+    weapon_confirmation_frames: 3
+    phone_confirmation_frames: 2
+    unattended_frame_threshold: 30
+    person_proximity_iou: 0.05
+  scoring_weights:
+    persistence: 0.30
+    spatial: 0.25
+    motion: 0.20
+    class: 0.25

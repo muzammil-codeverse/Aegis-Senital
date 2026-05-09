@@ -150,14 +150,11 @@ class ModelPool:
     def _resolve_device(device: str) -> str:
         if device != "auto":
             return device
-        try:
-            import torch
-            if not torch.cuda.is_available():
-                logger.warning("ModelPool: CUDA unavailable — using CPU")
-                return "cpu"
-            return "cuda"
-        except ImportError:
-            return "cpu"
+        from ml.runtime.device_manager import get_best_device
+        resolved = get_best_device(prefer_gpu=True)
+        if resolved == "cpu":
+            logger.warning("ModelPool: CUDA unavailable — using CPU")
+        return resolved
 
     def _load_one(self, path: str, label: str) -> Any:
         from ultralytics import YOLO
