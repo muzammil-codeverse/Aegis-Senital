@@ -1,0 +1,104 @@
+version: 2
+task: weapon_detection
+description: "Expanded Aegis Sentinel weapon taxonomy for firearm, blade, and explosive threat objects."
+
+classes:
+  0: pistol
+  1: rifle
+  2: knife
+  3: shotgun
+  4: grenade
+  5: machete
+  6: sickle
+  7: axe
+  8: sword
+
+superclasses:
+  firearm:
+    - pistol
+    - rifle
+    - shotgun
+
+  blade:
+    - knife
+    - machete
+    - sickle
+    - axe
+    - sword
+
+  explosive:
+    - grenade
+
+aliases:
+  pistol:
+    - Pistol
+    - handgun
+    - Handgun
+    - gun
+    - Gun
+    - pistol
+
+  rifle:
+    - Senapan
+    - Rifle
+    - Long gun
+    - long gun
+    - automatic rifle
+    - rifle
+    - AR
+    - assault rifle
+
+  knife:
+    - Pisau
+    - Knife
+    - knife
+    - Knife_Weapon
+    - Knife_Deploy
+    - pocket knife
+    - combat knife
+
+  shotgun:
+    - Shotgun
+    - shot-gun
+    - shotgun
+
+  grenade:
+    - Grenade
+    - grenade
+
+  machete:
+    - Golok
+    - machete
+    - Machete
+    - cleaver
+    - parang
+
+  sickle:
+    - Celurit
+    - sickle
+    - Sickle
+    - scythe
+
+  axe:
+    - Kapak
+    - axe
+    - Axe
+    - hatchet
+
+  sword:
+    - Pedang
+    - sword
+    - Sword
+    - sabre
+    - blade_sword
+
+minimum_class_coverage:
+  pistol: 100
+  rifle: 100
+  knife: 100
+  shotgun: 50
+  grenade: 50
+  machete: 50
+  sickle: 50
+  axe: 50
+  sword: 50

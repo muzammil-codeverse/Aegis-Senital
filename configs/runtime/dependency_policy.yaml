@@ -1,0 +1,103 @@
+# Aegis Sentinel dependency policy — controls which packages are required per profile.
+# Read by scripts/validate_runtime.py --profile <profile>.
+#
+# Profiles: development (local dev, no postgres/redis required)
+#           production  (all core services required; graceful degradation disabled)
+
+profiles:
+  development:
+    required:
+      - module: torch
+        label: "PyTorch"
+        install_hint: "pip install torch --index-url https://download.pytorch.org/whl/cu124"
+      - module: torchvision
+        label: "torchvision"
+        install_hint: "pip install torchvision --index-url https://download.pytorch.org/whl/cu124"
+      - module: ultralytics
+        label: "Ultralytics YOLO"
+        install_hint: "pip install ultralytics"
+      - module: cv2
+        label: "opencv-python"
+        install_hint: "pip install opencv-python"
+      - module: yaml
+        label: "PyYAML"
+        install_hint: "pip install pyyaml"
+
+    optional:
+      - module: faiss
+        label: "FAISS (vector search)"
+        install_hint: "pip install faiss-cpu"
+        reason: "Required for vector similarity search; in-memory fallback used in dev"
+      - module: psycopg2
+        label: "psycopg2 (postgres)"
+        install_hint: "pip install psycopg2-binary"
+        reason: "Required for persistent storage; in-memory mode used when POSTGRES_DSN unset"
+      - module: sqlalchemy
+        label: "SQLAlchemy"
+        install_hint: "pip install sqlalchemy"
+        reason: "ORM for postgres; not required if POSTGRES_DSN unset"
+      - module: asyncpg
+        label: "asyncpg"
+        install_hint: "pip install asyncpg"
+        reason: "Async postgres driver; not required if POSTGRES_DSN unset"
+      - module: insightface
+        label: "InsightFace (face recognition)"
+        install_hint: "pip install insightface"
+        reason: "Face embedding extraction; feature disabled without this package"
+      - module: torchreid.reid.utils
+        label: "osnet/torchreid (re-ID)"
+        install_hint: "pip install torchreid (Python 3.10 or earlier recommended)"
+        reason: "Person re-identification embeddings; feature disabled without this package"
+
+    required_if_env:
+      - env_var: POSTGRES_DSN
+        module: psycopg2
+        label: "psycopg2 (POSTGRES_DSN is set)"
+      - env_var: POSTGRES_DSN
+        module: sqlalchemy
+        label: "SQLAlchemy (POSTGRES_DSN is set)"
+      - env_var: POSTGRES_DSN
+        module: asyncpg
+        label: "asyncpg (POSTGRES_DSN is set)"
+
+  production:
+    required:
+      - module: torch
+        label: "PyTorch"
+        install_hint: "pip install torch --index-url https://download.pytorch.org/whl/cu124"
+      - module: torchvision
+        label: "torchvision"
+        install_hint: "pip install torchvision --index-url https://download.pytorch.org/whl/cu124"
+      - module: ultralytics
+        label: "Ultralytics YOLO"
+        install_hint: "pip install ultralytics"
+      - module: cv2
+        label: "opencv-python"
+        install_hint: "pip install opencv-python"
+      - module: yaml
+        label: "PyYAML"
+        install_hint: "pip install pyyaml"
+      - module: faiss
+        label: "FAISS (vector search)"
+        install_hint: "pip install faiss-cpu  # or faiss-gpu"
+      - module: psycopg2
+        label: "psycopg2 (postgres)"
+        install_hint: "pip install psycopg2-binary"
+      - module: sqlalchemy
+        label: "SQLAlchemy"
+        install_hint: "pip install sqlalchemy"
+      - module: asyncpg
+        label: "asyncpg"
+        install_hint: "pip install asyncpg"
+
+    optional:
+      - module: insightface
+        label: "InsightFace (face recognition)"
+        install_hint: "pip install insightface"
+        reason: "Face embedding extraction; face recognition feature disabled without this"
+      - module: torchreid.reid.utils
+        label: "osnet/torchreid (re-ID)"
+        install_hint: "pip install torchreid"
+        reason: "Person re-ID embeddings; re-ID feature disabled without this"
+
+    required_if_env: []

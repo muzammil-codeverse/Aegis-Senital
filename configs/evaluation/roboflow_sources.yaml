@@ -15,3 +15,40 @@ weapon:
   raw_dir: "datasets/raw/weapon/weapon-detection-smvsm-v3"
   eval_dir: "datasets/evaluation/weapon"
   expected_task: "weapon_detection"
+
+# --- Weapon v2 taxonomy sources ---
+# Each source contributes classes that map into weapon_taxonomy_v2.yaml aliases.
+# All sources are combined and remapped by scripts/prepare_weapon_dataset_v2.py.
+
+weapon_sources:
+  primary_indonesian:
+    workspace: "deteksi-senjata"
+    project: "weapon-detection-smvsm"
+    version: 3
+    format: "yolov8"
+    raw_dir: "datasets/raw/weapon/weapon-detection-smvsm-v3"
+    role: "primary_blade_firearm_source"
+
+  weapon_detection_large:
+    workspace: "yolov7test-u13vc"
+    project: "weapon-detection-m7qso"
+    version: null
+    format: "yolov8"
+    raw_dir: "datasets/raw/weapon/weapon-detection-m7qso"
+    role: "supplemental_firearm_blade_shotgun_grenade_source"
+
+  gun_and_knife:
+    workspace: "mahad-ahmed"
+    project: "gun-and-knife-detection"
+    version: null
+    format: "yolov8"
+    raw_dir: "datasets/raw/weapon/gun-and-knife-detection"
+    role: "supplemental_gun_knife_source"
+
+  object_detection_weapon:
+    workspace: "objectdetection-vwaq0"
+    project: "weapon-detection-m7qso-bh8jc"
+    version: null
+    format: "yolov8"
+    raw_dir: "datasets/raw/weapon/objectdetection-weapon-detection-m7qso-bh8jc"
+    role: "supplemental_weapon_source"
