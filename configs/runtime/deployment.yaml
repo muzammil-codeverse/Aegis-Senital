@@ -17,6 +17,10 @@ services:
     model_path_env: AEGIS_OPEN_VOCAB_MODEL_PATH
     processor_path_env: AEGIS_OPEN_VOCAB_PROCESSOR_PATH
     allow_download_env: AEGIS_OPEN_VOCAB_ALLOW_DOWNLOAD
+  segmentation:
+    enabled: true
+    required: false
+    provider: sam2
 
 storage:
   base_dir: storage

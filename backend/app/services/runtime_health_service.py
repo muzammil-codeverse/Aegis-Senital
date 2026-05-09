@@ -92,6 +92,29 @@ class RuntimeHealthService:
             "last_auto_load_error": last_error,
         }
 
+    def _check_segmentation(self) -> dict:
+        try:
+            from inference.segmentation import get_segmentation_service
+
+            health = get_segmentation_service().get_health()
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "detail": str(exc)[:120],
+                "enabled": True,
+                "provider": "unknown",
+                "loaded": False,
+            }
+        detail = health.get("last_error")
+        return {
+            "status": health.get("status", "degraded"),
+            "detail": detail,
+            "enabled": bool(health.get("enabled", False)),
+            "provider": health.get("provider"),
+            "loaded": bool(health.get("loaded", False)),
+            "device": health.get("device"),
+        }
+
     def _check_storage(self) -> dict:
         paths = ["storage", "storage/open_vocab", "models"]
         for p in paths:
@@ -131,6 +154,7 @@ class RuntimeHealthService:
             "redis": self._check_redis(),
             "gpu": self._check_gpu(),
             "open_vocab": self._check_open_vocab(),
+            "segmentation": self._check_segmentation(),
             "storage": self._check_storage(),
             "model_registry": self._check_model_registry(),
             "event_bus": self._check_event_bus(),
@@ -144,7 +168,7 @@ class RuntimeHealthService:
                     checks[k]["detail"] = "[filtered]"
 
         statuses = [c["status"] for c in checks.values()]
-        if "error" in statuses:
+        if "error" in statuses or "failed" in statuses:
             overall = "error"
         elif "degraded" in statuses or "unavailable" in statuses:
             overall = "degraded"
@@ -168,6 +192,7 @@ class RuntimeHealthService:
         require_redis = deploy_config.get("require_redis", False)
         require_gpu = deploy_config.get("require_gpu", False)
         require_open_vocab = bool(self._config.get("services", {}).get("open_vocab", {}).get("required", False))
+        require_segmentation = bool(self._config.get("services", {}).get("segmentation", {}).get("required", False))
 
         failures = []
         if require_postgres:
@@ -195,6 +220,10 @@ class RuntimeHealthService:
             open_vocab = self._check_open_vocab()
             if open_vocab["status"] != "ok":
                 failures.append(f"open_vocab: {open_vocab['detail']}")
+        if require_segmentation:
+            segmentation = self._check_segmentation()
+            if segmentation["status"] != "healthy":
+                failures.append(f"segmentation: {segmentation.get('detail') or segmentation['status']}")
 
         return {
             "ready": len(failures) == 0,

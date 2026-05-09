@@ -27,6 +27,7 @@ class Detection:
     face_embedding: list = field(default_factory=list)
     appearance_embedding: list = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
+    segmentation: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +40,7 @@ class Detection:
             "face_embedding": self.face_embedding,
             "appearance_embedding": self.appearance_embedding,
             "metadata": self.metadata,
+            "segmentation": self.segmentation,
         }
 
 
@@ -204,6 +206,7 @@ class Event:
     event_vector: list = field(default_factory=list)
     persisted: bool = False
     metadata: dict = field(default_factory=dict)
+    segmentation: dict | None = None
     # Phase 5 — intelligence layer
     priority_level: str = "LOW"     # "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"
 
@@ -232,6 +235,7 @@ class Event:
             "event_vector": list(self.event_vector),
             "persisted": self.persisted,
             "metadata": self.metadata,
+            "segmentation": self.segmentation,
         }
 
 

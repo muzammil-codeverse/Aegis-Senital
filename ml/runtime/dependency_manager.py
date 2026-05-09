@@ -3,9 +3,12 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from ml.runtime.model_router import ModelRouter
 
@@ -16,6 +19,7 @@ REQUIRED_DEPENDENCIES = {
 OPTIONAL_DEPENDENCIES = {
     "face_recognition": "insightface",
     "reid_model": "osnet (torchreid)",
+    "segmentation": "SAM2",
 }
 
 _BOOT_LOCK = threading.Lock()
@@ -47,12 +51,74 @@ def validate_dependencies() -> None:
     _validate_import("torchvision", "torchvision", missing)
     _validate_import("ultralytics", "ultralytics", missing)
     _validate_import("cv2", "opencv-python", missing)
+    validate_segmentation_dependencies()
 
     if missing_optional:
         logging.getLogger(__name__).warning(
             "Optional dependencies unavailable; related features will run degraded: %s",
             missing_optional,
         )
+
+
+def validate_segmentation_dependencies(profile: str | None = None) -> None:
+    profile = (profile or os.environ.get("APP_ENV") or "development").lower()
+    config_path = _PROJECT_ROOT / "configs" / "runtime" / "segmentation.yaml"
+    if not config_path.exists():
+        if profile == "production":
+            raise RuntimeError(
+                f"[CRITICAL FAILURE] Segmentation config missing in production: {config_path}"
+            )
+        logging.getLogger(__name__).warning(
+            "Segmentation config missing; segmentation disabled/degraded: %s",
+            config_path,
+        )
+        return
+
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        if profile == "production":
+            raise RuntimeError(
+                f"[CRITICAL FAILURE] Segmentation config unreadable: {config_path}. Error: {exc}"
+            ) from exc
+        logging.getLogger(__name__).warning("Segmentation config unreadable: %s", exc)
+        return
+
+    seg = cfg.get("segmentation", cfg)
+    if not isinstance(seg, dict) or not bool(seg.get("enabled", False)):
+        return
+    if str(seg.get("provider", "sam2")).lower() != "sam2":
+        message = f"Unsupported segmentation provider: {seg.get('provider')}"
+        if profile == "production":
+            raise RuntimeError(f"[CRITICAL FAILURE] {message}")
+        logging.getLogger(__name__).warning(message)
+        return
+
+    missing: list[str] = []
+    try:
+        importlib.import_module("sam2")
+    except Exception:
+        missing.append("sam2 package")
+
+    sam2_cfg = seg.get("sam2", {}) if isinstance(seg.get("sam2"), dict) else {}
+    checkpoint = _PROJECT_ROOT / sam2_cfg.get("checkpoint_path", "models/segmentation/sam2/checkpoint.pt")
+    model_config = _PROJECT_ROOT / sam2_cfg.get("model_config", "configs/segmentation/sam2.yaml")
+    if not checkpoint.exists():
+        missing.append(f"SAM2 checkpoint: {checkpoint}")
+    if not model_config.exists():
+        missing.append(f"SAM2 model config: {model_config}")
+    if not missing:
+        return
+
+    message = (
+        "Segmentation is enabled but SAM2 dependencies/assets are unavailable: "
+        f"{missing}"
+    )
+    if profile == "production":
+        raise RuntimeError(
+            f"[CRITICAL FAILURE] {message}. Install SAM2/checkpoint/config or disable segmentation."
+        )
+    logging.getLogger(__name__).warning("%s Runtime will degrade loudly.", message)
 
     if missing:
         raise RuntimeError(

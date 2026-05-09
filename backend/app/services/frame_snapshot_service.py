@@ -108,6 +108,7 @@ class FrameSnapshotService:
         incidents: list | None = None,
         alerts: list | None = None,
         overlays: list | None = None,
+        segmentation: dict | None = None,
         width: int | None = None,
         height: int | None = None,
     ) -> None:
@@ -154,6 +155,7 @@ class FrameSnapshotService:
             "events": events or [],
             "incidents": incidents or [],
             "alerts": alerts or [],
+            "segmentation": segmentation,
             "overlays": overlay_items,
             "overlay_items": overlay_items,
             "width": width,
@@ -221,6 +223,7 @@ class FrameSnapshotService:
                 "events": [],
                 "incidents": [],
                 "alerts": [],
+                "segmentation": None,
                 "overlays": [],
                 "overlay_items": [],
                 "width": None,

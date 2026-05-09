@@ -48,6 +48,7 @@ class TimelineBuilder:
             "event_ids": event_ids,
             "incident_ids": incident_ids,
             "snapshot_path": snapshot_path,
+            "segmentation": (metadata or {}).get("segmentation"),
             "metadata": {
                 **(metadata or {}),
                 "anomaly_count": len(anomalies or []),

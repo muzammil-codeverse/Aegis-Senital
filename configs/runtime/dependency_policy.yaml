@@ -101,3 +101,16 @@ profiles:
         reason: "Person re-ID embeddings; re-ID feature disabled without this"
 
     required_if_env: []
+
+feature_dependencies:
+  segmentation:
+    label: "SAM2 segmentation"
+    module: sam2
+    install_hint: "pip install git+https://github.com/facebookresearch/sam2.git"
+    config_path: "configs/runtime/segmentation.yaml"
+    enabled_path: "segmentation.enabled"
+    provider_path: "segmentation.provider"
+    checkpoint_path: "models/segmentation/sam2/checkpoint.pt"
+    model_config: "configs/segmentation/sam2.yaml"
+    development_behavior: "warn when segmentation is enabled and SAM2/checkpoint/config are missing"
+    production_behavior: "fail when segmentation is enabled and SAM2/checkpoint/config are missing"

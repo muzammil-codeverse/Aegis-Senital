@@ -642,6 +642,14 @@ def get_core_metrics():
             "open_vocab_model_auto_load_success_total",
             "open_vocab_model_auto_load_skipped_total",
             "open_vocab_model_auto_load_timeout_total",
+            "segmentation_requests_total",
+            "segmentation_success_total",
+            "segmentation_failures_total",
+            "segmentation_skipped_total",
+            "segmentation_latency_ms",
+            "segmentation_masks_generated_total",
+            "segmentation_mask_area_ratio",
+            "segmentation_provider_unavailable_total",
         ):
             base.setdefault(_p24_key, _mon24.get(_p24_key, 0))
     except Exception:
@@ -654,6 +662,14 @@ def get_core_metrics():
             "open_vocab_model_auto_load_success_total",
             "open_vocab_model_auto_load_skipped_total",
             "open_vocab_model_auto_load_timeout_total",
+            "segmentation_requests_total",
+            "segmentation_success_total",
+            "segmentation_failures_total",
+            "segmentation_skipped_total",
+            "segmentation_latency_ms",
+            "segmentation_masks_generated_total",
+            "segmentation_mask_area_ratio",
+            "segmentation_provider_unavailable_total",
         ):
             base.setdefault(_p24_key, 0)
     return base

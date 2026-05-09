@@ -21,6 +21,7 @@ from inference.forensics.replay_indexer import ReplayIndexer
 from inference.forensics.timeline_builder import TimelineBuilder
 from inference.identity.temporal_identity_graph import TemporalIdentityGraph
 from inference.reasoning.incident_engine import IncidentEngine
+from inference.segmentation import get_segmentation_service
 from inference.trajectory.trajectory_engine import TrajectoryEngine
 
 # Phase 23: open-vocabulary threat scanner (optional, lazy)
@@ -56,6 +57,7 @@ class IntelligenceRuntime:
         self.notification_dispatcher = NotificationDispatcher(router=self.alert_router)
         self.identity_graph = TemporalIdentityGraph(cfg.get("identity_graph", {}))
         self.context_engine = _optional_context_engine()
+        self.segmentation_service = get_segmentation_service()
         self._packet_history = deque(maxlen=int(cfg.get("packet_history_size", 1_000)))
         self._track_timelines: dict[str, deque[dict]] = defaultdict(
             lambda: deque(maxlen=int(cfg.get("track_timeline_size", 500)))
@@ -128,6 +130,7 @@ class IntelligenceRuntime:
             self._update_identity_graph(camera_id, ts, tracks, trajectories, events, anomalies)
             incidents = self.incident_engine.process(events=events, anomalies=anomalies, timeline_ref=None)
             alerts = self._process_alerts(incidents, events)
+            segmentation_payload = _segmentation_payload_from_events(events)
             timeline_record = self.timeline_builder.record_frame(
                 timestamp=ts,
                 camera_id=camera_id,
@@ -140,6 +143,7 @@ class IntelligenceRuntime:
                     "handoffs": handoffs,
                     "handoff_events": [h.get("handoff_id") for h in handoff_events],
                     "alert_ids": [alert["alert_id"] for alert in alerts],
+                    "segmentation": segmentation_payload,
                 },
             )
             replay_path = self.replay_indexer.append(timeline_record)
@@ -157,6 +161,7 @@ class IntelligenceRuntime:
                 "trajectories": trajectories,
                 "anomalies": anomalies,
                 "events": [_to_dict(item) for item in events],
+                "segmentation": segmentation_payload,
                 "incidents": incidents,
                 "alerts": alerts,
                 "metrics": {
@@ -168,6 +173,7 @@ class IntelligenceRuntime:
                         "active_alerts": len(self.alert_manager.list_alerts(limit=2_000)),
                         "new_alerts": len(alerts),
                     },
+                    "segmentation": self.segmentation_service.get_health(),
                     "handoff_predictions": len(handoffs),
                 },
             }
@@ -243,6 +249,7 @@ class IntelligenceRuntime:
             "status": "ok",
             "metrics": dict(self._metrics),
             "open_vocab": self.get_open_vocab_status(),
+            "segmentation": self.segmentation_service.get_health(),
             "event_bus": get_event_bus().health(),
             "supervisor": get_runtime_supervisor().get_health_snapshot(),
         }
@@ -602,6 +609,17 @@ def _get(item: Any, key: str, default: Any = None) -> Any:
     if isinstance(item, dict):
         return item.get(key, default)
     return getattr(item, key, default)
+
+
+def _segmentation_payload_from_events(events: list[Any]) -> dict | None:
+    for event in events or []:
+        payload = _get(event, "segmentation")
+        if isinstance(payload, dict):
+            return payload
+        metadata = _get(event, "metadata", {}) or {}
+        if isinstance(metadata, dict) and isinstance(metadata.get("segmentation"), dict):
+            return metadata["segmentation"]
+    return None
 
 
 _runtime: IntelligenceRuntime | None = None
