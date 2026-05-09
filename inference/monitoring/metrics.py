@@ -63,6 +63,16 @@ class SystemMetrics:
         self.geofence_checks: int = 0
         self.map_incident_markers: int = 0
         self.map_alert_markers: int = 0
+        # Phase 19 — cross-camera handoff metrics
+        self.handoff_predictions_created: int = 0
+        self.handoff_candidates_observed: int = 0
+        self.handoffs_confirmed: int = 0
+        self.handoffs_rejected: int = 0
+        self.handoffs_expired: int = 0
+        self.active_handoffs: int = 0
+        self.websocket_handoff_clients: int = 0
+        self.websocket_handoff_messages: int = 0
+        self.websocket_handoff_dropped_messages: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 

@@ -169,6 +169,18 @@ def get_core_metrics():
     for _geo_key in ("map_state_requests", "map_zone_queries", "map_topology_queries",
                      "geofence_checks", "map_incident_markers", "map_alert_markers"):
         base.setdefault(_geo_key, getattr(metrics, _geo_key, 0))
+    # Bridge Phase-19 handoff metrics
+    for _ho_key in ("handoff_predictions_created", "handoff_candidates_observed",
+                    "handoffs_confirmed", "handoffs_rejected", "handoffs_expired",
+                    "active_handoffs", "websocket_handoff_clients",
+                    "websocket_handoff_messages", "websocket_handoff_dropped_messages"):
+        base.setdefault(_ho_key, getattr(metrics, _ho_key, 0))
+    # Live active_handoffs count from store
+    try:
+        from inference.runtime import get_intelligence_runtime
+        base["active_handoffs"] = get_intelligence_runtime().handoff_store.active_count()
+    except Exception:
+        pass
     return base
 
 
@@ -773,6 +785,13 @@ def get_map_state_api():
     state = _geo().get_map_state()
     _geo_metric("map_incident_markers")
     _geo_metric("map_alert_markers")
+    # Attach active handoffs to map state
+    try:
+        from inference.runtime import get_intelligence_runtime
+        handoffs = get_intelligence_runtime().handoff_store.list_active(limit=100)
+        state["handoffs"] = handoffs
+    except Exception:
+        state["handoffs"] = []
     return {"item": state, "status": "ok"}
 
 
@@ -843,5 +862,55 @@ def get_map_topology_api():
     _geo_metric("map_topology_queries")
     topology = _geo().get_camera_topology()
     return {"item": topology, "status": "ok"}
+
+
+# ── Handoff endpoints ─────────────────────────────────────────────────────────
+
+def _handoff_store():
+    from inference.runtime import get_intelligence_runtime
+    return get_intelligence_runtime().handoff_store
+
+
+@router.get("/api/handoffs/active")
+def list_active_handoffs_api(limit: int = Query(default=100, ge=1, le=500)):
+    try:
+        metrics.increment("active_handoffs")
+    except Exception:
+        pass
+    items = _handoff_store().list_active(limit=limit)
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/handoffs/recent")
+def list_recent_handoffs_api(limit: int = Query(default=100, ge=1, le=500)):
+    items = _handoff_store().list_recent(limit=limit)
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/handoffs/identity/{identity_id}")
+def list_handoffs_by_identity_api(identity_id: str, limit: int = Query(default=100, ge=1, le=500)):
+    items = _handoff_store().list_by_identity(identity_id, limit=limit)
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/handoffs/camera/{camera_id}")
+def list_handoffs_by_camera_api(camera_id: str, limit: int = Query(default=100, ge=1, le=500)):
+    items = _handoff_store().list_by_camera(camera_id, limit=limit)
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/handoffs/{handoff_id}")
+def get_handoff_api(handoff_id: str):
+    item = _handoff_store().get_handoff(handoff_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail=f"Handoff '{handoff_id}' not found")
+    return {"item": item, "status": "ok"}
+
+
+@router.websocket("/ws/handoffs")
+async def websocket_handoffs_endpoint(websocket: WebSocket):
+    """Real-time cross-camera handoff event stream."""
+    from app.services.websocket_handoff_service import get_websocket_handoff_service
+    await get_websocket_handoff_service().handle_connection(websocket)
 
 

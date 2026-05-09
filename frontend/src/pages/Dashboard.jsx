@@ -6,6 +6,8 @@ import CommandOverview from '../components/dashboard/CommandOverview'
 import { useCameras } from '../hooks/useCameras'
 import { useLatestFrames } from '../hooks/useLatestFrames'
 import { useFrameUpdates } from '../hooks/useFrameUpdates'
+import { useHandoffs } from '../hooks/useHandoffs'
+import { useWebSocketHandoffs } from '../hooks/useWebSocketHandoffs'
 import { useMapState } from '../hooks/useMapState'
 import { getStreams } from '../api/camerasApi'
 import { compareSeverity } from '../utils/severity'
@@ -23,6 +25,26 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
     refresh: refreshMap,
     setSelectedCameraId: setMapSelectedCameraId,
   } = useMapState({ pollMs: DASHBOARD_POLL_MS })
+
+  const {
+    activeHandoffs: polledActiveHandoffs,
+    recentHandoffs,
+    mergeWebSocketHandoff,
+  } = useHandoffs({ pollMs: DASHBOARD_POLL_MS })
+
+  const { handoffList: wsHandoffList, status: handoffWsStatus } = useWebSocketHandoffs()
+
+  // Merge WS handoff updates with polling
+  const activeHandoffs = useMemo(() => {
+    const byId = {}
+    for (const h of polledActiveHandoffs) byId[h.handoff_id] = h
+    for (const h of wsHandoffList) {
+      if (h.state && h.state !== 'confirmed' && h.state !== 'rejected' && h.state !== 'expired') {
+        byId[h.handoff_id] = { ...(byId[h.handoff_id] ?? {}), ...h }
+      }
+    }
+    return Object.values(byId)
+  }, [polledActiveHandoffs, wsHandoffList])
 
   // Camera state — managed here, passed down to avoid duplicate fetching
   const { cameras, loading: camerasLoading, error: camerasError, refresh: refreshCameras, selectedCamera, setSelectedCamera } = useCameras()
@@ -143,6 +165,10 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
         mapLoading={mapLoading}
         mapError={mapError}
         onMapRefresh={refreshMap}
+        // Handoffs
+        activeHandoffs={activeHandoffs}
+        recentHandoffs={recentHandoffs}
+        handoffWsStatus={handoffWsStatus}
       />
       <AlertDetailDrawer
         open={Boolean(alertState.selectedAlert)}

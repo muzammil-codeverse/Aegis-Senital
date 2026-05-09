@@ -48,6 +48,16 @@ class SystemMetrics:
         self.geofence_checks = 0
         self.map_incident_markers = 0
         self.map_alert_markers = 0
+        # Phase 19: cross-camera handoff metrics
+        self.handoff_predictions_created = 0
+        self.handoff_candidates_observed = 0
+        self.handoffs_confirmed = 0
+        self.handoffs_rejected = 0
+        self.handoffs_expired = 0
+        self.active_handoffs = 0
+        self.websocket_handoff_clients = 0
+        self.websocket_handoff_messages = 0
+        self.websocket_handoff_dropped_messages = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

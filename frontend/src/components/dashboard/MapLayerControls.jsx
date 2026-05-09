@@ -3,6 +3,7 @@ const LAYERS = [
   { id: 'zones',       label: 'Zones' },
   { id: 'geofences',   label: 'Geofences' },
   { id: 'connections', label: 'Connections' },
+  { id: 'handoffs',    label: 'Handoffs' },
   { id: 'incidents',   label: 'Incidents' },
   { id: 'alerts',      label: 'Alerts' },
   { id: 'heatmap',     label: 'Heatmap' },

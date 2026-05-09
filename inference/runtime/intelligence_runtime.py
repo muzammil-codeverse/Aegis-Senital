@@ -16,6 +16,7 @@ from inference.alerts.notification.dispatcher import NotificationDispatcher
 from inference.anomaly.anomaly_engine import AnomalyEngine
 from inference.config_runtime import load_runtime_config
 from inference.correlation.handoff_predictor import HandoffPredictor
+from inference.correlation.handoff_engine import HandoffEngine
 from inference.forensics.replay_indexer import ReplayIndexer
 from inference.forensics.timeline_builder import TimelineBuilder
 from inference.identity.temporal_identity_graph import TemporalIdentityGraph
@@ -33,6 +34,8 @@ class IntelligenceRuntime:
         self.anomaly_engine = AnomalyEngine()
         self.incident_engine = IncidentEngine()
         self.handoff_predictor = HandoffPredictor()
+        self.handoff_engine = HandoffEngine()
+        self.handoff_store = self.handoff_engine.store
         self.timeline_builder = TimelineBuilder()
         self.replay_indexer = ReplayIndexer()
         self.alert_store = AlertStore()
@@ -92,6 +95,11 @@ class IntelligenceRuntime:
                     frame_id=frame_id,
                     timestamp=ts,
                 )
+            # Phase 19: structured handoff processing via HandoffEngine
+            handoff_events = self.handoff_engine.process_frame_tracks(
+                camera_id, tracks, timestamp=ts,
+            )
+            # Legacy prediction path (kept for backward compat metrics)
             handoffs = [
                 prediction
                 for track in tracks
@@ -102,6 +110,7 @@ class IntelligenceRuntime:
                 )
                 if prediction.get("candidate_camera") is not None
             ]
+            self._metrics["handoff_predictions"] += len(handoffs)
             self._update_identity_graph(camera_id, ts, tracks, trajectories, events, anomalies)
             incidents = self.incident_engine.process(events=events, anomalies=anomalies, timeline_ref=None)
             alerts = self._process_alerts(incidents, events)
@@ -113,7 +122,11 @@ class IntelligenceRuntime:
                 events=events,
                 incidents=incidents,
                 anomalies=anomalies,
-                metadata={"handoffs": handoffs, "alert_ids": [alert["alert_id"] for alert in alerts]},
+                metadata={
+                    "handoffs": handoffs,
+                    "handoff_events": [h.get("handoff_id") for h in handoff_events],
+                    "alert_ids": [alert["alert_id"] for alert in alerts],
+                },
             )
             replay_path = self.replay_indexer.append(timeline_record)
             self.incident_engine.attach_timeline_ref(
@@ -260,6 +273,10 @@ class IntelligenceRuntime:
             self.alert_manager.expire_stale_alerts()
             self.identity_graph.prune_expired()
             self._cleanup_heatmap_locked(time.time())
+        try:
+            self.handoff_engine.cleanup()
+        except Exception:
+            pass
 
     def _process_alerts(self, incidents: list[dict], events: list[Any]) -> list[dict]:
         alerts = []

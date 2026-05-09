@@ -84,11 +84,20 @@ function AlertMarkerDot({ cx, cy, severity }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
+const HANDOFF_STATE_COLOR = {
+  predicted: '#a78bfa',
+  candidate: '#60a5fa',
+  confirmed: '#34d399',
+  rejected: '#f87171',
+  expired: '#6b7280',
+}
+
 const DEFAULT_LAYERS = {
   cameras: true,
   zones: true,
   geofences: true,
   connections: true,
+  handoffs: true,
   incidents: true,
   alerts: true,
   heatmap: false,
@@ -103,6 +112,7 @@ export default function OperationsMapPanel({
   selectedCameraId,
   onCameraSelect,
   onIncidentSelect,
+  activeHandoffs = [],
 }) {
   const containerRef = useRef(null)
   const [layers, setLayers] = useState(DEFAULT_LAYERS)
@@ -265,6 +275,43 @@ export default function OperationsMapPanel({
                   strokeDasharray="6,4"
                   opacity={opacity}
                 />
+              )
+            })}
+
+            {/* Handoff overlay */}
+            {layers.handoffs && activeHandoffs.map(handoff => {
+              const from = cameraPos[handoff.source_camera]
+              const to = cameraPos[handoff.target_camera]
+              if (!from || !to) return null
+              const color = HANDOFF_STATE_COLOR[handoff.state] ?? '#9ca3af'
+              const opacity = Math.max(0.3, Math.min(1.0, handoff.confidence ?? 0.5))
+              const strokeW = handoff.state === 'confirmed' ? 3 : 2
+              const mx = (from.x + to.x) / 2
+              const my = (from.y + to.y) / 2
+              return (
+                <g key={`ho-${handoff.handoff_id}`}>
+                  <line
+                    x1={from.x} y1={from.y}
+                    x2={to.x} y2={to.y}
+                    stroke={color}
+                    strokeWidth={strokeW}
+                    strokeDasharray={handoff.state === 'confirmed' ? '0' : '8,4'}
+                    opacity={opacity}
+                  />
+                  {/* Arrow head at target */}
+                  <circle cx={to.x} cy={to.y} r={4} fill={color} opacity={opacity} />
+                  {/* Confidence/ETA label */}
+                  <g>
+                    <rect x={mx - 22} y={my - 9} width={44} height={14} rx={3}
+                      fill="rgba(0,0,0,0.75)" />
+                    <text x={mx} y={my} textAnchor="middle" dominantBaseline="middle"
+                      fontSize={8} fill={color} fontWeight="600">
+                      {handoff.eta_seconds != null
+                        ? `${Math.round(handoff.confidence * 100)}% ${Math.round(handoff.eta_seconds)}s`
+                        : `${Math.round(handoff.confidence * 100)}%`}
+                    </text>
+                  </g>
+                </g>
               )
             })}
 

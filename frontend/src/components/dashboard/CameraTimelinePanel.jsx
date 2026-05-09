@@ -80,10 +80,25 @@ export default function CameraTimelinePanel({ cameraId, onSelectFrame }) {
               >
                 <span style={{ color: '#6b7280' }}>{formatTimestamp(item.timestamp)}</span>
                 <strong style={{ color: '#e6e6e6' }}>#{item.frame_id ?? '—'}</strong>
-                <span style={{ display: 'flex', gap: 5, fontSize: '0.65rem' }}>
+                <span style={{ display: 'flex', gap: 5, fontSize: '0.65rem', flexWrap: 'wrap' }}>
                   {trackCount > 0 && <span style={{ color: '#1890ff' }}>{trackCount} trk</span>}
                   {eventCount > 0 && <span style={{ color: '#fa8c16' }}>{eventCount} evt</span>}
                   {incCount > 0 && <span style={{ color: '#ff4d4f' }}>{incCount} inc</span>}
+                  {(item.handoff_events || []).length > 0 && (
+                    <span
+                      style={{
+                        color: '#a78bfa',
+                        background: '#a78bfa18',
+                        border: '1px solid #a78bfa44',
+                        borderRadius: 3,
+                        padding: '0 4px',
+                        fontSize: '0.62rem',
+                      }}
+                      title={`Handoffs: ${(item.handoff_events || []).join(', ')}`}
+                    >
+                      {(item.handoff_events || []).length} HO
+                    </span>
+                  )}
                 </span>
               </li>
             )

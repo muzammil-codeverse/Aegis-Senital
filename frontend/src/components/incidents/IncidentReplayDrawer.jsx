@@ -40,6 +40,7 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
   const incidentTitle = incident?.incident_type || incident?.type || incident?.incident_id || 'Incident'
   const frames = replay?.frames || []
   const alerts = replay?.alerts || []
+  const handoffs = replay?.handoffs || []
   const currentFrame = frames[frameIdx]
 
   return (
@@ -123,6 +124,69 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
               </section>
             ) : (
               <EmptyState message="No timeline frames recorded for this incident." />
+            )}
+
+            {/* Handoff chain */}
+            {handoffs.length > 0 && (
+              <section style={{ marginBottom: 16 }}>
+                <p style={{ margin: '0 0 6px', fontSize: '0.6rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                  Camera Handoff Chain ({handoffs.length})
+                </p>
+                <ol style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 180, overflowY: 'auto' }}>
+                  {handoffs.map((ho, idx) => {
+                    const stateColor = {
+                      predicted: '#a78bfa', candidate: '#60a5fa',
+                      confirmed: '#34d399', rejected: '#f87171', expired: '#6b7280',
+                    }[ho.state] ?? '#9ca3af'
+                    const ev = ho.evidence ?? {}
+                    return (
+                      <li
+                        key={ho.handoff_id ?? idx}
+                        style={{
+                          borderLeft: `3px solid ${stateColor}`,
+                          background: '#0a0f1a',
+                          borderRadius: '0 4px 4px 0',
+                          padding: '5px 8px',
+                          marginBottom: 6,
+                          fontSize: '0.72rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 3 }}>
+                          <span style={{ color: stateColor, fontWeight: 600, fontSize: '0.65rem' }}>
+                            {(ho.state ?? 'unknown').toUpperCase()}
+                          </span>
+                          <span style={{ color: '#e5e7eb', fontFamily: 'monospace' }}>
+                            {ho.source_camera} → {ho.target_camera}
+                          </span>
+                          <span style={{ color: '#9ca3af' }}>
+                            {Math.round((ho.confidence ?? 0) * 100)}% conf
+                          </span>
+                          {ho.eta_seconds != null && (
+                            <span style={{ color: '#fbbf24' }}>ETA {ho.eta_seconds.toFixed(0)}s</span>
+                          )}
+                        </div>
+                        {ho.route && ho.route.length > 0 && (
+                          <div style={{ fontSize: '0.65rem', color: '#6b7280', marginBottom: 2, fontFamily: 'monospace' }}>
+                            Route: {ho.route.join(' → ')}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: '0.65rem', color: '#6b7280' }}>
+                          {ev.topology_score != null && <span>Topo {Math.round(ev.topology_score * 100)}%</span>}
+                          {ev.temporal_score != null && <span>Time {Math.round(ev.temporal_score * 100)}%</span>}
+                          {ev.motion_score != null && <span>Motion {Math.round(ev.motion_score * 100)}%</span>}
+                          {ev.identity_score != null && <span>ID {Math.round(ev.identity_score * 100)}%</span>}
+                          {ev.appearance_score != null && <span>App {Math.round(ev.appearance_score * 100)}%</span>}
+                        </div>
+                        {ho.identity_id && (
+                          <div style={{ fontSize: '0.62rem', color: '#9ca3af', marginTop: 2 }}>
+                            Identity: {ho.identity_id.slice(0, 12)}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ol>
+              </section>
             )}
 
             {/* Related alerts */}

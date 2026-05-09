@@ -3,6 +3,7 @@ import AlertFeed from './AlertFeed'
 import CameraGrid from './CameraGrid'
 import CameraDetailPanel from './CameraDetailPanel'
 import CameraTimelinePanel from './CameraTimelinePanel'
+import CrossCameraPanel from './CrossCameraPanel'
 import HeatmapPanel from './HeatmapPanel'
 import LiveVideoSurface from './LiveVideoSurface'
 import IncidentPanel from './IncidentPanel'
@@ -49,6 +50,10 @@ export default function CommandOverview({
   mapLoading,
   mapError,
   onMapRefresh,
+  // Handoffs
+  activeHandoffs = [],
+  recentHandoffs = [],
+  handoffWsStatus = 'disconnected',
 }) {
   const [replayIncident, setReplayIncident] = useState(null)
   const [replayOpen, setReplayOpen] = useState(false)
@@ -116,6 +121,7 @@ export default function CommandOverview({
             selectedCameraId={selectedCamera?.camera_id}
             onCameraSelect={handleMapCameraSelect}
             onIncidentSelect={inc => openReplay({ incident_id: inc.incident_id, incident_type: inc.incident_type, severity: inc.severity })}
+            activeHandoffs={activeHandoffs}
           />
 
           {/* Camera forensic timeline */}
@@ -172,6 +178,11 @@ export default function CommandOverview({
             loading={anomaliesLoading}
             error={anomaliesError}
             onRetry={onRefreshAnomalies}
+          />
+          <CrossCameraPanel
+            activeHandoffs={activeHandoffs}
+            recentHandoffs={recentHandoffs}
+            wsStatus={handoffWsStatus}
           />
         </div>
 

@@ -1,0 +1,31 @@
+prediction:
+  enabled: true
+  max_active_predictions: 500
+  prediction_ttl_seconds: 120
+  max_candidates_per_prediction: 5
+
+confirmation:
+  min_confidence: 0.68
+  min_identity_score: 0.50
+  min_temporal_score: 0.40
+  impossible_speed_mps: 12.0
+
+scoring:
+  topology_weight: 0.25
+  temporal_weight: 0.20
+  motion_weight: 0.20
+  identity_weight: 0.20
+  appearance_weight: 0.15
+
+expiry:
+  cleanup_interval_seconds: 30
+  recent_retention_seconds: 1800
+
+persistence:
+  enabled: true
+  base_dir: storage/handoffs
+
+visualization:
+  show_predicted: true
+  show_confirmed: true
+  show_rejected: false
