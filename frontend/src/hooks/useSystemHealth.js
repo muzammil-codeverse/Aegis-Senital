@@ -1,0 +1,35 @@
+import { useMemo } from 'react'
+
+export function useSystemHealth(metrics = {}, apiError = null, stale = false) {
+  return useMemo(() => {
+    const reasons = []
+    const queueOverflows = Number(metrics.queue_overflows ?? metrics.queue_overflow_count ?? 0)
+    const droppedFrames = Number(metrics.frames_dropped ?? 0)
+    const circuitTrips = Number(metrics.circuit_breaker_trips ?? metrics.stream_circuit_breaks ?? 0)
+    const notificationFailures = Number(metrics.notification_failures ?? 0)
+    const websocketClients = Number(metrics.websocket_clients ?? 0)
+
+    if (apiError) reasons.push('metrics api unavailable')
+    if (stale) reasons.push('metrics are stale')
+    if (queueOverflows > 0) reasons.push('queue overflow observed')
+    if (circuitTrips > 0) reasons.push('circuit breaker activity')
+    if (notificationFailures > 0) reasons.push('notification failures')
+    if (droppedFrames > 0) reasons.push('dropped frames')
+
+    let status = 'normal'
+    if (apiError || circuitTrips > 0 || queueOverflows > 10) {
+      status = 'critical'
+    } else if (stale || droppedFrames > 0 || notificationFailures > 0 || queueOverflows > 0) {
+      status = 'degraded'
+    }
+
+    const health = {
+      status,
+      reasons,
+      websocketClients,
+      generatedAt: Date.now(),
+    }
+
+    return health
+  }, [apiError, metrics, stale])
+}
