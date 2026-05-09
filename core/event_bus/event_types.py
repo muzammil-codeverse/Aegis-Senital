@@ -22,3 +22,5 @@ class EventType(str, Enum):
     OPEN_VOCAB_SCAN_COMPLETED = "open_vocab_scan_completed"
     OPEN_VOCAB_THREAT_FOUND = "open_vocab_threat_found"
     OPEN_VOCAB_SCAN_FAILED = "open_vocab_scan_failed"
+    # Phase 25 — open-vocab streaming integration
+    OPEN_VOCAB_SCAN_RESULT = "open_vocab_scan_result"

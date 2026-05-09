@@ -1434,6 +1434,22 @@ async def websocket_handoffs_endpoint(websocket: WebSocket):
     await get_websocket_handoff_service().handle_connection(websocket, user=user)
 
 
+@router.websocket("/ws/open-vocab")
+async def websocket_open_vocab_endpoint(websocket: WebSocket):
+    """
+    Phase 25 — Real-time Open-Vocab scan result stream.
+
+    Receives OPEN_VOCAB_SCAN_RESULT events from the event bus and pushes
+    normalized scan payloads (no raw frames, no embeddings) to subscribers.
+    Rate-limited per camera.  Falls back to REST polling if disconnected.
+    """
+    from app.services.websocket_open_vocab_service import get_websocket_open_vocab_service
+    user = await authenticate_websocket(websocket, required_permission="open_vocab:read")
+    if user is None:
+        return
+    await get_websocket_open_vocab_service().connect(websocket, user=user)
+
+
 # ============================================================
 # MODEL REGISTRY ENDPOINTS (Phase 20)
 # ============================================================

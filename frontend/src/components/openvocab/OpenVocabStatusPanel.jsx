@@ -54,6 +54,58 @@ function ControlButton({ label, onClick, disabled, variant = 'default' }) {
   )
 }
 
+/** Phase 25: Live threat badge for a camera with WebSocket-pushed scan data. */
+function LiveThreatBadge({ entry }) {
+  if (!entry) return null
+  const riskColors = {
+    critical: { bg: '#1f0a0a', color: '#f87171', border: '#7f1d1d' },
+    high:     { bg: '#431407', color: '#fdba74', border: '#7c2d12' },
+    medium:   { bg: '#1c1a08', color: '#fde68a', border: '#78350f' },
+    low:      { bg: '#052e16', color: '#6ee7b7', border: '#065f46' },
+  }
+  const risk = entry.riskLevel || 'low'
+  const p = riskColors[risk] || riskColors.low
+  const scanTime = entry.latestScanTime
+    ? new Date(entry.latestScanTime).toLocaleTimeString()
+    : '—'
+
+  return (
+    <div style={{
+      background: entry.hasThreat ? p.bg : '#0a0f1a',
+      border: `1px solid ${entry.hasThreat ? p.border : '#1c2535'}`,
+      borderRadius: 4, padding: '6px 10px', fontSize: '0.72rem',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1, fontSize: '0.6rem' }}>
+          {entry.cameraId}
+        </span>
+        {entry.hasThreat && (
+          <span style={{ color: p.color, fontWeight: 700, fontSize: '0.65rem', textTransform: 'uppercase' }}>
+            {risk.toUpperCase()}
+          </span>
+        )}
+      </div>
+      {entry.hasThreat ? (
+        <div style={{ marginTop: 2 }}>
+          {entry.detections.slice(0, 3).map((d, i) => (
+            <div key={i} style={{ color: p.color, fontSize: '0.7rem' }}>
+              {d.label} — open-vocab candidate ({(d.score * 100).toFixed(0)}%)
+            </div>
+          ))}
+          <div style={{ color: '#4b5563', fontSize: '0.62rem', marginTop: 2 }}>
+            Requires operator review
+          </div>
+        </div>
+      ) : (
+        <div style={{ color: '#374151', fontSize: '0.7rem', marginTop: 2 }}>No threats detected</div>
+      )}
+      <div style={{ color: '#374151', fontSize: '0.6rem', marginTop: 4 }}>
+        Last scan: {scanTime} · Device: {entry.device || '—'}
+      </div>
+    </div>
+  )
+}
+
 export default function OpenVocabStatusPanel({
   status,
   loading,
@@ -62,6 +114,11 @@ export default function OpenVocabStatusPanel({
   onUnload,
   onReload,
   canWrite = false,
+  // Phase 25 live streaming props
+  wsConnected = false,
+  wsTransport = 'disconnected',
+  wsCameraState = {},
+  wsError = null,
 }) {
   if (loading && !status) {
     return (
@@ -76,6 +133,14 @@ export default function OpenVocabStatusPanel({
   const enabled = status?.item?.enabled !== false
   const adapterAvailable = adapterStatus.available === true
   const reason = adapterStatus.reason
+
+  const liveEntries = Object.values(wsCameraState)
+  const transportLabel = wsTransport === 'websocket'
+    ? 'WebSocket live'
+    : wsTransport === 'polling_fallback'
+    ? 'Polling fallback'
+    : 'Disconnected'
+  const transportVariant = wsTransport === 'websocket' ? 'ok' : wsTransport === 'polling_fallback' ? 'warn' : 'neutral'
 
   // Phase 24 model-status fields
   const modelLoaded = modelStatus?.loaded === true
@@ -179,6 +244,35 @@ export default function OpenVocabStatusPanel({
               </p>
             </div>
           ))}
+        </div>
+
+        {/* Phase 25 — Live streaming section */}
+        <div style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ color: '#4b5563', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: 1 }}>
+              Live Threat Stream
+            </span>
+            <Badge label={transportLabel} variant={transportVariant} />
+            {wsError && (
+              <span style={{ color: '#f87171', fontSize: '0.65rem' }}>{wsError}</span>
+            )}
+          </div>
+          {liveEntries.length === 0 ? (
+            <div style={{
+              background: '#0a0f1a', border: '1px solid #1c2535', borderRadius: 4,
+              padding: '6px 10px', fontSize: '0.72rem', color: '#374151',
+            }}>
+              {wsConnected
+                ? 'No scan results received yet. Scans publish when triggered.'
+                : 'Waiting for WebSocket connection…'}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8 }}>
+              {liveEntries.map(entry => (
+                <LiveThreatBadge key={entry.cameraId} entry={entry} />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

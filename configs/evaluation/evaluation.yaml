@@ -1,0 +1,67 @@
+# Phase 25 — Model Evaluation & Benchmarking Configuration
+# Primary evaluation config. Do not hard-code paths here — use environment-specific datasets.yaml.
+
+evaluation:
+  output_dir: "storage/evaluation_runs"
+  fail_on_missing_required_dataset: true
+  device: "cuda"
+  allow_cpu_fallback: true
+  save_failure_cases: true
+  save_config_snapshot: true
+  latency_test_input: "samples/videos/test_stream.mp4"
+  latency_duration_seconds: 120
+
+# Regression policy for comparison reports
+regression_policy:
+  detection_map_drop_warn: 0.02
+  detection_map_drop_fail: 0.05
+  latency_p95_increase_warn_percent: 15
+  latency_p95_increase_fail_percent: 30
+  false_positive_increase_warn_percent: 20
+
+# Models (paths must be set per deployment)
+models:
+  weapon_yolo:
+    path: ""
+    task: detection
+    version: null
+    class_names: ["weapon"]
+  phone_yolo:
+    path: ""
+    task: detection
+    version: null
+    class_names: ["phone"]
+  insightface:
+    path: ""
+    task: face
+    version: null
+  osnet_reid:
+    path: ""
+    task: reid
+    version: null
+  grounding_dino:
+    path: ""
+    task: open_vocab
+    version: null
+
+# Datasets (populate paths per environment — see datasets.example.yaml)
+datasets: {}
+
+# Open-vocab evaluation prompts
+open_vocab_eval:
+  prompts:
+    - prompt_id: weapon_visible
+      text: "visible weapon"
+      threshold: 0.35
+    - prompt_id: firearm
+      text: "firearm"
+      threshold: 0.35
+    - prompt_id: knife
+      text: "knife"
+      threshold: 0.30
+    - prompt_id: unattended_bag
+      text: "unattended bag or backpack"
+      threshold: 0.38
+    - prompt_id: masked_person
+      text: "masked person"
+      threshold: 0.40

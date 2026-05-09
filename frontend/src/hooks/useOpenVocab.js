@@ -14,10 +14,13 @@ import {
   reloadOpenVocabModel,
   getOpenVocabModelStatus,
 } from '../api/openVocabApi'
+import { useOpenVocabStream } from './useOpenVocabStream'
 
 /**
  * Hook for managing open-vocabulary threat scanner state.
- * Provides status, prompt library, results, scan actions, and model control.
+ * Phase 25: adds WebSocket streaming with polling fallback.
+ * Provides status, prompt library, results, scan actions, model control,
+ * and live per-camera threat badges.
  */
 export function useOpenVocab() {
   const [status, setStatus] = useState(null)
@@ -27,6 +30,16 @@ export function useOpenVocab() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [unavailable, setUnavailable] = useState(false)
+
+  // Phase 25 — live WebSocket stream
+  const {
+    connected: wsConnected,
+    transport: wsTransport,
+    lastResult: wsLastResult,
+    streamError: wsError,
+    cameraState: wsCameraState,
+    getCameraEntry,
+  } = useOpenVocabStream({ enabled: true })
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -184,5 +197,12 @@ export function useOpenVocab() {
     loadModel,
     unloadModel,
     reloadModel,
+    // Phase 25 — live streaming
+    wsConnected,
+    wsTransport,
+    wsLastResult,
+    wsError,
+    wsCameraState,
+    getCameraEntry,
   }
 }

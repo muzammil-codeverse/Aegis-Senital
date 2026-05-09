@@ -1,0 +1,53 @@
+# Phase 25 — Example datasets configuration.
+# Copy to datasets.yaml and fill in your local paths.
+# Do NOT commit real dataset paths to version control.
+
+datasets:
+  weapon_eval:
+    task: detection
+    path: "/data/weapon_eval"
+    version: "v1.0"
+    required: false
+    loader: coco_yolo
+    class_names: ["weapon"]
+    metadata:
+      source: "internal annotation"
+      annotated_by: "team"
+
+  phone_eval:
+    task: detection
+    path: "/data/phone_eval"
+    version: "v1.0"
+    required: false
+    loader: coco_yolo
+    class_names: ["phone"]
+
+  mot_eval:
+    task: tracking
+    path: "/data/mot_eval/sequence_001"
+    version: "MOTChallenge-2017"
+    required: false
+    loader: mot
+
+  face_eval:
+    task: face
+    path: "/data/face_eval"
+    version: "internal-lfw-style"
+    required: false
+    loader: face_pairs
+
+  reid_eval:
+    task: reid
+    path: "/data/reid_eval"
+    version: "market1501-style"
+    required: false
+    loader: reid_split
+
+  open_vocab_eval:
+    task: open_vocab
+    path: "/data/open_vocab_eval"
+    version: "v1.0"
+    required: false
+    loader: open_vocab_jsonl
+    metadata:
+      prompts_evaluated: ["weapon_visible", "firearm", "knife", "unattended_bag"]

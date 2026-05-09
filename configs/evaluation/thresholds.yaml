@@ -1,0 +1,38 @@
+# Phase 25 — Evaluation thresholds and acceptance criteria.
+# These are dataset-specific. Do not use as operational deployment thresholds.
+
+detection:
+  min_map_50: 0.50
+  min_precision: 0.70
+  min_recall: 0.65
+  max_false_positives_per_image: 0.5
+
+tracking:
+  min_mota: 0.50
+  min_idf1: 0.55
+  max_id_switches: 100
+
+face:
+  # TAR targets at specific FAR levels (dataset-specific — not operational thresholds)
+  tar_at_far_1e-1: 0.95
+  tar_at_far_1e-2: 0.85
+  tar_at_far_1e-3: 0.70
+  # Threshold recommendation is generated from data — not fixed here
+
+reid:
+  min_rank_1: 0.80
+  min_rank_5: 0.92
+  min_map: 0.65
+
+open_vocab:
+  min_prompt_f1: 0.50
+  max_avg_latency_ms: 500
+
+latency:
+  max_p95_pipeline_ms: 150
+  max_p99_pipeline_ms: 300
+  min_avg_fps: 10
+  max_dropped_frames_pct: 0.05
+
+gpu:
+  max_peak_memory_mb: 8192

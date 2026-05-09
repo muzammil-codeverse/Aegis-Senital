@@ -118,6 +118,15 @@ class SystemMetrics:
         self.open_vocab_model_load_success: int = 0
         self.open_vocab_model_load_failures: int = 0
         self.open_vocab_model_unloads: int = 0
+        # Phase 25 — open-vocab streaming integration metrics
+        self.open_vocab_ws_events_published_total: int = 0
+        self.open_vocab_ws_events_dropped_total: int = 0
+        self.open_vocab_ws_event_payload_bytes: int = 0
+        self.open_vocab_ws_event_rate_limited_total: int = 0
+        self.open_vocab_model_auto_load_attempts_total: int = 0
+        self.open_vocab_model_auto_load_failures_total: int = 0
+        self.open_vocab_scan_to_push_latency_ms: float = 0.0
+        self.open_vocab_active_stream_subscribers: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -322,6 +331,15 @@ class SystemMetrics:
                 "open_vocab_model_load_success": self.open_vocab_model_load_success,
                 "open_vocab_model_load_failures": self.open_vocab_model_load_failures,
                 "open_vocab_model_unloads": self.open_vocab_model_unloads,
+                # Phase 25 — open-vocab streaming metrics
+                "open_vocab_ws_events_published_total": self.open_vocab_ws_events_published_total,
+                "open_vocab_ws_events_dropped_total": self.open_vocab_ws_events_dropped_total,
+                "open_vocab_ws_event_payload_bytes": self.open_vocab_ws_event_payload_bytes,
+                "open_vocab_ws_event_rate_limited_total": self.open_vocab_ws_event_rate_limited_total,
+                "open_vocab_model_auto_load_attempts_total": self.open_vocab_model_auto_load_attempts_total,
+                "open_vocab_model_auto_load_failures_total": self.open_vocab_model_auto_load_failures_total,
+                "open_vocab_scan_to_push_latency_ms": self.open_vocab_scan_to_push_latency_ms,
+                "open_vocab_active_stream_subscribers": self.open_vocab_active_stream_subscribers,
             }
 
 

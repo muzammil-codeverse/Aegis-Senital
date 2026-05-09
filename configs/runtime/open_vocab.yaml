@@ -59,3 +59,23 @@ uploads:
   allowed_extensions: [".jpg", ".jpeg", ".png"]
   max_file_mb: 10
   temp_dir: storage/open_vocab/uploads
+
+# Phase 25 — real-time WebSocket streaming config
+open_vocab_streaming:
+  enabled: true
+  publish_empty_results: false
+  max_detections_per_event: 25
+  max_events_per_camera_per_second: 2
+  websocket_topic: "open_vocab"
+  persist_results: true
+  heartbeat_seconds: 30
+  outbound_queue_size: 200
+  max_clients: 100
+
+# Phase 25 — camera/stream lifecycle config
+open_vocab_runtime:
+  auto_load_on_camera_start: false
+  require_open_vocab_for_stream: false
+  load_timeout_seconds: 45
+  unload_when_no_active_streams: false
+  max_concurrent_scans: 1

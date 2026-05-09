@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .adapter_base import OpenVocabDetectorAdapter
@@ -13,6 +14,16 @@ from .grounding_dino_adapter import GroundingDINOAdapter
 logger = logging.getLogger(__name__)
 
 SEVERITY_WEIGHTS = {"low": 0.25, "medium": 0.5, "high": 0.8, "critical": 1.0}
+
+
+def _risk_level_from_score(score: float) -> str:
+    if score >= 0.75:
+        return "critical"
+    if score >= 0.55:
+        return "high"
+    if score >= 0.35:
+        return "medium"
+    return "low"
 
 
 class OpenVocabThreatScanner:
@@ -187,11 +198,11 @@ class OpenVocabThreatScanner:
 
             self._result_store.append_result(scan_result)
 
+            latency_ms = (time.time() - t0) * 1000
             with self._lock:
                 self._metrics["open_vocab_scans_completed"] += 1
                 if detections:
                     self._metrics["open_vocab_threats_found"] += len(detections)
-                latency_ms = (time.time() - t0) * 1000
                 self._latency_samples.append(latency_ms)
                 if len(self._latency_samples) > 100:
                     self._latency_samples.pop(0)
@@ -212,6 +223,9 @@ class OpenVocabThreatScanner:
                     "detections": len(detections),
                 })
 
+            # Phase 25: publish structured OPEN_VOCAB_SCAN_RESULT to distributed bus
+            self._publish_scan_result(scan_result, prompt_metas, latency_ms)
+
             return scan_result.to_dict()
 
         except Exception as e:
@@ -230,6 +244,79 @@ class OpenVocabThreatScanner:
         finally:
             with self._lock:
                 self._active_scans -= 1
+
+    def _publish_scan_result(
+        self,
+        scan_result: Any,
+        prompt_metas: list[dict],
+        latency_ms: float,
+    ) -> None:
+        """Publish a normalized OPEN_VOCAB_SCAN_RESULT event to the distributed bus."""
+        try:
+            from core.event_bus import get_event_bus, EventType
+
+            adapter_status = self._adapter.get_status()
+            provider = adapter_status.get("provider", "unknown")
+            device = adapter_status.get("device", "cpu")
+            model_loaded = adapter_status.get("available", False)
+
+            detections = scan_result.detections or []
+            max_score = max((d.confidence for d in detections), default=0.0)
+            highest_risk = "low"
+            for d in detections:
+                rl = _risk_level_from_score(d.confidence)
+                if {"low": 0, "medium": 1, "high": 2, "critical": 3}.get(rl, 0) > \
+                   {"low": 0, "medium": 1, "high": 2, "critical": 3}.get(highest_risk, 0):
+                    highest_risk = rl
+
+            event_payload = {
+                "event_type": "open_vocab_scan_result",
+                "camera_id": scan_result.camera_id,
+                "stream_id": scan_result.camera_id,
+                "scan_id": scan_result.scan_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "scan_timestamp": scan_result.created_at,
+                "provider": provider,
+                "device": device,
+                "model_loaded": model_loaded,
+                "prompts": [
+                    {
+                        "prompt_id": p.get("prompt_id", p.get("text", "")),
+                        "label": p.get("text", ""),
+                        "text": p.get("text", ""),
+                        "threshold": p.get("threshold", 0.35),
+                    }
+                    for p in prompt_metas
+                ],
+                "detections": [
+                    {
+                        "label": d.label,
+                        "score": round(d.confidence, 4),
+                        "bbox": d.bbox,
+                        "prompt_id": d.prompt or None,
+                        "risk_level": _risk_level_from_score(d.confidence),
+                    }
+                    for d in detections
+                ],
+                "summary": {
+                    "detection_count": len(detections),
+                    "max_score": round(max_score, 4),
+                    "highest_risk_level": highest_risk,
+                    "latency_ms": round(latency_ms, 2),
+                    "scan_timestamp": scan_result.created_at,
+                },
+            }
+
+            priority = 3 if (detections and highest_risk in ("high", "critical")) else 5
+            get_event_bus().publish(
+                EventType.OPEN_VOCAB_SCAN_RESULT,
+                event_payload,
+                source=scan_result.camera_id or "unknown",
+                priority=priority,
+                metadata={"scan_id": scan_result.scan_id},
+            )
+        except Exception as exc:
+            logger.warning("Failed to publish OPEN_VOCAB_SCAN_RESULT event: %s", exc)
 
     def scan_latest_frame(self, camera_id: str, prompts: list[str] | None = None) -> dict:
         # Check cooldown
