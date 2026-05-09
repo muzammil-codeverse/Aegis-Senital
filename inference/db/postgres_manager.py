@@ -88,14 +88,7 @@ class PostgresManager:
     """
 
     def __init__(self, dsn: str | None = None, queue_size: int = 4096) -> None:
-        raw_dsn = dsn or os.getenv("AEGIS_POSTGRES_DSN") or os.getenv("POSTGRES_DSN")
-        if raw_dsn is None:
-            raw_dsn = os.getenv("DB_URL")
-        if raw_dsn is None:
-            raise RuntimeError("PostgreSQL is required for system operation")
-        self._dsn = _coerce_postgres_dsn(raw_dsn)
-        if self._dsn is None:
-            raise RuntimeError("PostgreSQL is required for system operation")
+        self._dsn: str | None = None
         self._queue_size = queue_size
         self._lock = threading.RLock()
         self._ready = threading.Event()
@@ -111,6 +104,21 @@ class PostgresManager:
         self._tracks_by_local: dict[int, dict[str, Any]] = {}
         self._events: dict[str, dict[str, Any]] = {}
         self._scenarios: dict[str, dict[str, Any]] = {}
+
+        raw_dsn = dsn or os.getenv("AEGIS_POSTGRES_DSN") or os.getenv("POSTGRES_DSN")
+        if raw_dsn is None:
+            raw_dsn = os.getenv("DB_URL")
+        if raw_dsn is None:
+            self._enabled = False
+            logger.warning("POSTGRES_DSN not configured - using in-memory persistence only.")
+            return
+        self._dsn = _coerce_postgres_dsn(raw_dsn)
+        if self._dsn is None:
+            if (os.getenv("APP_ENV") or "").lower() not in {"prod", "production"}:
+                self._enabled = False
+                logger.warning("PostgreSQL DSN is not configured for asyncpg - using in-memory persistence only.")
+                return
+            raise RuntimeError("PostgreSQL is required for system operation")
 
         self._thread = threading.Thread(
             target=self._run_worker,

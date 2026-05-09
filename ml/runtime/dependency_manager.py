@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Any
@@ -9,10 +10,12 @@ from typing import Any
 from ml.runtime.model_router import ModelRouter
 
 REQUIRED_DEPENDENCIES = {
-    "face_recognition": "insightface",
     "reid_model": "osnet",
     "vector_db": "faiss-cpu OR faiss-gpu",
     "database": "psycopg2 + sqlalchemy + asyncpg",
+}
+OPTIONAL_DEPENDENCIES = {
+    "face_recognition": "insightface",
 }
 
 _BOOT_LOCK = threading.Lock()
@@ -32,8 +35,9 @@ def _validate_import(module_name: str, label: str, missing: list[str]) -> None:
 
 def validate_dependencies() -> None:
     missing: list[str] = []
+    missing_optional: list[str] = []
 
-    _validate_import("insightface", "insightface", missing)
+    _validate_import("insightface", "insightface", missing_optional)
     _validate_import("faiss", "faiss", missing)
     _validate_import("psycopg2", "postgres drivers", missing)
     _validate_import("sqlalchemy", "sqlalchemy", missing)
@@ -42,7 +46,13 @@ def validate_dependencies() -> None:
     _validate_import("torchvision", "torchvision", missing)
     _validate_import("ultralytics", "ultralytics", missing)
     _validate_import("cv2", "opencv-python", missing)
-    _validate_import("torchreid.utils", "osnet", missing)
+    _validate_import("torchreid.reid.utils", "osnet", missing)
+
+    if missing_optional:
+        logging.getLogger(__name__).warning(
+            "Optional dependencies unavailable; related features will run degraded: %s",
+            missing_optional,
+        )
 
     if missing:
         raise RuntimeError(

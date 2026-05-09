@@ -1,0 +1,17 @@
+phone:
+  workspace: "college-ai4bu"
+  project: "mobile-phone-detection-v84ha"
+  version: 1
+  format: "yolov8"
+  raw_dir: "datasets/raw/phone/mobile-phone-detection-v84ha-v1"
+  eval_dir: "datasets/evaluation/phone"
+  expected_task: "phone_detection"
+
+weapon:
+  workspace: "deteksi-senjata"
+  project: "weapon-detection-smvsm"
+  version: 3
+  format: "yolov8"
+  raw_dir: "datasets/raw/weapon/weapon-detection-smvsm-v3"
+  eval_dir: "datasets/evaluation/weapon"
+  expected_task: "weapon_detection"

@@ -45,9 +45,10 @@ class OptionalModelUnavailable(RuntimeError):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Phase 25/26 — Model evaluation runner")
-    parser.add_argument("--task", required=True, choices=SUPPORTED_TASKS)
+    parser.add_argument("--task", choices=SUPPORTED_TASKS)
     parser.add_argument("--config", default="configs/evaluation/evaluation.yaml")
     parser.add_argument("--dataset", default=None, help="Dataset name from config")
+    parser.add_argument("--validate-dataset", action="store_true", help="Validate a configured dataset and exit")
     # Single-model mode
     parser.add_argument("--model", default=None, help="Single model name from config")
     # Multi-model mode (Phase 26)
@@ -58,6 +59,9 @@ def main() -> int:
     parser.add_argument("--no-failure-cases", action="store_true")
     parser.add_argument("--map-50-95", action="store_true", help="Compute mAP@0.5:0.95 (slower)")
     args = parser.parse_args()
+
+    if not args.validate_dataset and not args.task:
+        parser.error("--task is required unless --validate-dataset is used")
 
     from backend.app.evaluation.benchmark_config import (
         load_evaluation_config, resolve_device, get_git_commit,
@@ -72,6 +76,9 @@ def main() -> int:
     except FileNotFoundError as exc:
         logger.error("Config file not found: %s", exc)
         return 1
+
+    if args.validate_dataset:
+        return _validate_dataset_command(args, config)
 
     device = resolve_device(config, args.device)
     logger.info("Device: %s", device)
@@ -207,6 +214,57 @@ def main() -> int:
         logger.error("No real detection benchmark runs completed; refusing to report detector metrics")
         return 1
 
+    return 0
+
+
+def _validate_dataset_command(args, config: dict) -> int:
+    from backend.app.evaluation.datasets.dataset_registry import DatasetRegistry
+    from backend.app.evaluation.datasets.yolo_validation import inspect_yolo_detection_dataset
+
+    if not args.dataset:
+        logger.error("--dataset is required with --validate-dataset")
+        return 1
+
+    registry = DatasetRegistry(config)
+    entry = registry.get(args.dataset)
+    if entry is None:
+        logger.error("Dataset '%s' is not registered", args.dataset)
+        return 1
+
+    dataset_cfg = config.get("datasets", {}).get(args.dataset, {})
+    class_names = dataset_cfg.get("class_names") or entry.metadata.get("class_names", [])
+    summary = inspect_yolo_detection_dataset(
+        images_dir=entry.images_dir or "",
+        labels_dir=entry.labels_dir or "",
+        class_names=class_names,
+    )
+    data = summary.to_dict()
+
+    print(f"Dataset: {args.dataset}")
+    print(f"Images: {data['images_count']}")
+    print(f"Labels: {data['labels_count']}")
+    print(f"Positive images: {data['positive_images_count']}")
+    print(f"Negative images: {data['negative_images_count']}")
+    print(f"Total boxes: {data['total_boxes']}")
+    print("Class distribution:")
+    if data["class_distribution"]:
+        for class_id, count in data["class_distribution"].items():
+            class_name = class_names[int(class_id)] if int(class_id) < len(class_names) else class_id
+            print(f"  {class_id} ({class_name}): {count}")
+    else:
+        print("  none")
+    print(f"Invalid labels: {data['invalid_label_lines']}")
+    print(f"Missing labels: {data['missing_label_files']}")
+    print(f"Orphan labels: {data['orphan_label_files']}")
+    print(f"Status: {data['status']}")
+
+    if summary.errors:
+        print("Errors:")
+        for error in summary.errors[:25]:
+            print(f"  - {error}")
+        if len(summary.errors) > 25:
+            print(f"  ... and {len(summary.errors) - 25} more")
+        return 1
     return 0
 
 
@@ -379,9 +437,11 @@ def _find_model_cfg(config: dict, model_name: str) -> dict | None:
     # Legacy models section
     legacy = config.get("models", {}).get(model_name)
     if legacy:
+        class_names = legacy.get("classes", legacy.get("class_names", []))
         return {"name": model_name, "backend": legacy.get("backend", "ultralytics_yolo"),
-                "path": legacy.get("path", ""), "required": False,
-                "classes": legacy.get("class_names", [])}
+                "path": legacy.get("path", ""), "required": bool(legacy.get("required", True)),
+                "classes": class_names, "version": legacy.get("version"),
+                "image_size": legacy.get("image_size", 640)}
     return None
 
 

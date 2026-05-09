@@ -1,17 +1,17 @@
 {
   "weapon": {
-    "path": "models/weapon/model.pt",
-    "metadata": "models/weapon/metadata.json"
+    "path": "models/weapon/current.pt",
+    "metadata": "models/weapon/metadata.yaml"
   },
   "phone": {
-    "path": "models/phone/model.pt",
-    "metadata": "models/phone/metadata.json"
+    "path": "models/phone/current.pt",
+    "metadata": "models/phone/metadata.yaml"
   },
   "weapon_detector": {
     "v1": {
       "model_name": "weapon_detector",
       "version": "v1",
-      "path": "models/weapon/model.pt",
+      "path": "models/weapon/current.pt",
       "classes": ["pistol", "rifle", "knife", "grenade", "shotgun"],
       "nc": 5,
       "mAP50": 0.6907,
@@ -28,7 +28,7 @@
     "v1": {
       "model_name": "phone_detector",
       "version": "v1",
-      "path": "models/phone/model.pt",
+      "path": "models/phone/current.pt",
       "classes": ["phone"],
       "nc": 2,
       "class_id_map": {"0": "phone", "1": "phone"},

@@ -36,11 +36,15 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
-    logger.info(f"→ {request.method} {request.url.path}")
+    logger.info("-> %s %s", request.method, request.url.path)
     response = await enforce_request_security(request, call_next)
     elapsed_ms = (time.time() - start) * 1000
     logger.info(
-        f"← {request.method} {request.url.path} {response.status_code} ({elapsed_ms:.1f}ms)"
+        "<- %s %s %s (%.1fms)",
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
     )
     return response
 

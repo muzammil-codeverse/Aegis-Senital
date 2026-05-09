@@ -36,7 +36,7 @@ def _has_embedding(embedding: list[float] | None) -> bool:
 
 class IdentityDB:
     """
-    Strict identity/event/scenario adapter backed by FAISS and PostgreSQL.
+    Identity/event/scenario adapter backed by FAISS and optional PostgreSQL.
     """
 
     def __init__(self, db_path: Path | str | None = None, postgres_dsn: str | None = None) -> None:
@@ -44,7 +44,10 @@ class IdentityDB:
         self._db_path = Path(db_path) if db_path else None
         self._postgres = PostgresManager(dsn=postgres_dsn)
         self._vectors = VectorStore(dim=512)
-        logger.info("IdentityDB initialised with mandatory PostgreSQL and FAISS backends.")
+        logger.info(
+            "IdentityDB initialised with FAISS and %s persistence.",
+            "PostgreSQL" if self._postgres.enabled else "in-memory",
+        )
 
     @property
     def vector_store(self) -> VectorStore:

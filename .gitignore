@@ -53,6 +53,14 @@ uploads/
 # Runtime-generated inference output (recreated automatically on each run)
 backend/output/
 storage/
+raw_datasets/
+datasets/raw/
+
+# Evaluation dataset images/labels (large binaries — restore via scripts/restore_evaluation_datasets.py)
+datasets/evaluation/
+
+# Runtime logs
+logs/
 
 # Local machine-specific evaluation benchmark overrides
 configs/evaluation/evaluation.local.yaml

@@ -1,0 +1,31 @@
+task: weapon_detection
+active_weight: models/weapon/current.pt
+source_weight: weapon_model/aegis_models/weapon_run_v1/20260503_131745/weapon/weights/best.pt
+source_data_yaml: weapon_model/aegis_models/weapon_run_v1/20260503_131745/dataset_config.yaml
+selected_reason: best.pt from completed weapon training run (YOLOv8n, 48 epochs, best at epoch 45)
+architecture: YOLOv8n
+class_names:
+  - pistol
+  - rifle
+  - knife
+  - grenade
+  - shotgun
+nc: 5
+training_summary:
+  best_epoch: 45
+  final_epoch: 48
+  total_epochs_configured: 50
+  best_map50: 0.6907
+  best_map50_95: 0.39034
+  best_precision: 0.75265
+  best_recall: 0.66449
+  train_images: 11870
+  batch_size: 16
+  image_size: 640
+  training_completed: false
+  note: Training ran to epoch 48 of 50 (results.csv has 48 rows). best.pt = epoch 45 weights.
+dataset_status:
+  original_path: /content/datasets/weapon
+  original_path_valid: false
+  note: Colab absolute path — dataset not on this machine. Roboflow download needed for evaluation.
+created_at: "2026-05-09T23:38:00+00:00"

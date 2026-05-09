@@ -1,0 +1,32 @@
+task: phone_detection
+active_weight: models/phone/current.pt
+source_weight: phone_model/content/export_bundle/phone/best.pt
+source_data_yaml: phone_model/content/export_bundle/phone/data.yaml
+selected_reason: best.pt from Roboflow phone export bundle (YOLOv8, epoch 55+ training)
+architecture: YOLOv8
+class_names:
+  - phone
+nc: 2
+class_id_map:
+  "0": phone
+  "1": phone
+roboflow:
+  project: college-ai4bu/mobile-phone-detection-v84ha
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/college-ai4bu/mobile-phone-detection-v84ha/dataset/1
+training_summary:
+  best_epoch: unknown
+  final_epoch: 55_plus
+  best_map50: unknown
+  best_map50_95: unknown
+  best_precision: unknown
+  best_recall: unknown
+  note: No results.csv in export bundle. epoch45.pt and epoch55.pt present — best.pt selected from export.
+dataset_status:
+  original_paths:
+    train: ../train/images
+    val: ../valid/images
+    test: ../test/images
+  original_path_valid: false
+  note: Relative paths from export_bundle — dataset images not present locally. Roboflow download needed for evaluation.
+created_at: "2026-05-09T23:38:00+00:00"

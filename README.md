@@ -21,13 +21,14 @@ A modular AI-powered surveillance platform with a FastAPI backend, React fronten
 
 ### Step 3 — Download datasets via Roboflow
 
-Replace `<API_KEY>` and project details with your Roboflow credentials.
+Set `ROBOFLOW_API_KEY` in your local environment and replace project details as needed.
 
 **Weapon dataset:**
 ```python
 from roboflow import Roboflow
+import os
 
-rf = Roboflow(api_key="<API_KEY>")
+rf = Roboflow(api_key=os.environ["ROBOFLOW_API_KEY"])
 project = rf.workspace("<WORKSPACE>").project("weapon-detection")
 dataset = project.version(1).download("yolov8", location="/content/datasets/weapon")
 ```

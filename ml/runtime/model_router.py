@@ -24,7 +24,7 @@ class ModelRouter:
         "identity": "face_recognition",
         "face_recognition": "face_recognition",
     }
-    _REQUIRED_TASKS = ("weapon", "phone", "face")
+    _REQUIRED_TASKS = ("weapon", "phone")
 
     def __init__(self, registry_path: str | Path = "models/registry.json") -> None:
         self._registry_path = Path(registry_path)

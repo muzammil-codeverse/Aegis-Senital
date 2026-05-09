@@ -137,7 +137,7 @@ class _AppearanceEmbedder:
         try:
             system_boot_check()
             import torch
-            from torchreid.utils import FeatureExtractor
+            from torchreid.reid.utils import FeatureExtractor
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self._extractor = FeatureExtractor(model_name="osnet_x1_0", device=device)
