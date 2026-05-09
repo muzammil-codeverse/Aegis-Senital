@@ -432,6 +432,60 @@ def audit_integrity_api(
     return get_audit_log_service().verify_integrity()
 
 
+@router.get("/api/system/health")
+def system_health_api(request: Request):
+    """
+    Detailed subsystem health report.
+
+    Public callers receive filtered data (no path details).
+    Authenticated admins receive full detail via include_sensitive=True.
+    Increments system_health_requests metric.
+    """
+    from app.services.runtime_health_service import get_runtime_health_service
+    from inference.monitoring.metrics import get_metrics as get_mon
+    try:
+        get_mon().increment("system_health_requests")
+    except Exception:
+        pass
+    user = _request_user(request)
+    include_sensitive = user is not None and getattr(user, "role", "") in {"admin", "supervisor"}
+    svc = get_runtime_health_service()
+    result = svc.get_health(include_sensitive=include_sensitive)
+    return result
+
+
+@router.get("/api/system/readiness")
+def system_readiness_api():
+    """
+    Readiness check — returns 200 if all required subsystems are healthy,
+    503 otherwise.  Suitable for load balancer / orchestrator probes.
+    Increments system_readiness_failures metric on failure.
+    """
+    from app.services.runtime_health_service import get_runtime_health_service
+    from inference.monitoring.metrics import get_metrics as get_mon
+    from fastapi.responses import JSONResponse
+    svc = get_runtime_health_service()
+    result = svc.is_ready()
+    if not result["ready"]:
+        try:
+            get_mon().increment("system_readiness_failures")
+        except Exception:
+            pass
+        return JSONResponse(status_code=503, content=result)
+    return result
+
+
+@router.get("/api/system/liveness")
+def system_liveness_api():
+    """
+    Liveness check — lightweight endpoint returning 200 when process is alive.
+    Used by orchestrators to detect hung processes.
+    """
+    from app.services.runtime_health_service import get_runtime_health_service
+    svc = get_runtime_health_service()
+    return {"alive": svc.is_alive(), "status": "ok"}
+
+
 @router.get("/health")
 def health_check():
     from app.services.video_service import _engine, _runtime_db, _identity_fusion
@@ -575,6 +629,23 @@ def get_core_metrics():
         base["active_handoffs"] = get_intelligence_runtime().handoff_store.active_count()
     except Exception:
         pass
+    # Bridge Phase-24 deployment foundation metrics
+    try:
+        from inference.monitoring.metrics import get_metrics as _get_mon24
+        _mon24 = _get_mon24().snapshot()
+        for _p24_key in (
+            "system_health_requests", "system_readiness_failures", "runtime_validation_failures",
+            "open_vocab_model_load_attempts", "open_vocab_model_load_success",
+            "open_vocab_model_load_failures", "open_vocab_model_unloads",
+        ):
+            base.setdefault(_p24_key, _mon24.get(_p24_key, 0))
+    except Exception:
+        for _p24_key in (
+            "system_health_requests", "system_readiness_failures", "runtime_validation_failures",
+            "open_vocab_model_load_attempts", "open_vocab_model_load_success",
+            "open_vocab_model_load_failures", "open_vocab_model_unloads",
+        ):
+            base.setdefault(_p24_key, 0)
     return base
 
 
@@ -2007,3 +2078,211 @@ def get_open_vocab_results_by_incident_api(
         return response
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+# ============================================================
+# OPEN-VOCAB MODEL HOT-LOAD ENDPOINTS (Phase 24)
+# ============================================================
+
+def _ov_load_metrics(event: str) -> None:
+    """Increment an open-vocab model lifecycle metric counter safely."""
+    try:
+        from inference.monitoring.metrics import get_metrics as get_mon
+        get_mon().increment(event)
+    except Exception:
+        pass
+    try:
+        metrics.increment(event)
+    except Exception:
+        pass
+
+
+@router.post("/api/open-vocab/model/load")
+def open_vocab_model_load_api(
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """
+    Hot-load the open-vocabulary model adapter.
+
+    Reads AEGIS_OPEN_VOCAB_MODEL_PATH and AEGIS_OPEN_VOCAB_PROCESSOR_PATH from
+    environment, applies them to the adapter config, and calls adapter.load().
+    Returns a structured error (not 500) when paths are missing and download
+    is disabled.
+    """
+    import os as _os
+    _ov_load_metrics("open_vocab_model_load_attempts")
+
+    model_path = _os.environ.get("AEGIS_OPEN_VOCAB_MODEL_PATH", "")
+    processor_path = _os.environ.get("AEGIS_OPEN_VOCAB_PROCESSOR_PATH", "")
+    allow_download = _os.environ.get("AEGIS_OPEN_VOCAB_ALLOW_DOWNLOAD", "false").lower() == "true"
+
+    if not model_path and not allow_download:
+        _ov_load_metrics("open_vocab_model_load_failures")
+        return {
+            "status": "unavailable",
+            "detail": "AEGIS_OPEN_VOCAB_MODEL_PATH not set and AEGIS_OPEN_VOCAB_ALLOW_DOWNLOAD is false",
+            "loaded": False,
+        }
+
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            _ov_load_metrics("open_vocab_model_load_failures")
+            return {"status": "unavailable", "detail": "Open-vocab scanner not initialized", "loaded": False}
+
+        adapter = getattr(scanner, "adapter", None) or getattr(scanner, "_adapter", None)
+        if adapter is None:
+            _ov_load_metrics("open_vocab_model_load_failures")
+            return {"status": "error", "detail": "Adapter not accessible on scanner", "loaded": False}
+
+        # Push env-sourced paths into the adapter before loading
+        config_override: dict = {}
+        if model_path:
+            config_override["local_model_path"] = model_path
+        if processor_path:
+            config_override["local_processor_path"] = processor_path
+        if allow_download:
+            adapter._config["allow_huggingface_download"] = True
+
+        if hasattr(adapter, "set_config_override") and config_override:
+            adapter.set_config_override(config_override)
+
+        adapter.load()
+        adapter_status = adapter.get_status() if hasattr(adapter, "get_status") else {}
+
+        if adapter_status.get("available"):
+            _ov_load_metrics("open_vocab_model_load_success")
+            _audit(request, AuditAction.MODEL_UPDATED, resource_type="open_vocab_model",
+                   detail="Model loaded successfully")
+            return {"status": "ok", "loaded": True, "adapter": adapter_status}
+        else:
+            _ov_load_metrics("open_vocab_model_load_failures")
+            reason = adapter_status.get("reason", "Load did not succeed")
+            return {"status": "error", "loaded": False, "detail": reason, "adapter": adapter_status}
+    except Exception as exc:
+        _ov_load_metrics("open_vocab_model_load_failures")
+        logger.error("open_vocab model load error: %s", exc)
+        return {"status": "error", "loaded": False, "detail": str(exc)[:200]}
+
+
+@router.post("/api/open-vocab/model/unload")
+def open_vocab_model_unload_api(
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Unload the open-vocabulary model adapter to free memory."""
+    _ov_load_metrics("open_vocab_model_unloads")
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"status": "unavailable", "detail": "Open-vocab scanner not initialized", "loaded": False}
+
+        adapter = getattr(scanner, "adapter", None) or getattr(scanner, "_adapter", None)
+        if adapter is None:
+            return {"status": "error", "detail": "Adapter not accessible on scanner", "loaded": False}
+
+        if hasattr(adapter, "unload"):
+            adapter.unload()
+
+        _audit(request, AuditAction.MODEL_UPDATED, resource_type="open_vocab_model", detail="Model unloaded")
+        adapter_status = adapter.get_status() if hasattr(adapter, "get_status") else {}
+        return {"status": "ok", "loaded": False, "adapter": adapter_status}
+    except Exception as exc:
+        logger.error("open_vocab model unload error: %s", exc)
+        return {"status": "error", "detail": str(exc)[:200]}
+
+
+@router.post("/api/open-vocab/model/reload")
+def open_vocab_model_reload_api(
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+):
+    """Unload then re-load the open-vocabulary model adapter (hot-reload)."""
+    _ov_load_metrics("open_vocab_model_load_attempts")
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            _ov_load_metrics("open_vocab_model_load_failures")
+            return {"status": "unavailable", "detail": "Open-vocab scanner not initialized", "loaded": False}
+
+        adapter = getattr(scanner, "adapter", None) or getattr(scanner, "_adapter", None)
+        if adapter is None:
+            _ov_load_metrics("open_vocab_model_load_failures")
+            return {"status": "error", "detail": "Adapter not accessible on scanner", "loaded": False}
+
+        # Unload first
+        if hasattr(adapter, "unload"):
+            adapter.unload()
+
+        # Re-apply env paths
+        import os as _os
+        model_path = _os.environ.get("AEGIS_OPEN_VOCAB_MODEL_PATH", "")
+        processor_path = _os.environ.get("AEGIS_OPEN_VOCAB_PROCESSOR_PATH", "")
+        config_override: dict = {}
+        if model_path:
+            config_override["local_model_path"] = model_path
+        if processor_path:
+            config_override["local_processor_path"] = processor_path
+        if hasattr(adapter, "set_config_override") and config_override:
+            adapter.set_config_override(config_override)
+
+        adapter.load()
+        adapter_status = adapter.get_status() if hasattr(adapter, "get_status") else {}
+
+        if adapter_status.get("available"):
+            _ov_load_metrics("open_vocab_model_load_success")
+            _audit(request, AuditAction.MODEL_UPDATED, resource_type="open_vocab_model", detail="Model reloaded")
+            return {"status": "ok", "loaded": True, "adapter": adapter_status}
+        else:
+            _ov_load_metrics("open_vocab_model_load_failures")
+            reason = adapter_status.get("reason", "Reload did not succeed")
+            return {"status": "error", "loaded": False, "detail": reason, "adapter": adapter_status}
+    except Exception as exc:
+        _ov_load_metrics("open_vocab_model_load_failures")
+        logger.error("open_vocab model reload error: %s", exc)
+        return {"status": "error", "loaded": False, "detail": str(exc)[:200]}
+
+
+@router.get("/api/open-vocab/model/status")
+def open_vocab_model_status_api(
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
+):
+    """
+    Return the current load status of the open-vocabulary model adapter.
+
+    Reports provider, loaded state, device, and whether model/processor paths
+    are configured (boolean only — no raw paths exposed to non-admin callers).
+    """
+    import os as _os
+    try:
+        scanner = _get_open_vocab_scanner()
+        if scanner is None:
+            return {"status": "unavailable", "detail": "Open-vocab scanner not initialized", "adapter": None}
+
+        adapter = getattr(scanner, "adapter", None) or getattr(scanner, "_adapter", None)
+        if adapter is None:
+            return {"status": "ok", "adapter": None, "detail": "No adapter attached"}
+
+        raw_status = adapter.get_status() if hasattr(adapter, "get_status") else {}
+        model_path = _os.environ.get("AEGIS_OPEN_VOCAB_MODEL_PATH", "")
+        processor_path = _os.environ.get("AEGIS_OPEN_VOCAB_PROCESSOR_PATH", "")
+
+        # Redact paths for non-admin users; expose boolean only
+        is_admin = getattr(current_user, "role", "") in {"admin", "supervisor"}
+        public_status = {
+            "provider": raw_status.get("provider"),
+            "available": raw_status.get("available", False),
+            "loaded": raw_status.get("available", False),
+            "device": raw_status.get("device"),
+            "model_path_configured": bool(model_path),
+            "processor_path_configured": bool(processor_path),
+            "last_load_error": raw_status.get("reason") if not raw_status.get("available") else None,
+        }
+        if is_admin:
+            public_status["model_id"] = raw_status.get("model_id")
+
+        return {"status": "ok", "adapter": public_status}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)[:200], "adapter": None}

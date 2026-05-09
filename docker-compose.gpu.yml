@@ -1,0 +1,21 @@
+version: "3.9"
+
+# GPU override — use with: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# Requires NVIDIA Container Toolkit installed on the host.
+# Install: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+
+services:
+  backend:
+    environment:
+      - AEGIS_DEVICE_PREFERENCE=cuda
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # For older Docker/Compose versions, use runtime instead of deploy.devices:
+    # runtime: nvidia

@@ -13,8 +13,54 @@ function MetricRow({ label, value, warn, alert }) {
   )
 }
 
-export default function SystemHealthPanel({ health, metrics = {}, error, websocketStatus }) {
+/**
+ * StatusCheckRow — renders a single subsystem health check entry.
+ * Maps status strings to visual indicators: ok (green), degraded (amber),
+ * error (red), unavailable (grey).
+ */
+function StatusCheckRow({ name, check }) {
+  if (!check) return null
+  const statusColors = {
+    ok:          '#34d399',
+    degraded:    '#fbbf24',
+    error:       '#f87171',
+    unavailable: '#6b7280',
+  }
+  const dot = statusColors[check.status] || '#6b7280'
+  const label = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4, fontSize: '0.72rem' }}>
+      <span style={{
+        display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+        background: dot, marginTop: 3, flexShrink: 0,
+      }} />
+      <div>
+        <span style={{ color: '#d1d5db', fontWeight: 600 }}>{label}</span>
+        {check.detail && check.status !== 'ok' && (
+          <span style={{ color: '#6b7280', marginLeft: 6 }}>{check.detail}</span>
+        )}
+        {check.status === 'ok' && check.detail && (
+          <span style={{ color: '#4b5563', marginLeft: 6 }}>{check.detail}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default function SystemHealthPanel({ health, metrics = {}, error, websocketStatus, systemHealth }) {
   const status = health?.status || 'unknown'
+
+  // Phase 24: derive overall status from subsystem health if available
+  const subsystemStatus = systemHealth?.status
+  const checks = systemHealth?.checks || {}
+  const healthEndpointUnavailable = systemHealth?.error != null && Object.keys(checks).length === 0
+
+  // Subsystem order for display
+  const CHECK_ORDER = [
+    'security', 'database', 'redis', 'storage', 'gpu',
+    'model_registry', 'event_bus', 'open_vocab',
+  ]
 
   return (
     <section className="panel system-health-panel">
@@ -23,9 +69,43 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
           <p className="eyebrow">Runtime Health</p>
           <h2>Supervisor View</h2>
         </div>
-        <span className={`health-pill health-${status}`}>{status}</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span className={`health-pill health-${status}`}>{status}</span>
+          {subsystemStatus && subsystemStatus !== status && (
+            <span className={`health-pill health-${subsystemStatus}`} style={{ fontSize: '0.6rem' }}>
+              sys: {subsystemStatus}
+            </span>
+          )}
+        </div>
       </div>
       {error && <ErrorState message={error} />}
+
+      {/* Phase 24: subsystem health checks panel */}
+      {healthEndpointUnavailable ? (
+        <div style={{
+          background: '#1c1917', border: '1px solid #3f2d1e', borderRadius: 4,
+          padding: '8px 12px', margin: '8px 12px', fontSize: '0.72rem', color: '#fdba74',
+        }}>
+          Health endpoint unavailable — subsystem status not shown.
+        </div>
+      ) : Object.keys(checks).length > 0 ? (
+        <div style={{ padding: '8px 12px 4px' }}>
+          <p style={{ margin: '0 0 6px', fontSize: '0.62rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+            Subsystem Health
+          </p>
+          {CHECK_ORDER.map(key =>
+            checks[key] ? <StatusCheckRow key={key} name={key} check={checks[key]} /> : null
+          )}
+          {Object.keys(checks).filter(k => !CHECK_ORDER.includes(k)).map(key => (
+            <StatusCheckRow key={key} name={key} check={checks[key]} />
+          ))}
+          {systemHealth?.generated_at && (
+            <p style={{ margin: '6px 0 0', fontSize: '0.6rem', color: '#374151' }}>
+              Updated: {formatDateTime(systemHealth.generated_at * 1000)}
+            </p>
+          )}
+        </div>
+      ) : null}
 
       {/* Runtime / stream health */}
       <div className="health-grid">

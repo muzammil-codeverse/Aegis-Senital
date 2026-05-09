@@ -88,6 +88,14 @@ class SystemMetrics:
         self.open_vocab_prompts_active = 0
         self.open_vocab_scan_latency_ms_avg = 0.0
         self.open_vocab_scan_queue_rejected = 0
+        # Phase 24 — production deployment foundation metrics
+        self.system_health_requests = 0
+        self.system_readiness_failures = 0
+        self.runtime_validation_failures = 0
+        self.open_vocab_model_load_attempts = 0
+        self.open_vocab_model_load_success = 0
+        self.open_vocab_model_load_failures = 0
+        self.open_vocab_model_unloads = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

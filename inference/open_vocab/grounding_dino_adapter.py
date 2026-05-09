@@ -25,6 +25,20 @@ class GroundingDINOAdapter(OpenVocabDetectorAdapter):
         self._unavailable_reason: str | None = None
         self._device = "cpu"
 
+    def set_config_override(self, config_override: dict) -> None:
+        """
+        Merge the given override dict into the adapter config before loading.
+
+        This allows the hot-load API to inject runtime paths (local_model_path,
+        local_processor_path, device_preference) without replacing the full config.
+        """
+        import copy
+        merged = copy.deepcopy(self._config)
+        model_section = merged.setdefault("model", {})
+        for key, value in config_override.items():
+            model_section[key] = value
+        self._config = merged
+
     def load(self) -> None:
         model_cfg = self._config.get("model", {})
         local_model_path = model_cfg.get("local_model_path")

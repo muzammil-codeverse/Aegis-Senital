@@ -1,0 +1,26 @@
+runtime:
+  require_postgres: false
+  require_redis: false
+  require_gpu: false
+  device_preference: auto
+
+services:
+  postgres:
+    enabled: false
+    dsn_env: POSTGRES_DSN
+  redis:
+    enabled: false
+    url_env: REDIS_URL
+  open_vocab:
+    enabled: true
+    required: false
+    model_path_env: AEGIS_OPEN_VOCAB_MODEL_PATH
+    processor_path_env: AEGIS_OPEN_VOCAB_PROCESSOR_PATH
+    allow_download_env: AEGIS_OPEN_VOCAB_ALLOW_DOWNLOAD
+
+storage:
+  base_dir: storage
+  model_dir: models
+  open_vocab_dir: storage/open_vocab
+  uploads_dir: storage/open_vocab/uploads
+  output_dir: backend/output

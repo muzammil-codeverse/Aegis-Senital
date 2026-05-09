@@ -110,6 +110,14 @@ class SystemMetrics:
         self.open_vocab_prompts_active: int = 0
         self.open_vocab_scan_latency_ms_avg: float = 0.0
         self.open_vocab_scan_queue_rejected: int = 0
+        # Phase 24 — production deployment foundation metrics
+        self.system_health_requests: int = 0
+        self.system_readiness_failures: int = 0
+        self.runtime_validation_failures: int = 0
+        self.open_vocab_model_load_attempts: int = 0
+        self.open_vocab_model_load_success: int = 0
+        self.open_vocab_model_load_failures: int = 0
+        self.open_vocab_model_unloads: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -306,6 +314,14 @@ class SystemMetrics:
                 "open_vocab_prompts_active": self.open_vocab_prompts_active,
                 "open_vocab_scan_latency_ms_avg": self.open_vocab_scan_latency_ms_avg,
                 "open_vocab_scan_queue_rejected": self.open_vocab_scan_queue_rejected,
+                # Phase 24 — production deployment foundation metrics
+                "system_health_requests": self.system_health_requests,
+                "system_readiness_failures": self.system_readiness_failures,
+                "runtime_validation_failures": self.runtime_validation_failures,
+                "open_vocab_model_load_attempts": self.open_vocab_model_load_attempts,
+                "open_vocab_model_load_success": self.open_vocab_model_load_success,
+                "open_vocab_model_load_failures": self.open_vocab_model_load_failures,
+                "open_vocab_model_unloads": self.open_vocab_model_unloads,
             }
 
 

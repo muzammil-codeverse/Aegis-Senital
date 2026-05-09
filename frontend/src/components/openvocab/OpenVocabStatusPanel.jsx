@@ -1,8 +1,68 @@
 /**
  * OpenVocabStatusPanel — shows scanner enabled/disabled state, adapter
- * availability, active prompt count, and key metrics.
+ * availability, model load/unload controls, and key metrics.
+ *
+ * Phase 24: adds model control buttons (Load/Unload/Reload) and extended
+ * adapter status fields (device, path-configured booleans, last load error).
  */
-export default function OpenVocabStatusPanel({ status, loading }) {
+
+/** Badge component for status labels. */
+function Badge({ label, variant = 'neutral' }) {
+  const palettes = {
+    ok:      { bg: '#052e16', color: '#34d399', border: '#065f46' },
+    warn:    { bg: '#431407', color: '#fdba74', border: '#7c2d12' },
+    error:   { bg: '#1f1010', color: '#f87171', border: '#7f1d1d' },
+    neutral: { bg: '#1f2937', color: '#9ca3af', border: '#374151' },
+  }
+  const p = palettes[variant] || palettes.neutral
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 3, fontSize: '0.65rem', fontWeight: 700, letterSpacing: 1,
+      background: p.bg, color: p.color, border: `1px solid ${p.border}`,
+    }}>
+      {label}
+    </span>
+  )
+}
+
+/** Small action button for model control operations. */
+function ControlButton({ label, onClick, disabled, variant = 'default' }) {
+  const colors = {
+    default: { bg: '#1e3a5f', color: '#93c5fd', hover: '#1d4ed8' },
+    danger:  { bg: '#3b1515', color: '#fca5a5', hover: '#7f1d1d' },
+    success: { bg: '#052e16', color: '#6ee7b7', hover: '#065f46' },
+  }
+  const c = colors[variant] || colors.default
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        background: disabled ? '#111827' : c.bg,
+        color: disabled ? '#4b5563' : c.color,
+        border: `1px solid ${disabled ? '#1f2937' : c.hover}`,
+        borderRadius: 4,
+        padding: '4px 12px',
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        letterSpacing: 0.5,
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+export default function OpenVocabStatusPanel({
+  status,
+  loading,
+  modelStatus,
+  onLoad,
+  onUnload,
+  onReload,
+  canWrite = false,
+}) {
   if (loading && !status) {
     return (
       <div className="panel" style={{ padding: 16 }}>
@@ -16,6 +76,13 @@ export default function OpenVocabStatusPanel({ status, loading }) {
   const enabled = status?.item?.enabled !== false
   const adapterAvailable = adapterStatus.available === true
   const reason = adapterStatus.reason
+
+  // Phase 24 model-status fields
+  const modelLoaded = modelStatus?.loaded === true
+  const modelDevice = modelStatus?.device || adapterStatus.device
+  const modelPathConfigured = modelStatus?.model_path_configured ?? false
+  const processorPathConfigured = modelStatus?.processor_path_configured ?? false
+  const lastLoadError = modelStatus?.last_load_error || (adapterAvailable ? null : reason)
 
   const metricRows = [
     { label: 'Scans Requested', value: metricsData.open_vocab_scans_requested ?? 0 },
@@ -32,43 +99,46 @@ export default function OpenVocabStatusPanel({ status, loading }) {
     <div className="panel" style={{ marginBottom: 16 }}>
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Phase 23</p>
+          <p className="eyebrow">Phase 23 + 24</p>
           <h2>Open-Vocabulary Scanner</h2>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{
-            padding: '2px 8px', borderRadius: 3, fontSize: '0.65rem', fontWeight: 700, letterSpacing: 1,
-            background: enabled ? '#052e16' : '#1f2937',
-            color: enabled ? '#34d399' : '#9ca3af',
-            border: `1px solid ${enabled ? '#065f46' : '#374151'}`,
-          }}>
-            {enabled ? 'ENABLED' : 'DISABLED'}
-          </span>
-          <span style={{
-            padding: '2px 8px', borderRadius: 3, fontSize: '0.65rem', fontWeight: 700, letterSpacing: 1,
-            background: adapterAvailable ? '#052e16' : '#1c1917',
-            color: adapterAvailable ? '#34d399' : '#f87171',
-            border: `1px solid ${adapterAvailable ? '#065f46' : '#7f1d1d'}`,
-          }}>
-            {adapterAvailable ? 'MODEL READY' : 'MODEL UNAVAILABLE'}
-          </span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Badge label={enabled ? 'ENABLED' : 'DISABLED'} variant={enabled ? 'ok' : 'neutral'} />
+          <Badge
+            label={adapterAvailable ? 'MODEL READY' : 'MODEL UNAVAILABLE'}
+            variant={adapterAvailable ? 'ok' : 'error'}
+          />
+          <Badge
+            label={modelLoaded ? 'LOADED' : 'UNLOADED'}
+            variant={modelLoaded ? 'ok' : 'warn'}
+          />
         </div>
       </div>
 
       <div style={{ padding: '8px 12px' }}>
-        {/* Adapter info */}
+        {/* Adapter info row */}
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10, fontSize: '0.75rem' }}>
           <span style={{ color: '#6b7280' }}>
-            Provider: <strong style={{ color: '#d1d5db' }}>{adapterStatus.provider || '—'}</strong>
+            Provider: <strong style={{ color: '#d1d5db' }}>{adapterStatus.provider || modelStatus?.provider || '—'}</strong>
           </span>
           <span style={{ color: '#6b7280' }}>
             Model: <strong style={{ color: '#d1d5db' }}>{adapterStatus.model_id || '—'}</strong>
           </span>
-          {adapterStatus.device && (
+          {modelDevice && (
             <span style={{ color: '#6b7280' }}>
-              Device: <strong style={{ color: '#d1d5db' }}>{adapterStatus.device}</strong>
+              Device: <strong style={{ color: modelDevice === 'cuda' ? '#34d399' : '#9ca3af' }}>{modelDevice}</strong>
             </span>
           )}
+          <span style={{ color: '#6b7280' }}>
+            Model Path: <strong style={{ color: modelPathConfigured ? '#34d399' : '#f87171' }}>
+              {modelPathConfigured ? 'configured' : 'not set'}
+            </strong>
+          </span>
+          <span style={{ color: '#6b7280' }}>
+            Processor Path: <strong style={{ color: processorPathConfigured ? '#34d399' : '#f87171' }}>
+              {processorPathConfigured ? 'configured' : 'not set'}
+            </strong>
+          </span>
         </div>
 
         {/* Degraded banner */}
@@ -78,7 +148,19 @@ export default function OpenVocabStatusPanel({ status, loading }) {
             padding: '6px 10px', marginBottom: 10, fontSize: '0.72rem', color: '#fdba74',
           }}>
             Model unavailable — scans will return degraded results.
-            {reason && <span style={{ color: '#9ca3af', marginLeft: 6 }}>Reason: {reason}</span>}
+            {lastLoadError && <span style={{ color: '#9ca3af', marginLeft: 6 }}>Reason: {lastLoadError}</span>}
+          </div>
+        )}
+
+        {/* Model control buttons — visible only to users with open_vocab:write */}
+        {canWrite && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ color: '#4b5563', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: 1, marginRight: 4 }}>
+              Model Control
+            </span>
+            <ControlButton label="Load" onClick={onLoad} disabled={!onLoad || loading} variant="success" />
+            <ControlButton label="Unload" onClick={onUnload} disabled={!onUnload || loading} variant="danger" />
+            <ControlButton label="Reload" onClick={onReload} disabled={!onReload || loading} variant="default" />
           </div>
         )}
 

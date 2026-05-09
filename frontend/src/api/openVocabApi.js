@@ -148,3 +148,34 @@ export async function getOpenVocabResultsByIncident(incidentId, params = {}) {
     params,
   }))
 }
+
+// ── Model hot-load control (Phase 24) ─────────────────────────────────────────
+
+/**
+ * Trigger a hot-load of the open-vocabulary model adapter.
+ * Reads model paths from backend environment variables.
+ * Requires open_vocab:write permission.
+ * @returns {Promise<{status: string, loaded: boolean, adapter: Object|null}>}
+ */
+export const loadOpenVocabModel = () => apiClient.post('/api/open-vocab/model/load').then(r => r.data)
+
+/**
+ * Unload the open-vocabulary model adapter to free memory.
+ * Requires open_vocab:write permission.
+ * @returns {Promise<{status: string, loaded: boolean, adapter: Object|null}>}
+ */
+export const unloadOpenVocabModel = () => apiClient.post('/api/open-vocab/model/unload').then(r => r.data)
+
+/**
+ * Unload then re-load the open-vocabulary model adapter (hot-reload).
+ * Requires open_vocab:write permission.
+ * @returns {Promise<{status: string, loaded: boolean, adapter: Object|null}>}
+ */
+export const reloadOpenVocabModel = () => apiClient.post('/api/open-vocab/model/reload').then(r => r.data)
+
+/**
+ * Get current load status of the open-vocabulary model adapter.
+ * Requires open_vocab:read permission.
+ * @returns {Promise<{status: string, adapter: Object|null}>}
+ */
+export const getOpenVocabModelStatus = () => apiClient.get('/api/open-vocab/model/status').then(r => r.data)

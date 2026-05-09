@@ -9,16 +9,21 @@ import {
   scanIncident,
   scanImage,
   getOpenVocabResults,
+  loadOpenVocabModel,
+  unloadOpenVocabModel,
+  reloadOpenVocabModel,
+  getOpenVocabModelStatus,
 } from '../api/openVocabApi'
 
 /**
  * Hook for managing open-vocabulary threat scanner state.
- * Provides status, prompt library, results, and scan actions.
+ * Provides status, prompt library, results, scan actions, and model control.
  */
 export function useOpenVocab() {
   const [status, setStatus] = useState(null)
   const [prompts, setPrompts] = useState([])
   const [results, setResults] = useState([])
+  const [modelStatus, setModelStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [unavailable, setUnavailable] = useState(false)
@@ -27,10 +32,11 @@ export function useOpenVocab() {
     setLoading(true)
     setError(null)
     try {
-      const [statusRes, promptsRes, resultsRes] = await Promise.allSettled([
+      const [statusRes, promptsRes, resultsRes, modelStatusRes] = await Promise.allSettled([
         getOpenVocabStatus(),
         getOpenVocabPrompts(),
         getOpenVocabResults(),
+        getOpenVocabModelStatus(),
       ])
       if (statusRes.status === 'fulfilled') {
         const s = statusRes.value
@@ -43,6 +49,9 @@ export function useOpenVocab() {
       }
       if (resultsRes.status === 'fulfilled') {
         setResults(resultsRes.value?.items || [])
+      }
+      if (modelStatusRes.status === 'fulfilled') {
+        setModelStatus(modelStatusRes.value?.adapter || null)
       }
     } catch (e) {
       setError(e?.message || 'Failed to load open-vocab data')
@@ -121,10 +130,47 @@ export function useOpenVocab() {
     }
   }, [refresh])
 
+  /** Load the open-vocabulary model adapter via the hot-load API. */
+  const loadModel = useCallback(async () => {
+    try {
+      const res = await loadOpenVocabModel()
+      await refresh()
+      return res
+    } catch (e) {
+      setError(e?.message || 'Model load failed')
+      return null
+    }
+  }, [refresh])
+
+  /** Unload the open-vocabulary model adapter. */
+  const unloadModel = useCallback(async () => {
+    try {
+      const res = await unloadOpenVocabModel()
+      await refresh()
+      return res
+    } catch (e) {
+      setError(e?.message || 'Model unload failed')
+      return null
+    }
+  }, [refresh])
+
+  /** Reload (unload + re-load) the open-vocabulary model adapter. */
+  const reloadModel = useCallback(async () => {
+    try {
+      const res = await reloadOpenVocabModel()
+      await refresh()
+      return res
+    } catch (e) {
+      setError(e?.message || 'Model reload failed')
+      return null
+    }
+  }, [refresh])
+
   return {
     status,
     prompts,
     results,
+    modelStatus,
     loading,
     error,
     unavailable,
@@ -135,5 +181,8 @@ export function useOpenVocab() {
     createPrompt: addPrompt,
     updatePrompt: editPrompt,
     disablePrompt: removePrompt,
+    loadModel,
+    unloadModel,
+    reloadModel,
   }
 }
