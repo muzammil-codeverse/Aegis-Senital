@@ -9,6 +9,15 @@ from inference.identity_db import get_db
 from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
 
+from inference.reasoning.incident_engine import IncidentEngine
+from inference.forensics.timeline_builder import build_timeline
+from inference.anomaly.anomaly_engine import AnomalyEngine
+from inference.cross_camera.handoff_engine import HandoffEngine
+
+_incident_engine = IncidentEngine()
+_anomaly_engine = AnomalyEngine()
+_handoff_engine = HandoffEngine()
+
 router = APIRouter()
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
@@ -200,3 +209,40 @@ def remove_stream(body: StreamRemoveRequest):
             detail=f"Stream '{body.stream_id}' not found",
         )
     return {"stream_id": body.stream_id, "status": "stopped"}
+
+
+@router.get("/incidents")
+def list_incidents_api():
+    return _incident_engine.list_incidents()
+
+
+@router.get("/incidents/{incident_id}")
+def get_incident_api(incident_id: str):
+    for inc in _incident_engine.list_incidents():
+        if inc.get("id") == incident_id:
+            return inc
+    raise HTTPException(status_code=404, detail="Incident not found")
+
+
+@router.get("/timeline/{track_id}")
+def get_timeline(track_id: str):
+    events = get_db().get_events(limit=500)
+    return {"track_id": track_id, "timeline": build_timeline(events, track_id)}
+
+
+@router.get("/anomalies/live")
+def get_live_anomalies(speed: float = Query(default=0.0), accel: float = Query(default=0.0), track_id: int = Query(default=0)):
+    anomaly = _anomaly_engine.evaluate_motion(speed=speed, accel=accel, track_id=track_id)
+    return {"anomaly": anomaly}
+
+
+@router.get("/cameras/{camera_id}/heatmap")
+def get_camera_heatmap(camera_id: str):
+    tracks = [t for t in get_db().get_tracks(limit=500) if t.get("camera_id", "default") == camera_id]
+    bins = {}
+    for t in tracks:
+        b = t.get("bbox") or [0,0,0,0]
+        cx, cy = int((b[0] + b[2]) / 2 // 50), int((b[1] + b[3]) / 2 // 50)
+        key = f"{cx}:{cy}"
+        bins[key] = bins.get(key, 0) + 1
+    return {"camera_id": camera_id, "occupancy_heatmap": bins, "handoff_prediction": _handoff_engine.predict_handoff(camera_id)}
