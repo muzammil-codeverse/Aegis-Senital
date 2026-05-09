@@ -10,12 +10,12 @@ from typing import Any
 from ml.runtime.model_router import ModelRouter
 
 REQUIRED_DEPENDENCIES = {
-    "reid_model": "osnet",
     "vector_db": "faiss-cpu OR faiss-gpu",
     "database": "psycopg2 + sqlalchemy + asyncpg",
 }
 OPTIONAL_DEPENDENCIES = {
     "face_recognition": "insightface",
+    "reid_model": "osnet (torchreid)",
 }
 
 _BOOT_LOCK = threading.Lock()
@@ -38,6 +38,7 @@ def validate_dependencies() -> None:
     missing_optional: list[str] = []
 
     _validate_import("insightface", "insightface", missing_optional)
+    _validate_import("torchreid.reid.utils", "osnet (torchreid)", missing_optional)
     _validate_import("faiss", "faiss", missing)
     _validate_import("psycopg2", "postgres drivers", missing)
     _validate_import("sqlalchemy", "sqlalchemy", missing)
@@ -46,7 +47,6 @@ def validate_dependencies() -> None:
     _validate_import("torchvision", "torchvision", missing)
     _validate_import("ultralytics", "ultralytics", missing)
     _validate_import("cv2", "opencv-python", missing)
-    _validate_import("torchreid.reid.utils", "osnet", missing)
 
     if missing_optional:
         logging.getLogger(__name__).warning(
