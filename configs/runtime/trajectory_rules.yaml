@@ -1,0 +1,3 @@
+history_size: 180
+ttl_seconds: 600
+fps: 30

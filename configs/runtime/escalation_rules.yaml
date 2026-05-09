@@ -1,0 +1,5 @@
+weights:
+  WEAPON_THREAT: 0.5
+  GEOFENCE_VIOLATION: 0.3
+  pursuit_behavior: 0.2
+dedup_seconds: 20

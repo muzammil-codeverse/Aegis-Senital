@@ -1,0 +1,9 @@
+edges:
+  cam_a:
+    cam_b:
+      weight: 0.8
+      eta_seconds: 4
+  cam_b:
+    cam_c:
+      weight: 0.7
+      eta_seconds: 6

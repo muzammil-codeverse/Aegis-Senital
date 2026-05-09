@@ -1,0 +1,5 @@
+baseline_window: 120
+motion:
+  panic_zscore: 3.0
+  erratic_zscore: 2.0
+smoothing_alpha: 0.2
