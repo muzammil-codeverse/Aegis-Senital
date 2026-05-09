@@ -32,6 +32,29 @@ class AlertActionRequest(BaseModel):
     reason: str | None = None
 
 
+class CameraCreateRequest(BaseModel):
+    camera_id: str
+    name: str
+    source_type: str = "mock"
+    source_uri: str | None = None
+    location: dict | None = None
+    zone: str | None = None
+    priority: str = "normal"
+    enabled: bool = True
+    metadata: dict | None = None
+
+
+class CameraUpdateRequest(BaseModel):
+    name: str | None = None
+    source_type: str | None = None
+    source_uri: str | None = None
+    location: dict | None = None
+    zone: str | None = None
+    priority: str | None = None
+    enabled: bool | None = None
+    metadata: dict | None = None
+
+
 @router.get("/health")
 def health_check():
     from app.services.video_service import _engine, _runtime_db, _identity_fusion
@@ -240,13 +263,6 @@ def get_live_anomalies():
     return IntelligenceResponseBuilder.anomalies(anomalies)
 
 
-@router.get("/api/cameras/{camera_id}/heatmap")
-@router.get("/cameras/{camera_id}/heatmap")
-def get_camera_heatmap(camera_id: str):
-    heatmap = get_intelligence_runtime().get_camera_heatmap(camera_id)
-    return IntelligenceResponseBuilder.heatmap(heatmap, camera_id)
-
-
 @router.get("/api/alerts")
 def list_alerts_api(
     state: str | None = Query(default=None),
@@ -300,3 +316,145 @@ def escalate_alert_api(alert_id: str, body: AlertActionRequest | None = None):
 def alert_history_api(alert_id: str):
     response = get_intelligence_runtime().get_alert_history(alert_id)
     return IntelligenceResponseBuilder.build_alert_history_payload(response["items"])
+
+
+# ── Camera registry endpoints ─────────────────────────────────────────────────
+
+@router.get("/api/cameras")
+def list_cameras_api(
+    status: str | None = Query(default=None),
+    enabled: bool | None = Query(default=None),
+):
+    from app.services.camera_registry import get_camera_registry
+    enabled_filter = enabled
+    cameras = get_camera_registry().list_cameras(status=status, enabled=enabled_filter)
+    items = [c.to_dict() for c in cameras]
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.post("/api/cameras")
+def create_camera_api(body: CameraCreateRequest):
+    from app.services.camera_registry import get_camera_registry
+    try:
+        camera = get_camera_registry().register_camera(body.model_dump(exclude_none=False))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=507, detail=str(exc))
+    return {"item": camera.to_dict(), "status": "ok"}
+
+
+@router.get("/api/cameras/latest-frames")
+def list_latest_frames_api():
+    from app.services.frame_snapshot_service import get_frame_snapshot_service
+    items = get_frame_snapshot_service().list_latest_frames()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/cameras/{camera_id}/status")
+def get_camera_status_api(camera_id: str):
+    from app.services.camera_registry import get_camera_registry
+    from app.services.stream_session_manager import get_stream_session_manager
+    camera = get_camera_registry().get_camera(camera_id)
+    if camera is None:
+        return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    stream_state = get_stream_session_manager().get_stream_state(camera_id)
+    return {"item": {**camera.to_dict(), "stream_session": stream_state}, "status": "ok"}
+
+
+@router.get("/api/cameras/{camera_id}/latest-frame")
+def get_camera_latest_frame_api(camera_id: str):
+    from app.services.frame_snapshot_service import get_frame_snapshot_service
+    frame = get_frame_snapshot_service().get_latest_frame(camera_id)
+    status = frame.get("status", "ok")
+    return {"item": frame, "status": status}
+
+
+@router.get("/api/cameras/{camera_id}/heatmap")
+@router.get("/cameras/{camera_id}/heatmap")
+def get_camera_heatmap(camera_id: str):
+    heatmap = get_intelligence_runtime().get_camera_heatmap(camera_id)
+    return IntelligenceResponseBuilder.heatmap(heatmap, camera_id)
+
+
+@router.get("/api/cameras/{camera_id}")
+def get_camera_api(camera_id: str):
+    from app.services.camera_registry import get_camera_registry
+    camera = get_camera_registry().get_camera(camera_id)
+    if camera is None:
+        return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    return {"item": camera.to_dict(), "status": "ok"}
+
+
+@router.patch("/api/cameras/{camera_id}")
+def update_camera_api(camera_id: str, body: CameraUpdateRequest):
+    from app.services.camera_registry import get_camera_registry
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    camera = get_camera_registry().update_camera(camera_id, updates)
+    if camera is None:
+        return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    return {"item": camera.to_dict(), "status": "ok"}
+
+
+@router.delete("/api/cameras/{camera_id}")
+def delete_camera_api(camera_id: str):
+    from app.services.camera_registry import get_camera_registry
+    removed = get_camera_registry().remove_camera(camera_id)
+    if not removed:
+        return {"item": None, "status": "not_found", "detail": f"Camera '{camera_id}' not found"}
+    return {"item": None, "status": "ok", "detail": f"Camera '{camera_id}' removed"}
+
+
+# ── Stream session control endpoints ─────────────────────────────────────────
+
+@router.post("/api/cameras/{camera_id}/start")
+def start_camera_stream_api(camera_id: str):
+    from app.services.stream_session_manager import get_stream_session_manager
+    result = get_stream_session_manager().start_stream(camera_id)
+    return {"item": result, "status": "ok"}
+
+
+@router.post("/api/cameras/{camera_id}/stop")
+def stop_camera_stream_api(camera_id: str):
+    from app.services.stream_session_manager import get_stream_session_manager
+    result = get_stream_session_manager().stop_stream(camera_id)
+    return {"item": result, "status": "ok"}
+
+
+@router.post("/api/cameras/{camera_id}/pause")
+def pause_camera_stream_api(camera_id: str):
+    from app.services.stream_session_manager import get_stream_session_manager
+    result = get_stream_session_manager().pause_stream(camera_id)
+    return {"item": result, "status": "ok"}
+
+
+@router.post("/api/cameras/{camera_id}/resume")
+def resume_camera_stream_api(camera_id: str):
+    from app.services.stream_session_manager import get_stream_session_manager
+    result = get_stream_session_manager().resume_stream(camera_id)
+    return {"item": result, "status": "ok"}
+
+
+@router.post("/api/cameras/{camera_id}/restart")
+def restart_camera_stream_api(camera_id: str):
+    from app.services.stream_session_manager import get_stream_session_manager
+    result = get_stream_session_manager().restart_stream(camera_id)
+    return {"item": result, "status": "ok"}
+
+
+# ── Stream session list endpoints ─────────────────────────────────────────────
+
+@router.get("/api/streams")
+def list_stream_sessions_api():
+    from app.services.stream_session_manager import get_stream_session_manager
+    items = get_stream_session_manager().list_stream_states()
+    return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/streams/{camera_id}")
+def get_stream_session_api(camera_id: str):
+    from app.services.stream_session_manager import get_stream_session_manager
+    item = get_stream_session_manager().get_stream_state(camera_id)
+    return {"item": item, "status": "ok"}
+
+

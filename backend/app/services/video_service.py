@@ -159,10 +159,34 @@ def _process_frame_job(
             )
 
         fname = f"frame_{frame_index:06d}.jpg"
-        cv2.imwrite(os.path.join(_OUTPUT_DIR, fname), resized)
+        frame_path = os.path.join(_OUTPUT_DIR, fname)
+        cv2.imwrite(frame_path, resized)
 
         metrics.increment("frames_processed")
         metrics.record_pipeline_time(time.monotonic() - t_pipeline)
+
+        # Update camera registry and frame snapshot
+        try:
+            from app.services.camera_registry import get_camera_registry
+            get_camera_registry().mark_frame_seen(packet.camera_id, timestamp=ts_float)
+        except Exception:
+            pass
+        try:
+            from app.services.frame_snapshot_service import get_frame_snapshot_service
+            detection_dicts = [
+                {"type": t.class_name, "bbox": list(t.bbox), "confidence": t.confidence, "track_id": t.track_id}
+                for t in packet.tracks
+                if t.missed_frames == 0 and len(t.bbox) == 4
+            ]
+            get_frame_snapshot_service().update_latest_frame(
+                camera_id=packet.camera_id,
+                frame_path=fname,
+                frame_id=frame_index,
+                timestamp=ts_float,
+                detections=detection_dicts,
+            )
+        except Exception:
+            pass
 
         return {
             "frame_result": _to_legacy_frame_result(packet),

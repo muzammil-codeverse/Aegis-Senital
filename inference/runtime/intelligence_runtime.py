@@ -161,6 +161,13 @@ class IntelligenceRuntime:
         supervisor.update_metric("intelligence_frames", self._metrics["frames"])
         supervisor.report_stream_stall(camera_id, ts)
         supervisor.evaluate_health()
+        # Mark event seen on camera registry if events or incidents occurred
+        if events or packet.get("incidents"):
+            try:
+                from app.services.camera_registry import get_camera_registry
+                get_camera_registry().mark_event_seen(camera_id, timestamp=ts)
+            except Exception:
+                pass
         return packet
 
     def get_incidents(self) -> list[dict]:

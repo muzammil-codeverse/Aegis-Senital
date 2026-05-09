@@ -41,6 +41,13 @@ class SystemMetrics:
         self._gpu_busy_seconds: float = 0.0
         self._gpu_wall_start: float = 0.0
         self._gpu_tracking_active: bool = False
+        # Phase 15 — camera registry and stream metrics
+        self.registered_cameras: int = 0
+        self.active_streams: int = 0
+        self.offline_cameras: int = 0
+        self.degraded_cameras: int = 0
+        self.stream_start_failures: int = 0
+        self.latest_frame_updates: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -202,6 +209,13 @@ class SystemMetrics:
                     if self._gpu_tracking_active else 0.0
                 ),
                 "latency_avg_ms": _avg_ms(self._pipeline_times),
+                # Phase 15 — camera registry and stream metrics
+                "registered_cameras": self.registered_cameras,
+                "active_streams": self.active_streams,
+                "offline_cameras": self.offline_cameras,
+                "degraded_cameras": self.degraded_cameras,
+                "stream_start_failures": self.stream_start_failures,
+                "latest_frame_updates": self.latest_frame_updates,
             }
 
 

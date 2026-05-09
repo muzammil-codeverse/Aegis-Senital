@@ -54,6 +54,14 @@ async def startup():
     system_boot_check()
     bootstrap_inference_runtime()
     init_db()
+    # Initialize camera registry from config
+    try:
+        from app.services.camera_registry import get_camera_registry
+        registry = get_camera_registry()
+        snapshot = registry.snapshot()
+        logger.info("Camera registry initialized: %s cameras", snapshot["total"])
+    except Exception as exc:
+        logger.warning("Camera registry init failed: %s", exc)
     logger.info("Aegis Sentinel startup complete.")
 
 

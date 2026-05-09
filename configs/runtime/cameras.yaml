@@ -1,0 +1,72 @@
+max_cameras: 128
+
+cameras:
+  - camera_id: cam_entrance_01
+    name: Entrance Gate 01
+    source_type: video_file
+    source_uri: samples/videos/entrance.mp4
+    zone: entrance
+    priority: high
+    enabled: true
+    location:
+      lat: null
+      lng: null
+      floor: 0
+    metadata:
+      description: Primary entry monitoring camera
+
+  - camera_id: cam_corridor_01
+    name: Corridor 01
+    source_type: mock
+    source_uri: null
+    zone: corridor
+    priority: normal
+    enabled: true
+    location:
+      lat: null
+      lng: null
+      floor: 0
+    metadata:
+      description: Main corridor monitoring
+
+  - camera_id: cam_parking_01
+    name: Parking Lot 01
+    source_type: mock
+    source_uri: null
+    zone: parking
+    priority: normal
+    enabled: true
+    location:
+      lat: null
+      lng: null
+      floor: -1
+    metadata:
+      description: External parking area camera
+
+  - camera_id: cam_server_room_01
+    name: Server Room 01
+    source_type: mock
+    source_uri: null
+    zone: restricted
+    priority: critical
+    enabled: true
+    location:
+      lat: null
+      lng: null
+      floor: 1
+    metadata:
+      description: Restricted access server room camera
+
+  - camera_id: cam_lobby_01
+    name: Main Lobby 01
+    source_type: mock
+    source_uri: null
+    zone: lobby
+    priority: high
+    enabled: true
+    location:
+      lat: null
+      lng: null
+      floor: 0
+    metadata:
+      description: Main lobby area camera
