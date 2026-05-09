@@ -50,14 +50,31 @@ tmp/
 temp/
 uploads/
 
-# Runtime-generated inference output (recreated automatically on each run)
-backend/output/
-storage/
+# Local/generated datasets (restore via scripts/download_roboflow_exact_datasets.py)
+datasets/
 raw_datasets/
-datasets/raw/
 
-# Evaluation dataset images/labels (large binaries — restore via scripts/restore_evaluation_datasets.py)
-datasets/evaluation/
+# Runtime-generated inference output
+backend/output/
+
+# Training/evaluation outputs
+runs/
+storage/
+storage/evaluation_runs/
+
+# Dataset/model caches
+*.cache
+
+# Training-generated preview/plot images (kept on disk, not in Git)
+weapon_model/**/*.jpg
+weapon_model/**/*.jpeg
+weapon_model/**/*.png
+phone_model/**/*.jpg
+phone_model/**/*.jpeg
+phone_model/**/*.png
+
+# Local machine settings
+.claude/settings.local.json
 
 # Runtime logs
 logs/
