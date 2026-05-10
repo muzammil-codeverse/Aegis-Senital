@@ -46,8 +46,19 @@ _VIDEOMAE_UCF_DIR = Path("models/anomaly/videomae_ucf_binary")
 _VIDEOMAE_UCF_XD_DIR = Path("models/anomaly/videomae_ucf_xd_binary")
 _PRETRAINED_KINETICS = Path("models/anomaly/pretrained/videomae_kinetics")
 
+# -- Plan B safe dataset paths (never use full anomaly_video which may have large XD counts) --
+_UCF_ONLY_TRAIN_JSONL = Path("datasets/training/anomaly_video_ucf_only/train.jsonl")
+_UCF_ONLY_VAL_JSONL   = Path("datasets/training/anomaly_video_ucf_only/val.jsonl")
+_UCF_MICRO_TRAIN_JSONL = Path("datasets/training/anomaly_video_ucf_plus_xd_micro/train.jsonl")
+_UCF_MICRO_VAL_JSONL   = Path("datasets/training/anomaly_video_ucf_plus_xd_micro/val.jsonl")
+_UCF_MICRO_SUMMARY     = Path("datasets/training/anomaly_video_ucf_plus_xd_micro/dataset_summary.json")
+
+# Unsafe large dataset — never auto-start training with this; audit required first
+_FULL_UCF_TRAIN_JSONL = Path("datasets/training/anomaly_video/train.jsonl")
 _UCF_TRAIN_JSONL = Path("datasets/training/anomaly_video/train.jsonl")
 _UCF_VAL_JSONL = Path("datasets/training/anomaly_video/val.jsonl")
+
+TRAINING_BUDGET_HOURS = 10.0  # never launch a run estimated above this without approval
 
 _GPU_STABILITY_WAIT_SECS = 300   # 5 min file-stable check for zip
 
@@ -308,6 +319,59 @@ def _prepare_merged() -> bool:
     return result.returncode == 0
 
 
+# -- dataset safety selector ---------------------------------------------------
+
+def _select_safe_training_dataset() -> tuple[str, str, str]:
+    """Return (train_jsonl, val_jsonl, policy_name) for VideoMAE training.
+
+    Priority:
+      1. UCF + XD micro if it exists and its summary confirms budget_accepted=True
+      2. UCF-only if it exists
+      3. REFUSE to use full anomaly_video without audit
+
+    Raises RuntimeError if no safe dataset is found.
+    """
+    # Option 1: UCF + XD micro (verified under budget)
+    if _UCF_MICRO_TRAIN_JSONL.exists() and _UCF_MICRO_VAL_JSONL.exists():
+        if _UCF_MICRO_SUMMARY.exists():
+            try:
+                summary = json.loads(_UCF_MICRO_SUMMARY.read_text(encoding="utf-8"))
+                if summary.get("budget_accepted", False):
+                    est_h = summary.get("estimated_total_training_hours", 999)
+                    xd_clips = summary.get("xd_clips_in_train", 0)
+                    logger.info(
+                        "Dataset: UCF+XD micro (train=%d, xd_clips=%d, est=%.2fh < %.0fh budget)",
+                        summary.get("train_clips", 0), xd_clips, est_h, TRAINING_BUDGET_HOURS,
+                    )
+                    return (
+                        str(_UCF_MICRO_TRAIN_JSONL),
+                        str(_UCF_MICRO_VAL_JSONL),
+                        "ucf_plus_xd_micro",
+                    )
+                else:
+                    logger.warning("UCF+XD micro summary shows budget_accepted=False — falling back to UCF-only.")
+            except Exception as exc:
+                logger.warning("Could not parse micro summary: %s — falling back to UCF-only.", exc)
+
+    # Option 2: UCF-only
+    if _UCF_ONLY_TRAIN_JSONL.exists() and _UCF_ONLY_VAL_JSONL.exists():
+        count = sum(1 for _ in _UCF_ONLY_TRAIN_JSONL.open(encoding="utf-8"))
+        logger.info("Dataset: UCF-only (train=%d clips)", count)
+        return (
+            str(_UCF_ONLY_TRAIN_JSONL),
+            str(_UCF_ONLY_VAL_JSONL),
+            "ucf_only",
+        )
+
+    # Option 3: BLOCKED — full dataset requires audit
+    raise RuntimeError(
+        "No safe VideoMAE training dataset found.\n"
+        "Run: python scripts/create_ucf_xd_micro_dataset.py\n"
+        "Or verify: datasets/training/anomaly_video_ucf_only/ exists.\n"
+        "BLOCKED: datasets/training/anomaly_video/ requires XD audit before use."
+    )
+
+
 # -- training launchers ---------------------------------------------------------
 
 def _launch_videomae(
@@ -316,9 +380,14 @@ def _launch_videomae(
     resume_from: str | None,
     auto_resume: bool,
     batch_size: int = 2,
-    train_jsonl: str = "datasets/training/anomaly_video/train.jsonl",
-    val_jsonl: str = "datasets/training/anomaly_video/val.jsonl",
+    train_jsonl: str | None = None,
+    val_jsonl: str | None = None,
 ) -> subprocess.Popen:
+    # If no dataset explicitly passed, auto-select safe one
+    if train_jsonl is None or val_jsonl is None:
+        train_jsonl, val_jsonl, policy = _select_safe_training_dataset()
+        logger.info("Auto-selected dataset policy: %s", policy)
+
     cmd = [
         sys.executable, "scripts/train_anomaly_videomae.py",
         "--train-jsonl", train_jsonl,
@@ -438,24 +507,10 @@ def _decide(state: dict, gpu: GPUInfo, running: dict[str, bool],
         actions.append("WAIT_XD_DOWNLOAD: zip not yet present")
 
     # -- VideoMAE UCF+XD -----------------------------------------
-    xd_ready = xd_state.get("prepared", False)
-    ucf_done = vm_ucf["complete"]
-    if running["videomae_ucf_xd_binary"]:
-        actions.append(f"MONITOR: VideoMAE UCF+XD running (epoch {vm_xd.get('last_epoch', '?')})")
-    elif vm_xd["complete"]:
-        actions.append("DONE: VideoMAE UCF+XD binary complete")
-    elif xd_ready and ucf_done:
-        if active < max_jobs and _probe_vram_safe(gpu):
-            actions.append("START_VIDEOMAE_UCF_XD: all prerequisites met")
-        else:
-            actions.append("DEFER_VIDEOMAE_UCF_XD: waiting for GPU slot")
-    else:
-        missing = []
-        if not xd_ready:
-            missing.append("XD-Violence not prepared")
-        if not ucf_done:
-            missing.append("VideoMAE UCF not complete")
-        actions.append(f"BLOCKED_VIDEOMAE_UCF_XD: {', '.join(missing)}")
+    # Plan B: full UCF+XD training is DEFERRED — too slow on current hardware.
+    # restart_allowed=False in state prevents relaunch. XD micro-eval only.
+    if vm_xd.get("status") == "deferred" or not vm_xd.get("restart_allowed", True):
+        actions.append("DEFERRED: VideoMAE UCF+XD — excluded from Plan B (Phase 28C target)")
 
     # -- Weapon v2 ---------------------------------------------
     if running["weapon_yolo11s_v2"]:
