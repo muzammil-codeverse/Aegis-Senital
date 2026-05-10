@@ -21,6 +21,8 @@ import yaml
 
 ROOT = Path(__file__).parent.parent
 POLICY_PATH = ROOT / "configs" / "runtime" / "dependency_policy.yaml"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def check(name: str, ok: bool, detail: str = "", required: bool = True) -> dict:
@@ -98,6 +100,7 @@ def validate_dependencies(profile: str) -> list[dict]:
         results.append(r)
 
     results.extend(validate_feature_dependencies(policy, profile))
+    results.extend(validate_identity_feature_dependencies(policy, profile))
 
     return results
 
@@ -159,6 +162,60 @@ def validate_feature_dependencies(policy: dict, profile: str) -> list[dict]:
     return results
 
 
+def validate_identity_feature_dependencies(policy: dict, profile: str) -> list[dict]:
+    results: list[dict] = []
+    feature_cfg = policy.get("feature_dependencies", {})
+    config_path = ROOT / "configs/runtime/identity.yaml"
+    if not config_path.exists():
+        results.append(check("identity config", False, str(config_path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("identity config parseable", False, str(exc), required=True))
+        return results
+
+    identity = cfg.get("identity", cfg)
+    fail_open = bool(_get_nested(identity, "fail_open", True))
+
+    face_enabled = bool(_get_nested(identity, "face.enabled", False))
+    if face_enabled:
+        print("\n[Feature Dependencies â€” identity.face]")
+        required = profile == "production" or not fail_open
+        for module_cfg in feature_cfg.get("identity_face", {}).get("modules", []):
+            ok = _try_import(module_cfg["module"])
+            detail = "available" if ok else f"missing; install: {module_cfg.get('install_hint', '')}"
+            results.append(check(module_cfg["module"], ok, detail, required=required))
+        try:
+            from ml.runtime.model_router import ModelRouter
+
+            face_model = ModelRouter().get_model("face")
+            results.append(check("identity face model bundle", True, face_model.get("resolved_path", ""), required=required))
+        except Exception as exc:
+            results.append(check("identity face model bundle", False, str(exc), required=required))
+
+    reid_enabled = bool(_get_nested(identity, "reid.enabled", False))
+    if reid_enabled:
+        print("\n[Feature Dependencies â€” identity.reid]")
+        required = profile == "production" or not fail_open
+        for module_cfg in feature_cfg.get("identity_reid", {}).get("modules", []):
+            ok = _try_import(module_cfg["module"])
+            detail = "available" if ok else f"missing; install: {module_cfg.get('install_hint', '')}"
+            results.append(check(module_cfg["module"], ok, detail, required=required))
+
+    liveness_enabled = bool(_get_nested(identity, "liveness.enabled", False))
+    if liveness_enabled:
+        print("\n[Feature Dependencies â€” identity.liveness]")
+        provider = str(_get_nested(identity, "liveness.provider", "pending"))
+        results.append(check(
+            feature_cfg.get("identity_liveness", {}).get("label", "Identity liveness provider"),
+            False,
+            f"provider '{provider}' is pending integration",
+            required=profile == "production",
+        ))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -182,6 +239,7 @@ def validate(profile: str) -> None:
         "configs/runtime/security.yaml",
         "configs/runtime/deployment.yaml",
         "configs/runtime/dependency_policy.yaml",
+        "configs/runtime/identity.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))

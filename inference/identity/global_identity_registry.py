@@ -4,42 +4,31 @@ import logging
 import math
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 
+from inference.identity.runtime_config import load_identity_config
+
 logger = logging.getLogger(__name__)
 
 _DIM = 512
-_CROSS_STREAM_THRESHOLD = 0.72   # min cosine similarity to count as a cross-stream match
-_TTL_SECONDS = 600.0             # 10 minutes — identities unseen longer than this are purged
-_CONF_DECAY_LAMBDA = 0.00005     # exponential decay; halves in ~14400 s (~4 hours)
-_PURGE_INTERVAL = 60.0           # lazy-purge check at most once per minute
+_PURGE_INTERVAL = 60.0
+_MAX_HISTORY = 100
+
+
+def _now_iso(ts: float | None = None) -> str:
+    return datetime.fromtimestamp(ts or time.time(), tz=timezone.utc).isoformat()
 
 
 class GlobalIdentityRegistry:
     """
-    Process-wide singleton identity index shared across all stream processors.
+    Process-wide cross-camera identity registry.
 
-    Enables cross-stream person re-identification: when stream A registers a
-    person identity, stream B can retrieve the same identity_id for the same
-    person even if the two cameras have no temporal overlap.
-
-    Phase-6 additions:
-        - Per-identity TTL (10 min since last_seen) with lazy purge
-        - Confidence decay over time (exponential, very slow)
-        - Decayed confidence exposed in search results
-
-    Backend selection (in order of preference):
-        1. FAISS IndexFlatIP  — O(N) exact inner-product search on normalized vectors
-        2. NumPy fallback     — cosine dot-product scan; no dependency required
-
-    Both backends return the same results for normalized embeddings.
-
-    Usage:
-        reg = get_global_registry()
-        reg.register_identity("cam_01", appearance_embedding, identity_id)
-        hits = reg.search_global(embedding, exclude_stream="cam_01", k=5)
+    Keeps searchable embeddings plus per-identity observation history,
+    source-confidence breakdowns, camera visitation state, and audit events
+    for merge/split/conflict tracking.
     """
 
     _instance: "GlobalIdentityRegistry | None" = None
@@ -56,32 +45,30 @@ class GlobalIdentityRegistry:
     def __init__(self) -> None:
         if self._initialized:
             return
+        cfg = load_identity_config()
+        fusion_cfg = cfg.get("fusion", {})
+        reid_cfg = cfg.get("reid", {})
+        self._threshold = float(reid_cfg.get("match_threshold", 0.55))
+        self._ttl_seconds = float(fusion_cfg.get("identity_ttl_seconds", 600))
+        decay_seconds = float(fusion_cfg.get("confidence_decay_seconds", 120))
+        self._conf_decay_lambda = math.log(2.0) / max(decay_seconds, 1.0)
         self._lock: threading.RLock = threading.RLock()
-        self._embeddings: list[np.ndarray] = []   # normalized (512,) vectors
-        self._identity_ids: list[str] = []
-        self._stream_ids: list[str] = []
+        self._records: dict[str, dict[str, Any]] = {}
         self._faiss_index: Any | None = None
-        self._faiss_available: bool = False
-        # Phase 6 — per-identity lifecycle metadata
-        self._created_at: dict[str, float] = {}    # identity_id -> monotonic timestamp
-        self._last_seen: dict[str, float] = {}     # identity_id -> monotonic timestamp
-        self._confidence: dict[str, float] = {}    # identity_id -> initial confidence
-        self._last_purge: float = time.monotonic()
+        self._faiss_available = False
+        self._last_purge = time.monotonic()
         self._try_init_faiss()
-        self._initialized: bool = True
-
-    # ── backend init ──────────────────────────────────────────────────────────
+        self._initialized = True
 
     def _try_init_faiss(self) -> None:
         try:
             import faiss
+
             self._faiss_index = faiss.IndexFlatIP(_DIM)
             self._faiss_available = True
             logger.info("GlobalIdentityRegistry: FAISS IndexFlatIP initialised (dim=%d)", _DIM)
         except ImportError:
-            logger.info("GlobalIdentityRegistry: FAISS not installed — using numpy cosine fallback")
-
-    # ── normalisation ─────────────────────────────────────────────────────────
+            logger.info("GlobalIdentityRegistry: FAISS unavailable - using numpy cosine fallback")
 
     @staticmethod
     def _normalize(emb: list[float] | np.ndarray) -> np.ndarray:
@@ -93,7 +80,17 @@ class GlobalIdentityRegistry:
         norm = float(np.linalg.norm(arr))
         return arr / norm if norm > 0.0 else arr
 
-    # ── registration ──────────────────────────────────────────────────────────
+    def _append_history(self, record: dict[str, Any], confidence: float, timestamp: float) -> None:
+        history = record.setdefault("confidence_history", [])
+        history.append({"timestamp": timestamp, "confidence": round(float(confidence), 4)})
+        if len(history) > _MAX_HISTORY:
+            del history[:-_MAX_HISTORY]
+
+    def _append_audit(self, record: dict[str, Any], event_type: str, **payload: Any) -> None:
+        events = record.setdefault("audit_events", [])
+        events.append({"timestamp": _now_iso(), "type": event_type, **payload})
+        if len(events) > _MAX_HISTORY:
+            del events[:-_MAX_HISTORY]
 
     def register_identity(
         self,
@@ -101,232 +98,298 @@ class GlobalIdentityRegistry:
         embedding: list[float] | np.ndarray,
         identity_id: str,
         confidence: float = 1.0,
+        source_scores: dict[str, float] | None = None,
+        source: str = "reid",
     ) -> None:
-        """
-        Add or update an identity in the global index.
-
-        Accepts appearance or combined embeddings.  Already-registered
-        identities are updated in place so re-identification across sessions
-        uses the most recent embedding.  Records created_at / last_seen /
-        confidence for TTL and decay.
-        """
         if not len(embedding):
             return
         normed = self._normalize(embedding)
-        now = time.monotonic()
+        now = time.time()
 
         with self._lock:
-            self._maybe_purge(now)
+            self._maybe_purge()
+            record = self._records.get(identity_id)
+            if record is None:
+                record = {
+                    "global_id": identity_id,
+                    "embedding": normed,
+                    "confidence": float(confidence),
+                    "sources": {"face": 0.0, "reid": 0.0, "track": 0.0},
+                    "cameras_seen": set([stream_id]),
+                    "camera_observations": {stream_id: 1},
+                    "first_seen_ts": now,
+                    "last_seen_ts": now,
+                    "observation_count": 1,
+                    "status": "active",
+                    "confidence_history": [],
+                    "audit_events": [],
+                    "last_stream_id": stream_id,
+                }
+                self._records[identity_id] = record
+                self._append_audit(record, "created", source=source)
+            else:
+                record["embedding"] = normed
+                record["last_seen_ts"] = now
+                record["observation_count"] = int(record.get("observation_count", 0)) + 1
+                record["cameras_seen"].add(stream_id)
+                camera_observations = record.setdefault("camera_observations", {})
+                camera_observations[stream_id] = int(camera_observations.get(stream_id, 0)) + 1
+                record["status"] = "active"
+            record["last_stream_id"] = stream_id
+            record["confidence"] = max(float(record.get("confidence", 0.0)), float(confidence))
+            if source_scores:
+                for key in ("face", "reid", "track"):
+                    record["sources"][key] = round(
+                        max(float(record["sources"].get(key, 0.0)), float(source_scores.get(key, 0.0))),
+                        4,
+                    )
+                if abs(float(source_scores.get("face", 0.0)) - float(source_scores.get("reid", 0.0))) > 0.45:
+                    self.record_conflict(
+                        identity_id,
+                        reason="face_reid_confidence_disagreement",
+                        metadata={"source_scores": source_scores},
+                    )
+            self._append_history(record, confidence, now)
+            self._rebuild_index_locked()
 
-            # Update existing entry if identity_id already present
-            try:
-                existing_idx = self._identity_ids.index(identity_id)
-                self._embeddings[existing_idx] = normed
-                self._stream_ids[existing_idx] = stream_id
-                self._last_seen[identity_id] = now
-                self._confidence[identity_id] = confidence
-                # FAISS index cannot update in-place — rebuild lazily on next search
-                if self._faiss_available:
-                    self._rebuild_faiss()
+    def record_merge(self, primary_identity_id: str, secondary_identity_id: str, reason: str) -> None:
+        with self._lock:
+            primary = self._records.get(primary_identity_id)
+            secondary = self._records.get(secondary_identity_id)
+            if primary is None or secondary is None:
                 return
-            except ValueError:
-                pass  # new identity
+            self._append_audit(primary, "merge", merged_from=secondary_identity_id, reason=reason)
+            self._append_audit(secondary, "merged_into", merged_to=primary_identity_id, reason=reason)
 
-            self._embeddings.append(normed)
-            self._identity_ids.append(identity_id)
-            self._stream_ids.append(stream_id)
-            self._created_at[identity_id] = now
-            self._last_seen[identity_id] = now
-            self._confidence[identity_id] = confidence
+    def record_split(self, identity_id: str, reason: str, related_identity_id: str | None = None) -> None:
+        with self._lock:
+            record = self._records.get(identity_id)
+            if record is None:
+                return
+            self._append_audit(record, "split", reason=reason, related_identity_id=related_identity_id)
 
-            if self._faiss_available and self._faiss_index is not None:
-                import faiss
-                vec = normed.reshape(1, -1).copy()
-                faiss.normalize_L2(vec)
-                self._faiss_index.add(vec)
+    def record_conflict(self, identity_id: str, reason: str, metadata: dict[str, Any] | None = None) -> None:
+        with self._lock:
+            record = self._records.get(identity_id)
+            if record is None:
+                return
+            self._append_audit(record, "conflict", reason=reason, metadata=metadata or {})
+            try:
+                from inference.monitoring.metrics import get_metrics
 
-    def _rebuild_faiss(self) -> None:
+                get_metrics().increment("identity_false_merge_warnings_total")
+            except Exception:
+                pass
+
+    def _rebuild_index_locked(self) -> None:
+        active_vectors = []
+        active_ids = []
+        for identity_id, record in self._records.items():
+            if record.get("status") != "active":
+                continue
+            vector = record.get("embedding")
+            if vector is None:
+                continue
+            active_vectors.append(vector)
+            active_ids.append(identity_id)
+        self._active_ids = active_ids
+        self._active_matrix = np.stack(active_vectors, axis=0) if active_vectors else None
+        if not self._faiss_available:
+            return
         import faiss
+
         self._faiss_index = faiss.IndexFlatIP(_DIM)
-        if self._embeddings:
-            matrix = np.stack(self._embeddings, axis=0)
+        if active_vectors:
+            matrix = np.stack(active_vectors, axis=0).astype(np.float32)
             faiss.normalize_L2(matrix)
             self._faiss_index.add(matrix)
 
-    # ── TTL + decay ───────────────────────────────────────────────────────────
-
-    def _maybe_purge(self, now: float) -> None:
-        """Trigger a TTL purge at most once per _PURGE_INTERVAL seconds."""
+    def _maybe_purge(self) -> None:
+        now = time.monotonic()
         if now - self._last_purge < _PURGE_INTERVAL:
             return
         self._last_purge = now
-        self._purge_expired(now)
+        self._purge_expired_locked(time.time())
 
-    def _purge_expired(self, now: float | None = None) -> int:
-        """
-        Remove identities unseen for longer than _TTL_SECONDS.
+    def _purge_expired_locked(self, now_ts: float) -> int:
+        expired = 0
+        for identity_id, record in self._records.items():
+            if record.get("status") != "active":
+                continue
+            if now_ts - float(record.get("last_seen_ts", now_ts)) > self._ttl_seconds:
+                record["status"] = "expired"
+                self._append_audit(record, "expired")
+                expired += 1
+        if expired:
+            self._rebuild_index_locked()
+            try:
+                from inference.monitoring.metrics import get_metrics
 
-        Returns the number of identities purged.  Caller must hold self._lock.
-        """
-        if now is None:
-            now = time.monotonic()
-        expired_ids = [
-            iid for iid, last_seen in self._last_seen.items()
-            if now - last_seen > _TTL_SECONDS
-        ]
-        if not expired_ids:
-            return 0
+                get_metrics().record_expired_identity(expired)
+            except Exception:
+                pass
+        return expired
 
-        expired_set = set(expired_ids)
-        keep = [i for i, iid in enumerate(self._identity_ids) if iid not in expired_set]
-        self._embeddings = [self._embeddings[i] for i in keep]
-        self._identity_ids = [self._identity_ids[i] for i in keep]
-        self._stream_ids = [self._stream_ids[i] for i in keep]
-        for iid in expired_ids:
-            self._created_at.pop(iid, None)
-            self._last_seen.pop(iid, None)
-            self._confidence.pop(iid, None)
-
-        if self._faiss_available:
-            self._rebuild_faiss()
-
-        try:
-            from inference.monitoring.metrics import get_metrics
-            get_metrics().record_expired_identity(len(expired_ids))
-        except Exception:
-            pass
-
-        logger.info(
-            "GlobalIdentityRegistry: purged %d expired identities (TTL=%ds)",
-            len(expired_ids), int(_TTL_SECONDS),
-        )
-        return len(expired_ids)
-
-    def _decayed_confidence(self, identity_id: str, now: float) -> float:
-        """Return the time-decayed confidence score for an identity."""
-        conf = self._confidence.get(identity_id, 1.0)
-        last_seen = self._last_seen.get(identity_id)
-        if last_seen is None:
-            return round(conf, 4)
-        elapsed = max(0.0, now - last_seen)
-        return round(float(conf * math.exp(-_CONF_DECAY_LAMBDA * elapsed)), 4)
-
-    # ── search ────────────────────────────────────────────────────────────────
+    def _decayed_confidence(self, record: dict[str, Any], now_ts: float) -> float:
+        latest = float(record.get("confidence", 0.0))
+        last_seen = float(record.get("last_seen_ts", now_ts))
+        elapsed = max(0.0, now_ts - last_seen)
+        return round(float(latest * math.exp(-self._conf_decay_lambda * elapsed)), 4)
 
     def search_global(
         self,
         embedding: list[float] | np.ndarray,
         k: int = 5,
         exclude_stream: str | None = None,
-    ) -> list[dict]:
-        """
-        Return up to k matching identities from the global index.
-
-        Only results with cosine similarity >= _CROSS_STREAM_THRESHOLD are
-        returned.  Pass exclude_stream to skip identities registered by the
-        querying stream (avoids matching a stream against itself).
-
-        Each result includes a decayed ``confidence`` score in addition to
-        the raw cosine ``score``.
-
-        Returns: list of {"identity_id": str, "score": float, "stream_id": str, "confidence": float}
-        """
+    ) -> list[dict[str, Any]]:
         if not len(embedding):
             return []
         normed = self._normalize(embedding)
-        now = time.monotonic()
+        now_ts = time.time()
 
         with self._lock:
-            self._maybe_purge(now)
-            if not self._embeddings:
+            self._maybe_purge()
+            if not getattr(self, "_active_ids", []):
                 return []
             if self._faiss_available and self._faiss_index is not None and self._faiss_index.ntotal > 0:
-                results = self._faiss_search(normed, k, exclude_stream)
+                results = self._faiss_search_locked(normed, k, exclude_stream)
             else:
-                results = self._numpy_search(normed, k, exclude_stream)
-
-            # Annotate each result with decayed confidence
+                results = self._numpy_search_locked(normed, k, exclude_stream)
             for hit in results:
-                hit["confidence"] = self._decayed_confidence(hit["identity_id"], now)
+                record = self._records.get(hit["identity_id"])
+                if record is None:
+                    continue
+                hit["confidence"] = self._decayed_confidence(record, now_ts)
+                hit["sources"] = dict(record.get("sources", {}))
+                hit["cameras_seen"] = sorted(record.get("cameras_seen", set()))
+                hit["first_seen"] = _now_iso(float(record.get("first_seen_ts", now_ts)))
+                hit["last_seen"] = _now_iso(float(record.get("last_seen_ts", now_ts)))
+                hit["observation_count"] = int(record.get("observation_count", 0))
+                hit["status"] = str(record.get("status", "active"))
             return results
 
-    def _faiss_search(
+    def _faiss_search_locked(
         self,
         normed: np.ndarray,
         k: int,
         exclude_stream: str | None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         import faiss
-        oversample_k = min(k * 3, len(self._embeddings))
+
+        if not getattr(self, "_active_ids", []):
+            return []
+        oversample_k = min(k * 3, len(self._active_ids))
         vec = normed.reshape(1, -1).copy()
         faiss.normalize_L2(vec)
         scores, indices = self._faiss_index.search(vec, oversample_k)
-        results: list[dict] = []
+        results: list[dict[str, Any]] = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx < 0 or float(score) < _CROSS_STREAM_THRESHOLD:
+            if idx < 0 or float(score) < self._threshold:
                 continue
-            sid = self._stream_ids[idx]
-            if exclude_stream and sid == exclude_stream:
+            identity_id = self._active_ids[idx]
+            record = self._records.get(identity_id)
+            if record is None:
                 continue
-            results.append({
-                "identity_id": self._identity_ids[idx],
-                "score": round(float(score), 4),
-                "stream_id": sid,
-            })
+            if exclude_stream and record.get("last_stream_id") == exclude_stream:
+                continue
+            results.append(
+                {
+                    "identity_id": identity_id,
+                    "global_id": identity_id,
+                    "score": round(float(score), 4),
+                    "stream_id": record.get("last_stream_id"),
+                }
+            )
             if len(results) >= k:
                 break
         return results
 
-    def _numpy_search(
+    def _numpy_search_locked(
         self,
         normed: np.ndarray,
         k: int,
         exclude_stream: str | None,
-    ) -> list[dict]:
-        matrix = np.stack(self._embeddings, axis=0)   # (N, 512)
-        scores = matrix @ normed                        # (N,) cosine similarities
+    ) -> list[dict[str, Any]]:
+        matrix = getattr(self, "_active_matrix", None)
+        if matrix is None:
+            return []
+        scores = matrix @ normed
         ranked = np.argsort(-scores)
-        results: list[dict] = []
+        results: list[dict[str, Any]] = []
         for idx in ranked:
             score = float(scores[idx])
-            if score < _CROSS_STREAM_THRESHOLD:
+            if score < self._threshold:
                 break
-            sid = self._stream_ids[idx]
-            if exclude_stream and sid == exclude_stream:
+            identity_id = self._active_ids[idx]
+            record = self._records.get(identity_id)
+            if record is None:
                 continue
-            results.append({
-                "identity_id": self._identity_ids[idx],
-                "score": round(score, 4),
-                "stream_id": sid,
-            })
+            if exclude_stream and record.get("last_stream_id") == exclude_stream:
+                continue
+            results.append(
+                {
+                    "identity_id": identity_id,
+                    "global_id": identity_id,
+                    "score": round(score, 4),
+                    "stream_id": record.get("last_stream_id"),
+                }
+            )
             if len(results) >= k:
                 break
         return results
 
-    # ── introspection ─────────────────────────────────────────────────────────
+    def get_identity_record(self, identity_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._records.get(identity_id)
+            if record is None:
+                return None
+            now_ts = time.time()
+            return {
+                "global_id": identity_id,
+                "confidence": self._decayed_confidence(record, now_ts),
+                "sources": dict(record.get("sources", {})),
+                "cameras_seen": sorted(record.get("cameras_seen", set())),
+                "first_seen": _now_iso(float(record.get("first_seen_ts", now_ts))),
+                "last_seen": _now_iso(float(record.get("last_seen_ts", now_ts))),
+                "observation_count": int(record.get("observation_count", 0)),
+                "status": str(record.get("status", "active")),
+                "camera_observations": dict(record.get("camera_observations", {})),
+                "audit_events": list(record.get("audit_events", [])),
+            }
+
+    def list_records(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock:
+            records = []
+            for identity_id in self._records:
+                record = self.get_identity_record(identity_id)
+                if record is None:
+                    continue
+                if status and record["status"] != status:
+                    continue
+                records.append(record)
+            records.sort(key=lambda item: item["last_seen"], reverse=True)
+            return records[:limit]
 
     @property
     def total_identities(self) -> int:
         with self._lock:
-            return len(self._identity_ids)
+            return len(self._records)
 
     def stream_identity_counts(self) -> dict[str, int]:
         with self._lock:
             counts: dict[str, int] = {}
-            for sid in self._stream_ids:
-                counts[sid] = counts.get(sid, 0) + 1
+            for record in self._records.values():
+                for camera_id in record.get("cameras_seen", set()):
+                    counts[camera_id] = counts.get(camera_id, 0) + 1
             return counts
 
     def force_purge(self) -> int:
-        """Explicitly trigger TTL purge. Returns number of expired identities removed."""
         with self._lock:
-            return self._purge_expired()
+            return self._purge_expired_locked(time.time())
 
 
-# Process-wide singleton
 _registry: GlobalIdentityRegistry = GlobalIdentityRegistry()
 
 
 def get_global_registry() -> GlobalIdentityRegistry:
-    """Return the process-wide GlobalIdentityRegistry singleton."""
     return _registry

@@ -52,6 +52,17 @@ desktop.ini
 *.onnx
 *.h5
 *.pkl
+*.safetensors
+*.bin
+
+# InsightFace internal download cache (restored by scripts/setup_insightface_models.py)
+models/models/
+models/buffalo_l/
+
+# VideoMAE / anomaly training checkpoints (restored by training scripts)
+models/anomaly/pretrained/
+models/anomaly/videomae_*/
+models/anomaly/pretrained_manifest.json
 
 # Temp
 tmp/

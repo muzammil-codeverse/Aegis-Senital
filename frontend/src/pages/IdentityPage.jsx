@@ -1,17 +1,17 @@
-/**
- * IdentityPage — two-tab view for identity management and watchlist operations.
- */
 import React, { useState } from 'react';
+import GlobalIdentityDrawer from '../components/identity/GlobalIdentityDrawer.jsx';
+import IdentityHealthPanel from '../components/identity/IdentityHealthPanel.jsx';
+import IdentityDetailPanel from '../components/identity/IdentityDetailPanel.jsx';
+import IdentityTable from '../components/identity/IdentityTable.jsx';
+import WatchlistPanel from '../components/identity/WatchlistPanel.jsx';
 import { useIdentities } from '../hooks/useIdentities.js';
 import { useWatchlist } from '../hooks/useWatchlist.js';
-import IdentityTable from '../components/identity/IdentityTable.jsx';
-import IdentityDetailPanel from '../components/identity/IdentityDetailPanel.jsx';
-import WatchlistPanel from '../components/identity/WatchlistPanel.jsx';
 
 export default function IdentityPage() {
   const identityHook = useIdentities();
   const watchlistHook = useWatchlist();
   const [activeTab, setActiveTab] = useState('identities');
+  const [registryOpen, setRegistryOpen] = useState(false);
 
   return (
     <div
@@ -26,7 +26,6 @@ export default function IdentityPage() {
         overflowY: 'auto',
       }}
     >
-      {/* Tab bar */}
       <div
         style={{
           display: 'flex',
@@ -68,43 +67,64 @@ export default function IdentityPage() {
         </button>
       </div>
 
-      {/* Identities tab */}
       {activeTab === 'identities' && (
-        <div style={{ display: 'flex', gap: '16px', flex: 1, minHeight: 0 }}>
-          <div style={{ flex: '0 0 380px', overflowY: 'auto' }}>
-            <IdentityTable {...identityHook} watchlistHook={watchlistHook} />
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            {identityHook.selectedIdentity ? (
-              <IdentityDetailPanel
-                {...identityHook}
-                watchlistHook={watchlistHook}
-              />
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  height: '200px',
-                  color: '#8b949e',
-                  fontSize: '14px',
-                }}
-              >
-                Select an identity to view details
-              </div>
-            )}
+        <div style={{ display: 'grid', gap: '16px', flex: 1, minHeight: 0 }}>
+          <IdentityHealthPanel
+            health={identityHook.identityHealth}
+            metrics={identityHook.identityMetrics}
+            globalIdentities={identityHook.globalIdentities}
+            identities={identityHook.identities}
+            onOpenRegistry={() => setRegistryOpen(true)}
+          />
+          <div style={{ display: 'flex', gap: '16px', flex: 1, minHeight: 0 }}>
+            <div style={{ flex: '0 0 380px', overflowY: 'auto' }}>
+              <IdentityTable {...identityHook} watchlistHook={watchlistHook} />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {identityHook.selectedIdentity ? (
+                <IdentityDetailPanel
+                  {...identityHook}
+                  watchlistHook={watchlistHook}
+                />
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '200px',
+                    color: '#8b949e',
+                    fontSize: '14px',
+                    border: '1px solid #21262d',
+                    borderRadius: '8px',
+                    background: '#161b22',
+                  }}
+                >
+                  Select an identity to review confidence, enrollment quality, and timeline.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Watchlist tab */}
       {activeTab === 'watchlist' && (
         <WatchlistPanel
           watchlistHook={watchlistHook}
           identityHook={identityHook}
         />
       )}
+
+      <GlobalIdentityDrawer
+        open={registryOpen}
+        onClose={() => setRegistryOpen(false)}
+        globalIdentities={identityHook.globalIdentities}
+        identities={identityHook.identities}
+        onSelectIdentity={(identity) => {
+          identityHook.selectIdentity(identity);
+          setRegistryOpen(false);
+        }}
+      />
     </div>
   );
 }

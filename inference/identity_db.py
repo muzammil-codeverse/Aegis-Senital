@@ -104,16 +104,16 @@ class IdentityDB:
         appearance_embedding: list[float] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if not _has_embedding(face_embedding) or not _has_embedding(appearance_embedding):
+        if not _has_embedding(face_embedding) and not _has_embedding(appearance_embedding):
             logger.debug(
-                "persist_identity: skipping FAISS upsert for %s — embeddings unavailable (degraded mode).",
+                "persist_identity: skipping FAISS upsert for %s - embeddings unavailable (degraded mode).",
                 identity_id,
             )
             return
         self._vectors.upsert_identity(
             identity_id,
-            face_embedding=face_embedding,
-            appearance_embedding=appearance_embedding,
+            face_embedding=face_embedding if _has_embedding(face_embedding) else None,
+            appearance_embedding=appearance_embedding if _has_embedding(appearance_embedding) else None,
             metadata=metadata,
         )
 
@@ -135,20 +135,22 @@ class IdentityDB:
         appearance_embedding: list[float] | None = None,
         k: int = 5,
     ) -> list[dict[str, Any]]:
-        if not _has_embedding(face_embedding) or not _has_embedding(appearance_embedding):
+        if not _has_embedding(face_embedding) and not _has_embedding(appearance_embedding):
             return []
         merged: dict[str, dict[str, Any]] = {}
-        for hit in self.search_top_k(face_embedding, k=k, modality="face"):
-            merged.setdefault(
-                hit["identity_id"],
-                {"identity_id": hit["identity_id"], "face_score": 0.0, "appearance_score": 0.0},
-            )["face_score"] = float(hit["score"])
-        for hit in self.search_top_k(appearance_embedding, k=k, modality="appearance"):
-            merged.setdefault(
-                hit["identity_id"],
-                {"identity_id": hit["identity_id"], "face_score": 0.0, "appearance_score": 0.0},
-            )["appearance_score"] = float(hit["score"])
-            merged[hit["identity_id"]]["metadata"] = deepcopy(hit.get("metadata", {}))
+        if _has_embedding(face_embedding):
+            for hit in self.search_top_k(face_embedding, k=k, modality="face"):
+                merged.setdefault(
+                    hit["identity_id"],
+                    {"identity_id": hit["identity_id"], "face_score": 0.0, "appearance_score": 0.0},
+                )["face_score"] = float(hit["score"])
+        if _has_embedding(appearance_embedding):
+            for hit in self.search_top_k(appearance_embedding, k=k, modality="appearance"):
+                merged.setdefault(
+                    hit["identity_id"],
+                    {"identity_id": hit["identity_id"], "face_score": 0.0, "appearance_score": 0.0},
+                )["appearance_score"] = float(hit["score"])
+                merged[hit["identity_id"]]["metadata"] = deepcopy(hit.get("metadata", {}))
 
         results = []
         for identity_id, payload in merged.items():

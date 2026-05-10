@@ -202,6 +202,10 @@ def permission_for_request(method: str, path: str) -> str | None:
         if method == "GET":
             return "identity:read"
         return "identity:write"
+    if path.startswith("/api/identity"):
+        if method == "GET":
+            return "identity:read"
+        return "identity:write"
     if path.startswith("/api/watchlist"):
         if method == "GET":
             return "watchlist:read"

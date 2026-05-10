@@ -147,12 +147,47 @@ class RuntimeHealthService:
             return {"status": "degraded", "detail": "JWT secret not set (dev mode)"}
         return {"status": "ok", "detail": None}
 
+    def _check_identity(self) -> dict:
+        try:
+            from app.services.identity_service import get_identity_service
+
+            health = get_identity_service().get_health()
+        except Exception as exc:
+            return {
+                "status": "failed",
+                "detail": str(exc)[:120],
+                "enabled": True,
+                "face_provider": "unknown",
+                "face_loaded": False,
+                "reid_provider": "unknown",
+                "reid_loaded": False,
+                "liveness_enabled": False,
+            }
+        detail = health.get("last_error")
+        status_map = {
+            "healthy": "ok",
+            "degraded": "degraded",
+            "disabled": "disabled",
+            "failed": "error",
+        }
+        return {
+            "status": status_map.get(health.get("status", "degraded"), "degraded"),
+            "detail": detail,
+            "enabled": bool(health.get("enabled", True)),
+            "face_provider": health.get("face_provider"),
+            "face_loaded": bool(health.get("face_loaded", False)),
+            "reid_provider": health.get("reid_provider"),
+            "reid_loaded": bool(health.get("reid_loaded", False)),
+            "liveness_enabled": bool(health.get("liveness_enabled", False)),
+        }
+
     def get_health(self, include_sensitive: bool = False) -> dict:
         """Return aggregated health status for all subsystems."""
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
             "gpu": self._check_gpu(),
+            "identity": self._check_identity(),
             "open_vocab": self._check_open_vocab(),
             "segmentation": self._check_segmentation(),
             "storage": self._check_storage(),
@@ -193,6 +228,7 @@ class RuntimeHealthService:
         require_gpu = deploy_config.get("require_gpu", False)
         require_open_vocab = bool(self._config.get("services", {}).get("open_vocab", {}).get("required", False))
         require_segmentation = bool(self._config.get("services", {}).get("segmentation", {}).get("required", False))
+        require_identity = True
 
         failures = []
         if require_postgres:
@@ -224,6 +260,10 @@ class RuntimeHealthService:
             segmentation = self._check_segmentation()
             if segmentation["status"] != "healthy":
                 failures.append(f"segmentation: {segmentation.get('detail') or segmentation['status']}")
+        if require_identity:
+            identity = self._check_identity()
+            if identity["status"] == "error":
+                failures.append(f"identity: {identity.get('detail') or identity['status']}")
 
         return {
             "ready": len(failures) == 0,

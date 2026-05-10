@@ -51,6 +51,8 @@ def test_identities_requires_identity_read(monkeypatch):
     client = TestClient(app, raise_server_exceptions=False)
     assert client.get("/api/identities", headers={"Authorization": "Bearer viewer"}).status_code == 403
     assert client.get("/api/identities", headers={"Authorization": "Bearer analyst"}).status_code in {200, 503}
+    assert client.get("/api/identity/enrollments", headers={"Authorization": "Bearer viewer"}).status_code == 403
+    assert client.get("/api/identity/enrollments", headers={"Authorization": "Bearer analyst"}).status_code in {200, 503}
 
 
 def test_sensitive_writes_require_admin_or_write_permissions(monkeypatch):
@@ -58,6 +60,7 @@ def test_sensitive_writes_require_admin_or_write_permissions(monkeypatch):
     client = TestClient(app, raise_server_exceptions=False)
     assert client.post("/api/watchlist", headers={"Authorization": "Bearer operator"}, json={}).status_code == 403
     assert client.post("/api/models/reload", headers={"Authorization": "Bearer analyst"}).status_code == 403
+    assert client.post("/api/identity/enroll", headers={"Authorization": "Bearer operator"}).status_code == 403
 
 
 def test_invalid_token_returns_401(monkeypatch):

@@ -386,6 +386,9 @@ class MultiObjectTracker:
         frame_packet: FramePacket,
         matched_track_to_detection: dict[int, Detection],
     ) -> None:
+        from inference.identity.identity_profile_store import get_identity_store
+
+        store = get_identity_store()
         for track_id, detection in matched_track_to_detection.items():
             state = self.active_tracks.get(track_id)
             if state is None:
@@ -396,6 +399,23 @@ class MultiObjectTracker:
                 state.apply_identity(resolution.identity_id, resolution.confidence_score)
                 state.face_embedding = list(resolution.face_embedding)
                 state.appearance_embedding = list(resolution.appearance_embedding)
+                state.metadata["identity_source_breakdown"] = dict(getattr(resolution, "source_scores", {}))
+                state.metadata["identity_quality"] = dict(getattr(resolution, "quality", {}))
+                store.record_match(
+                    identity_id=resolution.identity_id,
+                    camera_id=frame_packet.camera_id,
+                    track_id=track_id,
+                    confidence=resolution.confidence_score,
+                    source="fusion",
+                    source_breakdown=dict(getattr(resolution, "source_scores", {})),
+                    quality_score=(getattr(resolution, "quality", {}) or {}).get("quality_score"),
+                    operator_review_required=bool(getattr(resolution, "operator_review_required", True)),
+                    match_type=str(getattr(resolution, "match_type", "possible_identity_match")),
+                    metadata={
+                        "class_name": state.class_name,
+                        "face_quality": getattr(resolution, "quality", {}),
+                    },
+                )
                 self._db.insert_track(state.to_track())
             except Exception as exc:
                 logger.warning(

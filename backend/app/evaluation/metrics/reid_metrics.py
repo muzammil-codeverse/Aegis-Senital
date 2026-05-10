@@ -100,6 +100,12 @@ def compute_reid_metrics(
 
     intra_avg = sum(intra_dists) / len(intra_dists) if intra_dists else None
     inter_avg = sum(inter_dists) / len(inter_dists) if inter_dists else None
+    similarity_distribution = {
+        "same_person_count": len(intra_dists),
+        "different_person_count": len(inter_dists),
+        "same_person_distance_avg": round(intra_avg, 4) if intra_avg is not None else None,
+        "different_person_distance_avg": round(inter_avg, 4) if inter_avg is not None else None,
+    }
 
     return ReIDMetricResult(
         rank_1=round(rank_1, 4) if rank_1 is not None else None,
@@ -109,6 +115,7 @@ def compute_reid_metrics(
         intra_identity_distance_avg=round(intra_avg, 4) if intra_avg is not None else None,
         inter_identity_distance_avg=round(inter_avg, 4) if inter_avg is not None else None,
         embedding_failure_count=embedding_failures,
+        similarity_distribution=similarity_distribution,
         overlap_or_leakage_detected=bool(overlap),
         warnings=warnings,
     )

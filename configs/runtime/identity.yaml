@@ -1,0 +1,44 @@
+identity:
+  enabled: true
+  fail_open: true
+
+  face:
+    enabled: true
+    provider: "insightface"
+    device: "cuda"
+    detection_size: [640, 640]
+    min_face_size_px: 40
+    min_detection_score: 0.60
+    min_quality_score: 0.55
+    embedding_dim: 512
+    match_threshold: 0.42
+    unknown_threshold: 0.35
+
+  reid:
+    enabled: true
+    provider: "osnet"
+    device: "cuda"
+    min_person_box_area_px: 2500
+    min_track_length: 5
+    embedding_dim: 512
+    match_threshold: 0.55
+
+  fusion:
+    enabled: true
+    face_weight: 0.65
+    reid_weight: 0.35
+    min_fused_confidence: 0.50
+    identity_ttl_seconds: 600
+    confidence_decay_seconds: 120
+    require_face_for_high_confidence: false
+
+  liveness:
+    enabled: false
+    provider: "pending"
+    fail_if_enabled_missing: true
+
+  privacy:
+    store_raw_faces: false
+    store_embeddings: true
+    encrypt_embeddings: false
+    max_identity_history_days: 30

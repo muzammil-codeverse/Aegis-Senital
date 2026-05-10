@@ -1,7 +1,8 @@
+import json
 import os
 import tempfile
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query, WebSocket, Request, Depends, Response
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, WebSocket, Request, Depends, Response
 from pydantic import BaseModel
 from app.api.object_authorization import (
     can_access_alert,
@@ -489,6 +490,7 @@ def system_liveness_api():
 @router.get("/health")
 def health_check():
     from app.services.video_service import _engine, _runtime_db, _identity_fusion
+    from app.services.identity_service import get_identity_service
     from inference.stream.stream_manager import get_stream_manager
 
     models_loaded = _engine is not None and getattr(_engine, "is_loaded", False)
@@ -506,6 +508,7 @@ def health_check():
             identity_status = _identity_fusion.get_status()
         except Exception as exc:
             logger.warning("Identity status check failed: %s", exc)
+    identity_health = get_identity_service().get_health()
 
     stream_health = get_stream_manager().health_summary()
     intelligence_health = get_intelligence_runtime().get_health()
@@ -514,6 +517,7 @@ def health_check():
         "status": "ok",
         "models_loaded": models_loaded,
         "db_connected": db_connected,
+        "identity": identity_health,
         "identity_fusion": identity_status,
         "metrics": get_metrics().snapshot(),
         "active_streams": stream_health["active_streams"],
@@ -1582,6 +1586,109 @@ def _wl_store():
     return get_watchlist_store()
 
 
+def _identity_service():
+    from app.services.identity_service import get_identity_service
+    return get_identity_service()
+
+
+@router.get("/api/identity/health")
+def get_identity_health_api(request: Request):
+    try:
+        return _filter_identity_response({"item": _identity_service().get_health(), "status": "ok"}, request)
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identity/registry")
+def list_global_identity_registry_api(
+    request: Request,
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    try:
+        items = _identity_service().list_global_identities(status=status, limit=limit)
+        return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.post("/api/identity/enroll")
+async def enroll_identity_api(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    identity_id: Optional[str] = Form(default=None),
+    display_name: Optional[str] = Form(default=None),
+    metadata_json: Optional[str] = Form(default=None),
+):
+    try:
+        metadata = json.loads(metadata_json) if metadata_json else {}
+        images = []
+        for file in files:
+            images.append({"filename": file.filename, "data": await file.read()})
+        result = _identity_service().enroll(
+            images,
+            identity_id=identity_id,
+            display_name=display_name,
+            metadata=metadata,
+        )
+        _audit(
+            request,
+            AuditAction.FACE_ENROLLED,
+            resource_type="identity_enrollment",
+            resource_id=result.get("enrollment_id"),
+            metadata={
+                "identity_id": result.get("identity_id"),
+                "accepted_images": result.get("accepted_images", 0),
+                "rejected_images": result.get("rejected_images", 0),
+            },
+        )
+        return _filter_identity_response(result, request)
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identity/enrollments")
+def list_identity_enrollment_profiles_api(
+    request: Request,
+    identity_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    try:
+        items = _identity_service().list_enrollment_profiles(identity_id=identity_id, limit=limit)
+        return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identity/enrollments/{enrollment_id}")
+def get_identity_enrollment_profile_api(enrollment_id: str, request: Request):
+    try:
+        item = _identity_service().get_enrollment_profile(enrollment_id)
+        if item is None:
+            return {"item": None, "status": "not_found", "detail": f"Enrollment {enrollment_id} not found"}
+        return _filter_identity_response({"item": item, "status": "ok"}, request)
+    except Exception as exc:
+        return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.delete("/api/identity/enrollments/{enrollment_id}")
+def delete_identity_enrollment_profile_api(enrollment_id: str, request: Request):
+    try:
+        ok = _identity_service().delete_enrollment_profile(enrollment_id)
+        if not ok:
+            return {"status": "not_found", "detail": f"Enrollment {enrollment_id} not found"}
+        _audit(
+            request,
+            AuditAction.IDENTITY_UPDATED,
+            resource_type="identity_enrollment",
+            resource_id=enrollment_id,
+            detail="Enrollment profile deleted",
+        )
+        return {"status": "ok", "detail": "Enrollment deleted"}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc)}
+
+
 @router.get("/api/identities")
 def list_identities_api(
     request: Request,
@@ -1673,18 +1780,19 @@ async def enroll_face_api(
     display_name: Optional[str] = Query(default=None),
 ):
     try:
-        from app.services.face_enrollment_service import get_enrollment_service
-        service = get_enrollment_service()
         data = await file.read()
-        result = service.enroll_face(
+        result = _identity_service().enroll(
+            [{"filename": file.filename, "data": data}],
             identity_id=identity_id,
             display_name=display_name,
-            image_filename=file.filename,
-            image_data=data,
         )
-        if result.get("code") == 400:
-            raise HTTPException(status_code=400, detail=result.get("detail", "Bad request"))
-        _audit(request, AuditAction.FACE_ENROLLED, resource_type="identity", resource_id=identity_id)
+        _audit(
+            request,
+            AuditAction.FACE_ENROLLED,
+            resource_type="identity",
+            resource_id=identity_id,
+            metadata={"enrollment_id": result.get("enrollment_id")},
+        )
         return _filter_identity_response(result, request)
     except HTTPException:
         raise
@@ -1695,9 +1803,7 @@ async def enroll_face_api(
 @router.get("/api/identities/{identity_id}/enrollments")
 def list_identity_enrollments_api(identity_id: str, request: Request):
     try:
-        store = _id_store()
-        enrollments = store.list_face_enrollments(identity_id)
-        items = [e.to_public_dict() for e in enrollments]
+        items = _identity_service().list_face_enrollments(identity_id)
         return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}

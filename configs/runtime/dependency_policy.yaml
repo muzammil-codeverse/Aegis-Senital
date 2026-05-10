@@ -140,3 +140,36 @@ feature_dependencies:
     model_config: "configs/segmentation/sam2.yaml"
     development_behavior: "warn when segmentation is enabled and SAM2/checkpoint/config are missing"
     production_behavior: "fail when segmentation is enabled and SAM2/checkpoint/config are missing"
+
+  identity_face:
+    label: "Identity face provider"
+    modules:
+      - module: insightface
+        install_hint: "pip install insightface"
+      - module: onnxruntime
+        install_hint: "pip install onnxruntime-gpu"
+    config_path: "configs/runtime/identity.yaml"
+    enabled_path: "identity.face.enabled"
+    development_behavior: "warn when face identity is enabled and provider deps are missing unless fail_open=false"
+    production_behavior: "fail when face identity is enabled and provider deps are missing"
+
+  identity_reid:
+    label: "Identity ReID provider"
+    modules:
+      - module: torch
+        install_hint: "pip install torch --index-url https://download.pytorch.org/whl/cu124"
+      - module: torchreid.reid.utils
+        install_hint: "pip install torchreid"
+    config_path: "configs/runtime/identity.yaml"
+    enabled_path: "identity.reid.enabled"
+    development_behavior: "warn when ReID is enabled and deps are missing if fail_open=true"
+    production_behavior: "fail when ReID is enabled and deps are missing"
+
+  identity_liveness:
+    label: "Identity liveness provider"
+    modules: []
+    config_path: "configs/runtime/identity.yaml"
+    enabled_path: "identity.liveness.enabled"
+    provider_path: "identity.liveness.provider"
+    development_behavior: "warn when liveness is enabled because provider integration is pending"
+    production_behavior: "fail when liveness is enabled until a real provider is installed"

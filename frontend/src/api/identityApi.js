@@ -75,6 +75,22 @@ export async function enrollFace(identityId, file, metadata = {}) {
   }
 }
 
+export async function enrollIdentity(files, payload = {}) {
+  try {
+    const form = new FormData();
+    files.forEach((file) => form.append('files', file));
+    if (payload.identity_id) form.append('identity_id', payload.identity_id);
+    if (payload.display_name) form.append('display_name', payload.display_name);
+    if (payload.metadata) form.append('metadata_json', JSON.stringify(payload.metadata));
+    const res = await apiClient.post('/api/identity/enroll', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  } catch (e) {
+    return { status: 'error', detail: e.message };
+  }
+}
+
 export async function getIdentityEnrollments(identityId) {
   try {
     const res = await apiClient.get(`/api/identities/${identityId}/enrollments`);
@@ -92,6 +108,51 @@ export async function getIdentityMatches(identityId, limit = 100) {
     return normalizeListResponse(res.data);
   } catch (e) {
     return { items: [], count: 0, status: 'error' };
+  }
+}
+
+export async function getIdentityEnrollmentProfiles(params = {}) {
+  try {
+    const res = await apiClient.get('/api/identity/enrollments', { params });
+    return normalizeListResponse(res.data);
+  } catch (e) {
+    return { items: [], count: 0, status: 'error', detail: e.message };
+  }
+}
+
+export async function deleteIdentityEnrollmentProfile(enrollmentId) {
+  try {
+    const res = await apiClient.delete(`/api/identity/enrollments/${enrollmentId}`);
+    return res.data;
+  } catch (e) {
+    return { status: 'error', detail: e.message };
+  }
+}
+
+export async function getIdentityHealth() {
+  try {
+    const res = await apiClient.get('/api/identity/health');
+    return normalizeItemResponse(res.data);
+  } catch (e) {
+    return { item: null, status: 'error', detail: e.message };
+  }
+}
+
+export async function getIdentityRuntimeOverview() {
+  try {
+    const res = await apiClient.get('/health');
+    return { item: res.data, status: 'ok' };
+  } catch (e) {
+    return { item: null, status: 'error', detail: e.message };
+  }
+}
+
+export async function getGlobalIdentityRegistry(params = {}) {
+  try {
+    const res = await apiClient.get('/api/identity/registry', { params });
+    return normalizeListResponse(res.data);
+  } catch (e) {
+    return { items: [], count: 0, status: 'error', detail: e.message };
   }
 }
 

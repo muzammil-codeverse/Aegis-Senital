@@ -103,6 +103,11 @@ class FaceEnrollment:
         image_path: Optional[str] = None,
         embedding_vector_ref: Optional[str] = None,
         quality_score: Optional[float] = None,
+        status: str = "accepted",
+        rejection_reasons: Optional[List[str]] = None,
+        quality_metrics: Optional[Dict] = None,
+        source_breakdown: Optional[Dict[str, float]] = None,
+        batch_enrollment_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
     ) -> None:
         self.enrollment_id: str = str(uuid.uuid4())
@@ -110,6 +115,11 @@ class FaceEnrollment:
         self.image_path: Optional[str] = image_path
         self.embedding_vector_ref: Optional[str] = embedding_vector_ref
         self.quality_score: Optional[float] = quality_score
+        self.status: str = status
+        self.rejection_reasons: List[str] = rejection_reasons or []
+        self.quality_metrics: Dict = quality_metrics or {}
+        self.source_breakdown: Dict[str, float] = source_breakdown or {}
+        self.batch_enrollment_id: Optional[str] = batch_enrollment_id
         self.metadata: Dict = metadata or {}
         self.created_at: float = time.time()
 
@@ -121,6 +131,11 @@ class FaceEnrollment:
             "image_path": self.image_path,
             "embedding_vector_ref": self.embedding_vector_ref,
             "quality_score": self.quality_score,
+            "status": self.status,
+            "rejection_reasons": self.rejection_reasons,
+            "quality_metrics": self.quality_metrics,
+            "source_breakdown": self.source_breakdown,
+            "batch_enrollment_id": self.batch_enrollment_id,
             "metadata": self.metadata,
             "created_at": self.created_at,
         }
@@ -140,8 +155,86 @@ class FaceEnrollment:
         obj.image_path = d.get("image_path")
         obj.embedding_vector_ref = d.get("embedding_vector_ref")
         obj.quality_score = d.get("quality_score")
+        obj.status = d.get("status", "accepted")
+        obj.rejection_reasons = d.get("rejection_reasons", [])
+        obj.quality_metrics = d.get("quality_metrics", {})
+        obj.source_breakdown = d.get("source_breakdown", {})
+        obj.batch_enrollment_id = d.get("batch_enrollment_id")
         obj.metadata = d.get("metadata", {})
         obj.created_at = d.get("created_at", time.time())
+        return obj
+
+
+class IdentityEnrollmentProfile:
+    """Batch enrollment profile created from one or more submitted images."""
+
+    def __init__(
+        self,
+        identity_id: str,
+        enrollment_id: Optional[str] = None,
+        display_name: Optional[str] = None,
+        status: str = "completed",
+        total_images: int = 0,
+        accepted_images: int = 0,
+        rejected_images: int = 0,
+        aggregate_method: str = "mean",
+        aggregate_embedding_ref: Optional[str] = None,
+        quality_summary: Optional[Dict] = None,
+        metadata: Optional[Dict] = None,
+    ) -> None:
+        now = time.time()
+        self.enrollment_id: str = enrollment_id or str(uuid.uuid4())
+        self.identity_id: str = identity_id
+        self.display_name: Optional[str] = display_name
+        self.status: str = status
+        self.total_images: int = total_images
+        self.accepted_images: int = accepted_images
+        self.rejected_images: int = rejected_images
+        self.aggregate_method: str = aggregate_method
+        self.aggregate_embedding_ref: Optional[str] = aggregate_embedding_ref
+        self.quality_summary: Dict = quality_summary or {}
+        self.metadata: Dict = metadata or {}
+        self.created_at: float = now
+        self.updated_at: float = now
+
+    def to_dict(self) -> dict:
+        return {
+            "enrollment_id": self.enrollment_id,
+            "identity_id": self.identity_id,
+            "display_name": self.display_name,
+            "status": self.status,
+            "total_images": self.total_images,
+            "accepted_images": self.accepted_images,
+            "rejected_images": self.rejected_images,
+            "aggregate_method": self.aggregate_method,
+            "aggregate_embedding_ref": self.aggregate_embedding_ref,
+            "quality_summary": self.quality_summary,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    def to_public_dict(self) -> dict:
+        data = self.to_dict()
+        data.pop("aggregate_embedding_ref", None)
+        return data
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "IdentityEnrollmentProfile":
+        obj = cls.__new__(cls)
+        obj.enrollment_id = d["enrollment_id"]
+        obj.identity_id = d["identity_id"]
+        obj.display_name = d.get("display_name")
+        obj.status = d.get("status", "completed")
+        obj.total_images = int(d.get("total_images", 0))
+        obj.accepted_images = int(d.get("accepted_images", 0))
+        obj.rejected_images = int(d.get("rejected_images", 0))
+        obj.aggregate_method = d.get("aggregate_method", "mean")
+        obj.aggregate_embedding_ref = d.get("aggregate_embedding_ref")
+        obj.quality_summary = d.get("quality_summary", {})
+        obj.metadata = d.get("metadata", {})
+        obj.created_at = d.get("created_at", time.time())
+        obj.updated_at = d.get("updated_at", obj.created_at)
         return obj
 
 
@@ -209,6 +302,10 @@ class IdentityMatchRecord:
         track_id: Optional[int] = None,
         confidence: float = 0.0,
         source: str = "face",
+        source_breakdown: Optional[Dict[str, float]] = None,
+        quality_score: Optional[float] = None,
+        operator_review_required: bool = True,
+        match_type: str = "possible_identity_match",
         metadata: Optional[Dict] = None,
     ) -> None:
         self.match_id: str = str(uuid.uuid4())
@@ -218,6 +315,10 @@ class IdentityMatchRecord:
         self.confidence: float = confidence
         self.matched_at: float = time.time()
         self.source: str = source
+        self.source_breakdown: Dict[str, float] = source_breakdown or {}
+        self.quality_score: Optional[float] = quality_score
+        self.operator_review_required: bool = operator_review_required
+        self.match_type: str = match_type
         self.metadata: Dict = metadata or {}
 
     def to_dict(self) -> dict:
@@ -229,6 +330,10 @@ class IdentityMatchRecord:
             "confidence": self.confidence,
             "matched_at": self.matched_at,
             "source": self.source,
+            "source_breakdown": self.source_breakdown,
+            "quality_score": self.quality_score,
+            "operator_review_required": self.operator_review_required,
+            "match_type": self.match_type,
             "metadata": self.metadata,
         }
 
@@ -242,5 +347,9 @@ class IdentityMatchRecord:
         obj.confidence = d.get("confidence", 0.0)
         obj.matched_at = d.get("matched_at", time.time())
         obj.source = d.get("source", "face")
+        obj.source_breakdown = d.get("source_breakdown", {})
+        obj.quality_score = d.get("quality_score")
+        obj.operator_review_required = bool(d.get("operator_review_required", True))
+        obj.match_type = d.get("match_type", "possible_identity_match")
         obj.metadata = d.get("metadata", {})
         return obj

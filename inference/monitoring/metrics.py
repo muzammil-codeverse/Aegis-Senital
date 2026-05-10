@@ -77,6 +77,15 @@ class SystemMetrics:
         self.identities_registered: int = 0
         self.face_enrollments_created: int = 0
         self.identity_matches_recorded: int = 0
+        self.identity_face_detections_total: int = 0
+        self.identity_face_quality_rejected_total: int = 0
+        self.identity_embeddings_created_total: int = 0
+        self.identity_matches_total: int = 0
+        self.identity_unknowns_total: int = 0
+        self.identity_false_merge_warnings_total: int = 0
+        self.identity_reid_matches_total: int = 0
+        self.identity_fusion_latency_ms: float = 0.0
+        self.identity_registry_active_count: int = 0
         self.watchlist_entries_active: int = 0
         self.watchlist_hits: int = 0
         self.watchlist_alerts_created: int = 0
@@ -339,6 +348,15 @@ class SystemMetrics:
                 "object_authz_denied": self.object_authz_denied,
                 "mfa_challenges_created": self.mfa_challenges_created,
                 "mfa_challenges_failed": self.mfa_challenges_failed,
+                "identity_face_detections_total": self.identity_face_detections_total,
+                "identity_face_quality_rejected_total": self.identity_face_quality_rejected_total,
+                "identity_embeddings_created_total": self.identity_embeddings_created_total,
+                "identity_matches_total": self.identity_matches_total,
+                "identity_unknowns_total": self.identity_unknowns_total,
+                "identity_false_merge_warnings_total": self.identity_false_merge_warnings_total,
+                "identity_reid_matches_total": self.identity_reid_matches_total,
+                "identity_fusion_latency_ms": self.identity_fusion_latency_ms,
+                "identity_registry_active_count": self.identity_registry_active_count,
                 # Phase 23 — open-vocabulary threat scanner metrics
                 "open_vocab_scans_requested": self.open_vocab_scans_requested,
                 "open_vocab_scans_completed": self.open_vocab_scans_completed,

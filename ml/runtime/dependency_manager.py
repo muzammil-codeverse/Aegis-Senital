@@ -17,7 +17,7 @@ REQUIRED_DEPENDENCIES = {
     "database": "psycopg2 + sqlalchemy + asyncpg",
 }
 OPTIONAL_DEPENDENCIES = {
-    "face_recognition": "insightface",
+    "face_recognition": "insightface + onnxruntime",
     "reid_model": "osnet (torchreid)",
     "segmentation": "SAM2",
 }
@@ -30,6 +30,10 @@ _REGISTRY_PATH = _PROJECT_ROOT / "models" / "registry.json"
 _REQUIRED_MODEL_TYPES = ("weapon", "phone")
 
 
+def _profile(profile: str | None = None) -> str:
+    return (profile or os.environ.get("APP_ENV") or "development").lower()
+
+
 def _validate_import(module_name: str, label: str, missing: list[str]) -> None:
     try:
         importlib.import_module(module_name)
@@ -37,12 +41,119 @@ def _validate_import(module_name: str, label: str, missing: list[str]) -> None:
         missing.append(label)
 
 
-def validate_dependencies() -> None:
+def _load_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _load_identity_cfg() -> dict[str, Any]:
+    payload = _load_yaml(_PROJECT_ROOT / "configs" / "runtime" / "identity.yaml")
+    root = payload.get("identity", payload)
+    return root if isinstance(root, dict) else {}
+
+
+def get_identity_dependency_status(
+    profile: str | None = None,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_profile = _profile(profile)
+    identity_cfg = (config or _load_identity_cfg()) or {}
+    fail_open = bool(identity_cfg.get("fail_open", True))
+
+    def _module_status(enabled: bool, modules: list[str], label: str) -> dict[str, Any]:
+        errors = []
+        available = True
+        for module in modules:
+            try:
+                importlib.import_module(module)
+            except Exception as exc:
+                available = False
+                errors.append(f"{module}: {exc}")
+        return {
+            "enabled": enabled,
+            "available": available if enabled else True,
+            "required": enabled and (resolved_profile == "production" or not fail_open),
+            "label": label,
+            "errors": errors,
+        }
+
+    face_enabled = bool(identity_cfg.get("face", {}).get("enabled", False))
+    reid_enabled = bool(identity_cfg.get("reid", {}).get("enabled", False))
+    liveness_enabled = bool(identity_cfg.get("liveness", {}).get("enabled", False))
+    liveness_provider = str(identity_cfg.get("liveness", {}).get("provider", "pending"))
+
+    face = _module_status(face_enabled, ["insightface", "onnxruntime"], "identity.face")
+    if face_enabled and face["available"]:
+        try:
+            face_model = ModelRouter().get_model("face")
+            face["model_path"] = face_model.get("resolved_path")
+        except Exception as exc:
+            face["available"] = False
+            face["errors"].append(f"face model bundle: {exc}")
+    reid = _module_status(reid_enabled, ["torch", "torchreid.reid.utils"], "identity.reid")
+    liveness = {
+        "enabled": liveness_enabled,
+        "available": not liveness_enabled,
+        "required": liveness_enabled and resolved_profile == "production",
+        "label": "identity.liveness",
+        "errors": [] if not liveness_enabled else [f"provider '{liveness_provider}' not integrated"],
+        "provider": liveness_provider,
+    }
+
+    failures = []
+    warnings = []
+    for item in (face, reid, liveness):
+        if not item["enabled"]:
+            continue
+        if item["available"]:
+            continue
+        if item["required"]:
+            failures.append(f"{item['label']}: {', '.join(item['errors'])}")
+        else:
+            warnings.append(f"{item['label']}: {', '.join(item['errors'])}")
+
+    if failures:
+        overall = "failed"
+    elif warnings:
+        overall = "degraded"
+    elif not any((face_enabled, reid_enabled, liveness_enabled)):
+        overall = "disabled"
+    else:
+        overall = "healthy"
+
+    return {
+        "profile": resolved_profile,
+        "fail_open": fail_open,
+        "face": face,
+        "reid": reid,
+        "liveness": liveness,
+        "status": overall,
+        "failures": failures,
+        "warnings": warnings,
+    }
+
+
+def validate_identity_dependencies(profile: str | None = None) -> dict[str, Any]:
+    status = get_identity_dependency_status(profile=profile)
+    logger = logging.getLogger(__name__)
+    for warning in status["warnings"]:
+        logger.warning("Identity runtime degraded: %s", warning)
+    if status["failures"]:
+        raise RuntimeError(
+            "[CRITICAL FAILURE] Identity dependencies unavailable: "
+            + "; ".join(status["failures"])
+        )
+    return status
+
+
+def validate_dependencies(profile: str | None = None) -> None:
     missing: list[str] = []
     missing_optional: list[str] = []
 
-    _validate_import("insightface", "insightface", missing_optional)
-    _validate_import("torchreid.reid.utils", "osnet (torchreid)", missing_optional)
     _validate_import("faiss", "faiss", missing)
     _validate_import("psycopg2", "postgres drivers", missing)
     _validate_import("sqlalchemy", "sqlalchemy", missing)
@@ -51,20 +162,29 @@ def validate_dependencies() -> None:
     _validate_import("torchvision", "torchvision", missing)
     _validate_import("ultralytics", "ultralytics", missing)
     _validate_import("cv2", "opencv-python", missing)
-    validate_segmentation_dependencies()
+
+    _validate_import("insightface", "insightface", missing_optional)
+    _validate_import("onnxruntime", "onnxruntime", missing_optional)
+    _validate_import("torchreid.reid.utils", "osnet (torchreid)", missing_optional)
+    validate_segmentation_dependencies(profile=profile)
+    validate_identity_dependencies(profile=profile)
 
     if missing_optional:
         logging.getLogger(__name__).warning(
-            "Optional dependencies unavailable; related features will run degraded: %s",
+            "Optional dependencies unavailable; related features may run degraded: %s",
             missing_optional,
+        )
+    if missing:
+        raise RuntimeError(
+            f"[CRITICAL FAILURE] Missing dependencies: {missing}. System cannot start."
         )
 
 
 def validate_segmentation_dependencies(profile: str | None = None) -> None:
-    profile = (profile or os.environ.get("APP_ENV") or "development").lower()
+    resolved_profile = _profile(profile)
     config_path = _PROJECT_ROOT / "configs" / "runtime" / "segmentation.yaml"
     if not config_path.exists():
-        if profile == "production":
+        if resolved_profile == "production":
             raise RuntimeError(
                 f"[CRITICAL FAILURE] Segmentation config missing in production: {config_path}"
             )
@@ -74,22 +194,13 @@ def validate_segmentation_dependencies(profile: str | None = None) -> None:
         )
         return
 
-    try:
-        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    except Exception as exc:
-        if profile == "production":
-            raise RuntimeError(
-                f"[CRITICAL FAILURE] Segmentation config unreadable: {config_path}. Error: {exc}"
-            ) from exc
-        logging.getLogger(__name__).warning("Segmentation config unreadable: %s", exc)
-        return
-
+    cfg = _load_yaml(config_path)
     seg = cfg.get("segmentation", cfg)
     if not isinstance(seg, dict) or not bool(seg.get("enabled", False)):
         return
     if str(seg.get("provider", "sam2")).lower() != "sam2":
         message = f"Unsupported segmentation provider: {seg.get('provider')}"
-        if profile == "production":
+        if resolved_profile == "production":
             raise RuntimeError(f"[CRITICAL FAILURE] {message}")
         logging.getLogger(__name__).warning(message)
         return
@@ -114,27 +225,19 @@ def validate_segmentation_dependencies(profile: str | None = None) -> None:
         "Segmentation is enabled but SAM2 dependencies/assets are unavailable: "
         f"{missing}"
     )
-    if profile == "production":
+    if resolved_profile == "production":
         raise RuntimeError(
             f"[CRITICAL FAILURE] {message}. Install SAM2/checkpoint/config or disable segmentation."
         )
     logging.getLogger(__name__).warning("%s Runtime will degrade loudly.", message)
 
-    if missing:
-        raise RuntimeError(
-            f"[CRITICAL FAILURE] Missing dependencies: {missing}. "
-            "System cannot start in fallback mode."
-        )
-
 
 def validate_cuda_availability() -> None:
-    import logging
     from ml.runtime.device_manager import is_cuda_available
 
     if not is_cuda_available():
         logging.getLogger(__name__).warning(
-            "CUDA not available — inference will run on CPU. "
-            "Performance will be significantly degraded."
+            "CUDA not available - inference will run on CPU. Performance will be degraded."
         )
 
 
@@ -217,6 +320,7 @@ def system_boot_check() -> None:
         try:
             from inference.config_runtime import load_runtime_config
             from ml.runtime.device_manager import require_cuda_if_configured
+
             require_cuda_if_configured(load_runtime_config("runtime_health"))
         except FileNotFoundError:
             pass

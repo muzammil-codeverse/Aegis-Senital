@@ -6,12 +6,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
 import faiss  # type: ignore
+import numpy as np
 
 logger = logging.getLogger(__name__)
-
-_REBUILD_THRESHOLD = 50  # lazy full-rebuild after this many in-place updates
 
 
 def _now_iso() -> str:
@@ -38,13 +36,8 @@ class VectorStore:
     """
     Identity embedding store with FAISS search.
 
-    Upsert strategy:
-      NEW identity  → O(1) incremental index.add()
-      UPDATE        → update in-memory record; defer full index rebuild until
-                      _REBUILD_THRESHOLD cumulative updates have accumulated.
-
-    This eliminates the O(n) full rebuild that previously ran on every
-    upsert call, reducing write cost from O(n) to amortised O(1).
+    Face and appearance embeddings are tracked independently so face-only
+    enrollment can be stored before person ReID embeddings are available.
     """
 
     def __init__(self, dim: int = 512) -> None:
@@ -56,7 +49,6 @@ class VectorStore:
             "appearance": faiss.IndexFlatIP(dim),
         }
         self._id_order: dict[str, list[str]] = {"face": [], "appearance": []}
-        self._dirty_count: dict[str, int] = {"face": 0, "appearance": 0}
 
     @property
     def dim(self) -> int:
@@ -70,38 +62,27 @@ class VectorStore:
         appearance_embedding: list[float] | np.ndarray | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if face_embedding is None or appearance_embedding is None:
-            raise RuntimeError("Vector DB required - identity system cannot persist incomplete embeddings.")
+        if face_embedding is None and appearance_embedding is None:
+            raise RuntimeError("Vector DB requires at least one embedding vector.")
         with self._lock:
-            is_new = identity_id not in self._records
             record = self._records.setdefault(
                 identity_id,
                 {
                     "identity_id": identity_id,
-                    "face_embedding": _normalize_embedding(face_embedding, self._dim),
-                    "appearance_embedding": _normalize_embedding(appearance_embedding, self._dim),
+                    "face_embedding": None,
+                    "appearance_embedding": None,
                     "metadata": {},
                     "updated_at": _now_iso(),
                 },
             )
-            record["face_embedding"] = _normalize_embedding(face_embedding, self._dim)
-            record["appearance_embedding"] = _normalize_embedding(appearance_embedding, self._dim)
+            if face_embedding is not None:
+                record["face_embedding"] = _normalize_embedding(face_embedding, self._dim)
+            if appearance_embedding is not None:
+                record["appearance_embedding"] = _normalize_embedding(appearance_embedding, self._dim)
             if metadata:
                 record["metadata"].update(metadata)
             record["updated_at"] = _now_iso()
-
-            if is_new:
-                # Incremental O(1) add for brand-new identities (the common path)
-                for modality, key in (("face", "face_embedding"), ("appearance", "appearance_embedding")):
-                    vec = record[key].reshape(1, -1).astype(np.float32)
-                    self._indices[modality].add(vec)
-                    self._id_order[modality].append(identity_id)
-            else:
-                # Existing identity: update in-memory record and defer index rebuild
-                self._dirty_count["face"] += 1
-                self._dirty_count["appearance"] += 1
-                if self._dirty_count["face"] >= _REBUILD_THRESHOLD:
-                    self._full_rebuild_locked()
+            self._full_rebuild_locked()
 
     def get_identity(self, identity_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -148,13 +129,12 @@ class VectorStore:
             return [self._serialise_record(record) for record in self._records.values()]
 
     def _full_rebuild_locked(self) -> None:
-        """Full index rebuild — called lazily after _REBUILD_THRESHOLD in-place updates."""
         for modality in ("face", "appearance"):
             rows: list[np.ndarray] = []
             order: list[str] = []
             for identity_id, record in self._records.items():
                 vector = record[f"{modality}_embedding"]
-                if float(np.linalg.norm(vector)) == 0.0:
+                if vector is None or float(np.linalg.norm(vector)) == 0.0:
                     continue
                 rows.append(vector)
                 order.append(identity_id)
@@ -163,14 +143,19 @@ class VectorStore:
             if rows:
                 index.add(np.vstack(rows).astype(np.float32))
             self._indices[modality] = index
-        self._dirty_count = {"face": 0, "appearance": 0}
         logger.debug("VectorStore: full index rebuild completed (%d identities).", len(self._records))
 
     def _serialise_record(self, record: dict[str, Any]) -> dict[str, Any]:
         return {
             "identity_id": record["identity_id"],
-            "face_embedding": record["face_embedding"].astype(float).tolist(),
-            "appearance_embedding": record["appearance_embedding"].astype(float).tolist(),
+            "face_embedding": (
+                record["face_embedding"].astype(float).tolist()
+                if record["face_embedding"] is not None else []
+            ),
+            "appearance_embedding": (
+                record["appearance_embedding"].astype(float).tolist()
+                if record["appearance_embedding"] is not None else []
+            ),
             "metadata": deepcopy(record["metadata"]),
             "updated_at": record["updated_at"],
         }
