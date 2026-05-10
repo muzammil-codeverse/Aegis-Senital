@@ -21,6 +21,11 @@ build/
 !.env.example
 !.env.docker.example
 
+# Kaggle secrets — never commit tokens
+.kaggle/
+kaggle.json
+access_token
+
 # Node
 node_modules/
 dist/

@@ -263,6 +263,14 @@ class StreamProcessor:
         self._cb_event_times: deque[float] = deque(maxlen=2000)
         self._recent_pipeline_ms: deque[float] = deque(maxlen=20)
 
+        # ── Phase 28: anomaly service (fail-open) ────────────────────────────
+        try:
+            from inference.anomaly.anomaly_service import get_anomaly_service
+            self._anomaly_service = get_anomaly_service()
+        except Exception as _exc:
+            logger.warning("Phase 28 anomaly service unavailable: %s", _exc)
+            self._anomaly_service = None
+
         # ── per-stream metrics ────────────────────────────────────────────────
         register_stream(stream_id)
 
@@ -589,6 +597,29 @@ class StreamProcessor:
             frame_id=packet.frame_id,
             timestamp=ts_float,
         )
+
+        # Stage 3a-28: Phase 28 deep anomaly service (fail-open)
+        p28_anomalies: list = []
+        if self._anomaly_service is not None:
+            try:
+                det_dicts = [d.to_dict() for d in packet.detections]
+                trk_dicts = [t.to_dict() for t in packet.tracks]
+                seg = packet.metadata.get("segmentation")
+                p28_anomalies = self._anomaly_service.add_frame(
+                    camera_id=packet.camera_id,
+                    frame_id=packet.frame_id,
+                    timestamp=ts_float,
+                    detections=det_dicts,
+                    tracks=trk_dicts,
+                    segmentation=seg,
+                )
+                if p28_anomalies:
+                    packet.metadata["anomaly_events"] = [a.to_dict() for a in p28_anomalies]
+                    from core.event_bus import EventType
+                    for ap in p28_anomalies:
+                        get_event_bus().publish(EventType.ANOMALY_EVENT, ap.to_dict(), source=packet.camera_id, priority=3)
+            except Exception as _p28_exc:
+                logger.debug("Phase 28 anomaly frame error: %s", _p28_exc)
 
         # Stage 3b: context annotation — suppressed when pipeline is over budget
         if not self._skip_context_next:

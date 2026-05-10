@@ -1,0 +1,7 @@
+violence_detection_cctv:
+  workspace: "computer-vision-ueifa"
+  project: "violence-detection-through-cctv"
+  version: null
+  format: "yolov8"
+  raw_dir: "datasets/raw/anomaly/violence-detection-through-cctv"
+  role: "violence_fight_visual_detector"

@@ -103,6 +103,32 @@ profiles:
     required_if_env: []
 
 feature_dependencies:
+  anomaly_video_model:
+    label: "Video anomaly model (pretrained)"
+    modules:
+      - module: torch
+        install_hint: "pip install torch --index-url https://download.pytorch.org/whl/cu124"
+      - module: torchvision
+        install_hint: "pip install torchvision --index-url https://download.pytorch.org/whl/cu124"
+      - module: transformers
+        install_hint: "pip install transformers"
+    config_path: "configs/runtime/anomaly.yaml"
+    enabled_path: "anomaly.video_model.enabled"
+    development_behavior: "warn when anomaly video model is enabled and deps/weights are missing"
+    production_behavior: "fail when anomaly video model is enabled and deps/weights are missing"
+
+  anomaly_clip_decoding:
+    label: "Video clip decoding for anomaly"
+    modules:
+      - module: decord
+        install_hint: "pip install decord"
+      - module: av
+        install_hint: "pip install av"
+    config_path: "configs/runtime/anomaly.yaml"
+    enabled_path: "anomaly.video_model.enabled"
+    development_behavior: "warn when clip decoding deps are missing"
+    production_behavior: "fail when anomaly video model is enabled and clip decoding deps are missing"
+
   segmentation:
     label: "SAM2 segmentation"
     module: sam2

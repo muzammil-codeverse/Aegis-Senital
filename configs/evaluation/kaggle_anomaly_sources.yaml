@@ -1,0 +1,36 @@
+ucf_crime:
+  kaggle_slug: "odins0n/ucf-crime-dataset"
+  fallback_slug: "bypktt/ucf-crimes"
+  raw_dir: "datasets/raw/anomaly/ucf_crime"
+  zip_dir: "datasets/raw/anomaly/kaggle_zips"
+  role: "broad_surveillance_anomaly"
+  required: true
+
+xd_violence:
+  kaggle_slug: "bypktt/xd-violence"
+  fallback_slug: "nguhaduong/xd-violence-video-dataset"
+  raw_dir: "datasets/raw/anomaly/xd_violence"
+  zip_dir: "datasets/raw/anomaly/kaggle_zips"
+  role: "violence_anomaly"
+  required: true
+
+shanghaitech:
+  kaggle_slug: "ravikagglex/shanghaitech-anomaly-detection"
+  raw_dir: "datasets/raw/anomaly/shanghaitech"
+  zip_dir: "datasets/raw/anomaly/kaggle_zips"
+  role: "campus_scene_anomaly"
+  required: false
+
+avenue:
+  kaggle_slug: "vibhavvasudevan/avenue"
+  raw_dir: "datasets/raw/anomaly/avenue"
+  zip_dir: "datasets/raw/anomaly/kaggle_zips"
+  role: "pedestrian_anomaly"
+  required: false
+
+ucsd:
+  kaggle_slug: "orvile/ucsd-anomaly-dataset"
+  raw_dir: "datasets/raw/anomaly/ucsd"
+  zip_dir: "datasets/raw/anomaly/kaggle_zips"
+  role: "pedestrian_anomaly"
+  required: false

@@ -1,0 +1,67 @@
+anomaly:
+  enabled: true
+  fail_open: true
+  device: "cuda"
+  temporal_window_seconds: 5
+  frame_sample_rate: 5
+  max_tracks_per_window: 100
+
+  fusion:
+    weights:
+      rule_engine: 0.40
+      video_model: 0.40
+      object_context: 0.20
+    thresholds:
+      low: 0.30
+      medium: 0.50
+      high: 0.70
+      critical: 0.85
+
+  loitering:
+    enabled: true
+    min_duration_seconds: 30
+    min_track_confidence: 0.55
+
+  restricted_zone:
+    enabled: true
+    min_overlap_ratio: 0.20
+    min_duration_seconds: 1.0
+
+  abandoned_object:
+    enabled: true
+    stationary_seconds: 45
+    owner_distance_threshold_px: 120
+    object_classes:
+      - bag
+      - backpack
+      - suitcase
+      - package
+
+  panic_running:
+    enabled: true
+    speed_zscore_threshold: 2.5
+    min_tracks: 2
+    temporal_window_seconds: 5
+
+  crowd_anomaly:
+    enabled: true
+    density_zscore_threshold: 2.5
+    min_person_count: 8
+
+  violence:
+    enabled: true
+    require_temporal_confirmation: true
+    min_duration_seconds: 2.0
+
+  video_model:
+    enabled: false
+    provider: "pretrained_adapter"
+    model_path: "models/anomaly/current.pt"
+    fail_if_missing_in_production: true
+
+  acceptance_policy:
+    min_auc: 0.90
+    min_macro_f1: 0.87
+    min_high_risk_recall: 0.90
+    max_false_alarms_per_hour: 3
+    max_p95_latency_ms: 120

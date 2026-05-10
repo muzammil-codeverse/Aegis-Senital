@@ -137,6 +137,15 @@ class SystemMetrics:
         self.segmentation_skipped_total: int = 0
         self.segmentation_latency_ms: float = 0.0
         self.segmentation_masks_generated_total: int = 0
+        # Phase 28 — deep video anomaly detection metrics
+        self.anomaly_windows_processed_total: int = 0
+        self.anomaly_events_generated_total: int = 0
+        self.anomaly_model_latency_ms: float = 0.0
+        self.anomaly_rule_engine_latency_ms: float = 0.0
+        self.anomaly_score_last: float = 0.0
+        self.anomaly_temporal_buffer_size: int = 0
+        self.anomaly_dropped_windows_total: int = 0
+        self.anomaly_false_alarm_feedback_total: int = 0
         self.segmentation_mask_area_ratio: float = 0.0
         self.segmentation_provider_unavailable_total: int = 0
 
