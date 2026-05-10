@@ -13,7 +13,6 @@ from app.models.osint_models import (
 )
 from app.models.security_models import UserAccount
 from app.services.audit_log_service import get_audit_log_service
-from app.services.osint_service import get_osint_service
 
 router = APIRouter()
 
@@ -33,8 +32,18 @@ def _audit(request: Request, current_user: UserAccount, action: str, case_id: st
         pass
 
 
+def get_osint_service():
+    from app.services.osint_service import get_osint_service as _service_getter
+
+    return _service_getter()
+
+
+def _get_osint_service():
+    return get_osint_service()
+
+
 def _require_case_source(case_id: str, source_id: str):
-    source = get_osint_service().get_source(source_id)
+    source = _get_osint_service().get_source(source_id)
     if source is None or source.case_id != case_id:
         raise HTTPException(status_code=404, detail=f"Enrichment source '{source_id}' not found for case '{case_id}'")
     return source
@@ -60,7 +69,7 @@ def create_enrichment_source_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
-    service = get_osint_service()
+    service = _get_osint_service()
     try:
         item = service.create_source(case_id, body, actor=current_user.username)
     except KeyError:
@@ -78,7 +87,7 @@ def list_enrichment_sources_api(
     case_id: str,
     current_user: UserAccount = Depends(require_api_permission("osint:read")),
 ):
-    service = get_osint_service()
+    service = _get_osint_service()
     try:
         items = service.list_sources(case_id)
     except KeyError:
@@ -108,7 +117,7 @@ def update_enrichment_source_api(
     _require_case_source(case_id, source_id)
     updates = {key: value for key, value in body.model_dump(exclude_none=True, mode="json").items() if key not in {"source_id", "case_id"}}
     try:
-        item = get_osint_service().update_source(source_id, updates, actor=current_user.username)
+        item = _get_osint_service().update_source(source_id, updates, actor=current_user.username)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Enrichment source '{source_id}' not found")
     except ValueError as exc:
@@ -125,7 +134,7 @@ def delete_enrichment_source_api(
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
     _require_case_source(case_id, source_id)
-    deleted = get_osint_service().delete_source(source_id, actor=current_user.username)
+    deleted = _get_osint_service().delete_source(source_id, actor=current_user.username)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Enrichment source '{source_id}' not found")
     _audit(request, current_user, "osint_source_deleted", case_id, {"source_id": source_id})
@@ -144,7 +153,7 @@ async def upload_enrichment_document_api(
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
     content = await file.read()
-    service = get_osint_service()
+    service = _get_osint_service()
     try:
         source, upload = service.create_uploaded_source(
             case_id=case_id,
@@ -175,7 +184,7 @@ def add_enrichment_link_api(
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
     payload = body.model_copy(update={"source_type": "external_link"})
-    service = get_osint_service()
+    service = _get_osint_service()
     try:
         item = service.create_source(case_id, payload, actor=current_user.username)
     except KeyError:
@@ -195,7 +204,7 @@ def summarize_enrichment_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:summarize")),
 ):
-    service = get_osint_service()
+    service = _get_osint_service()
     try:
         item = service.summarize(
             case_id,
@@ -219,7 +228,7 @@ def list_enrichment_summaries_api(
     case_id: str,
     current_user: UserAccount = Depends(require_api_permission("osint:read")),
 ):
-    service = get_osint_service()
+    service = _get_osint_service()
     try:
         items = service.list_summaries(case_id)
     except KeyError:

@@ -81,6 +81,38 @@ class StreamSessionManager:
         except Exception as exc:
             return {"status": "failed", "loaded": False, "error": str(exc)}
 
+    def _get_processor(self, camera_id: str):
+        session = self._get_or_create(camera_id)
+        stream_id = session.stream_id or f"cam_{camera_id}"
+        try:
+            from inference.stream.stream_manager import get_stream_manager
+
+            processor = get_stream_manager().get_stream(stream_id)
+            if processor is not None:
+                return processor
+        except Exception:
+            pass
+        try:
+            from inference.stream.stream_session_manager import get_runtime_stream_session_manager
+
+            return get_runtime_stream_session_manager().get_by_camera_id(camera_id)
+        except Exception:
+            return None
+
+    def _decorate_session(self, session: _SessionEntry) -> dict:
+        payload = session.to_dict()
+        processor = self._get_processor(session.camera_id)
+        if processor is not None:
+            try:
+                payload["health"] = processor.get_stream_health()
+            except Exception:
+                payload["health"] = None
+            try:
+                payload["stats"] = processor.get_stream_stats()
+            except Exception:
+                payload["stats"] = None
+        return payload
+
     def start_stream(self, camera_id: str) -> dict:
         session = self._get_or_create(camera_id)
         with self._lock:
@@ -205,12 +237,27 @@ class StreamSessionManager:
         return self.start_stream(camera_id)
 
     def get_stream_state(self, camera_id: str) -> dict:
-        return self._get_or_create(camera_id).to_dict()
+        return self._decorate_session(self._get_or_create(camera_id))
 
     def list_stream_states(self) -> list[dict]:
         with self._lock:
             sessions = list(self._sessions.values())
-        return [s.to_dict() for s in sessions]
+        return [self._decorate_session(s) for s in sessions]
+
+    def get_stream_health(self, camera_id: str) -> dict:
+        processor = self._get_processor(camera_id)
+        if processor is None:
+            return {"camera_id": camera_id, "status": "stopped"}
+        return processor.get_stream_health()
+
+    def get_stream_stats(self, camera_id: str) -> dict:
+        processor = self._get_processor(camera_id)
+        if processor is None:
+            return {"camera_id": camera_id, "status": "stopped"}
+        return processor.get_stream_stats()
+
+    def get_stream_processor(self, camera_id: str):
+        return self._get_processor(camera_id)
 
 
 _session_manager: StreamSessionManager | None = None

@@ -14,7 +14,6 @@ from app.models.case_models import (
 )
 from app.models.security_models import UserAccount
 from app.services.audit_log_service import get_audit_log_service
-from app.services.case_service import get_case_service
 
 router = APIRouter()
 
@@ -26,6 +25,16 @@ class CaseAssignRequest(BaseModel):
 
 class CaseTransitionRequest(BaseModel):
     reason: str = ""
+
+
+def get_case_service():
+    from app.services.case_service import get_case_service as _service_getter
+
+    return _service_getter()
+
+
+def _get_case_service():
+    return get_case_service()
 
 
 def _audit_write(request: Request, current_user: UserAccount | None, action: str, case_id: str, metadata: dict[str, Any] | None = None) -> None:
@@ -49,7 +58,7 @@ def create_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.create_case(body, actor=current_user.username)
     except RuntimeError as exc:
@@ -74,7 +83,7 @@ def list_cases_api(
     limit: int = Query(default=200, ge=1, le=1000),
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     items = service.list_cases(
         {
             "status": status,
@@ -100,7 +109,7 @@ def get_case_api(
     case_id: str,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     case = service.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
@@ -142,7 +151,7 @@ def update_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.update_case(case_id, body, actor=current_user.username)
     except KeyError:
@@ -161,7 +170,7 @@ def delete_or_archive_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.delete_or_archive_case(case_id, actor=current_user.username)
     except KeyError:
@@ -176,7 +185,7 @@ def create_case_from_event_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.create_case_from_event_id(event_id, actor=current_user.username)
     except KeyError:
@@ -196,7 +205,7 @@ def add_case_evidence_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         evidence = service.add_evidence(case_id, body, actor=current_user.username)
     except KeyError:
@@ -214,7 +223,7 @@ def list_case_evidence_api(
     case_id: str,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         items = service.list_evidence(case_id)
     except KeyError:
@@ -230,7 +239,7 @@ def add_case_note_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         note = service.add_note(case_id, body, actor=current_user.username)
     except KeyError:
@@ -246,7 +255,7 @@ def list_case_notes_api(
     case_id: str,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         items = service.list_notes(case_id)
     except KeyError:
@@ -262,7 +271,7 @@ def assign_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:assign")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.assign_case(case_id, body.assigned_to, actor=current_user.username, reason=body.reason)
     except KeyError:
@@ -278,7 +287,7 @@ def close_case_api(
     body: CaseTransitionRequest = Body(default_factory=CaseTransitionRequest),
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.close_case(case_id, actor=current_user.username, reason=body.reason)
     except KeyError:
@@ -296,7 +305,7 @@ def reopen_case_api(
     body: CaseTransitionRequest = Body(default_factory=CaseTransitionRequest),
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.reopen_case(case_id, actor=current_user.username, reason=body.reason)
     except KeyError:
@@ -314,7 +323,7 @@ def dismiss_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.dismiss_case(case_id, actor=current_user.username, reason=body.reason)
     except KeyError:
@@ -332,7 +341,7 @@ def archive_case_api(
     body: CaseTransitionRequest = Body(default_factory=CaseTransitionRequest),
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         case = service.archive_case(case_id, actor=current_user.username, reason=body.reason)
     except KeyError:
@@ -348,7 +357,7 @@ def get_case_timeline_api(
     case_id: str,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         items = service.get_timeline(case_id)
     except KeyError:
@@ -364,7 +373,7 @@ def export_case_api(
     format: str = Query(default="json"),
     current_user: UserAccount = Depends(require_api_permission("case:export")),
 ):
-    service = get_case_service()
+    service = _get_case_service()
     try:
         export = service.export_case(case_id, format=format, actor=current_user.username)
     except KeyError:

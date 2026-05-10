@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import EmptyState from '../common/EmptyState'
+import ReplayClipPanel from '../streaming/ReplayClipPanel'
 import { formatTimestamp } from '../../utils/time'
 
-export default function CaseEvidencePanel({ items = [], onAddEvidence, busy }) {
+export default function CaseEvidencePanel({ items = [], onAddEvidence, busy, caseId = null, defaultCameraId = null }) {
   const [form, setForm] = useState({
     evidence_type: 'external_link',
     title: '',
@@ -57,6 +58,11 @@ export default function CaseEvidencePanel({ items = [], onAddEvidence, busy }) {
         <input value={form.storage_uri} onChange={event => setForm(current => ({ ...current, storage_uri: event.target.value }))} placeholder="Reference URI" />
         <button type="submit" className="text-button" disabled={busy}>Attach</button>
       </form>
+      {caseId && defaultCameraId && (
+        <div style={{ marginTop: 12 }}>
+          <ReplayClipPanel cameraId={defaultCameraId} caseId={caseId} />
+        </div>
+      )}
     </section>
   )
 }

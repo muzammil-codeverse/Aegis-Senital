@@ -13,11 +13,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import router
 from app.api.security_dependencies import enforce_request_security
 from app.api.websocket_security import authenticate_websocket
-from app.models.database import init_db
-from app.services.video_service import bootstrap_inference_runtime
 from app.services.auth_service import get_auth_service
-from app.services.case_service import get_case_service
-from app.services.llm_service import get_llm_service
 from app.security.config import get_auth_config
 from app.core.logging_config import logger
 from inference.logging_setup import configure_logging
@@ -73,6 +69,11 @@ async def websocket_alerts(websocket: WebSocket):
 
 @app.on_event("startup")
 async def startup():
+    from app.models.database import init_db
+    from app.services.case_service import get_case_service
+    from app.services.llm_service import get_llm_service
+    from app.services.video_service import bootstrap_inference_runtime
+
     configure_logging()
     auth_cfg = get_auth_config()
     if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} and not bool(auth_cfg.get("cookie_secure", False)):

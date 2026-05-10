@@ -171,6 +171,20 @@ class SystemMetrics:
         self.case_auto_dedup_total: int = 0
         self.case_auto_create_failures_total: int = 0
         self.case_repository_latency_ms: float = 0.0
+        # Phase 33 - streaming transport metrics
+        self.stream_frames_decoded_total: int = 0
+        self.stream_frames_processed_total: int = 0
+        self.stream_frames_dropped_total: int = 0
+        self.stream_reconnect_attempts_total: int = 0
+        self.stream_offline_transitions_total: int = 0
+        self.stream_online_transitions_total: int = 0
+        self.stream_decode_latency_ms: float = 0.0
+        self.stream_processing_latency_ms: float = 0.0
+        self.stream_preview_clients_active: int = 0
+        self.stream_webrtc_sessions_total: int = 0
+        self.stream_hls_segments_written_total: int = 0
+        self.stream_replay_clips_created_total: int = 0
+        self.stream_queue_depth: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -422,6 +436,19 @@ class SystemMetrics:
                 "case_auto_dedup_total": self.case_auto_dedup_total,
                 "case_auto_create_failures_total": self.case_auto_create_failures_total,
                 "case_repository_latency_ms": self.case_repository_latency_ms,
+                "stream_frames_decoded_total": self.stream_frames_decoded_total,
+                "stream_frames_processed_total": self.stream_frames_processed_total,
+                "stream_frames_dropped_total": self.stream_frames_dropped_total,
+                "stream_reconnect_attempts_total": self.stream_reconnect_attempts_total,
+                "stream_offline_transitions_total": self.stream_offline_transitions_total,
+                "stream_online_transitions_total": self.stream_online_transitions_total,
+                "stream_decode_latency_ms": self.stream_decode_latency_ms,
+                "stream_processing_latency_ms": self.stream_processing_latency_ms,
+                "stream_preview_clients_active": self.stream_preview_clients_active,
+                "stream_webrtc_sessions_total": self.stream_webrtc_sessions_total,
+                "stream_hls_segments_written_total": self.stream_hls_segments_written_total,
+                "stream_replay_clips_created_total": self.stream_replay_clips_created_total,
+                "stream_queue_depth": self.stream_queue_depth,
             }
 
 

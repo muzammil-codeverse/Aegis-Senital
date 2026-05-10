@@ -1,0 +1,63 @@
+streaming:
+  enabled: true
+
+  ingest:
+    rtsp_enabled: true
+    file_enabled: true
+    webcam_enabled: true
+    reconnect:
+      enabled: true
+      max_attempts: 10
+      initial_backoff_seconds: 1
+      max_backoff_seconds: 30
+      jitter: true
+    read_timeout_seconds: 10
+    stale_frame_timeout_seconds: 5
+
+  processing:
+    target_fps: 15
+    max_decode_fps: 30
+    frame_queue_size: 120
+    drop_policy: "drop_oldest"
+    preserve_keyframes: true
+    timestamp_source: "camera_or_system"
+    max_clock_skew_ms: 500
+
+  preview:
+    webrtc_enabled: true
+    hls_enabled: true
+    jpeg_mjpeg_enabled: true
+
+  webrtc:
+    enabled: true
+    max_clients_per_camera: 5
+    target_latency_ms: 500
+    stun_servers:
+      - "stun:stun.l.google.com:19302"
+    turn_enabled: false
+
+  hls:
+    enabled: true
+    segment_seconds: 2
+    playlist_length: 6
+    output_dir: "storage/hls"
+    cleanup_old_segments: true
+    max_retention_minutes: 60
+
+  replay:
+    enabled: true
+    evidence_clip_seconds_before: 10
+    evidence_clip_seconds_after: 20
+    output_dir: "storage/replay"
+    include_sha256: false
+
+  health:
+    unhealthy_no_frame_seconds: 10
+    degraded_latency_ms: 500
+    failed_reconnect_threshold: 10
+
+  case_integration:
+    auto_attach_replay_for_high_risk: true
+    min_severity: "high"
+    clip_seconds_before: 10
+    clip_seconds_after: 20

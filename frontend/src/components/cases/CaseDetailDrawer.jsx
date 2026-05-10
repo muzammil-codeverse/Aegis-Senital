@@ -139,7 +139,13 @@ export default function CaseDetailDrawer({
             <h3>Timeline</h3>
             <CaseTimeline items={timeline} />
           </section>
-          <CaseEvidencePanel items={evidence} onAddEvidence={onAddEvidence} busy={busy} />
+          <CaseEvidencePanel
+            items={evidence}
+            onAddEvidence={onAddEvidence}
+            busy={busy}
+            caseId={caseItem.case_id}
+            defaultCameraId={caseItem.camera_ids?.[0] || evidence?.[0]?.camera_id || null}
+          />
           <CaseNotesPanel items={notes} onAddNote={onAddNote} busy={busy} />
           <CaseAssignmentPanel caseItem={caseItem} onAssign={onAssign} busy={busy} />
         </>

@@ -12,6 +12,7 @@ import OperationsMapPanel from './OperationsMapPanel'
 import SystemHealthPanel from './SystemHealthPanel'
 import TimelinePanel from './TimelinePanel'
 import IncidentReplayDrawer from '../incidents/IncidentReplayDrawer'
+import LiveStreamPanel from '../streaming/LiveStreamPanel'
 import EmptyState from '../common/EmptyState'
 import ErrorState from '../common/ErrorState'
 import LoadingState from '../common/LoadingState'
@@ -112,6 +113,10 @@ export default function CommandOverview({
               />
             )}
           </div>
+
+          {selectedCamera && (
+            <LiveStreamPanel camera={selectedCamera} />
+          )}
 
           {/* Operations map */}
           <OperationsMapPanel

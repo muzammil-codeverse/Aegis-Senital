@@ -13,6 +13,11 @@ from typing import List
 import cv2
 import numpy as np
 
+from app.services.rtsp_ingest_service import (
+    DecodedFramePacket,
+    RTSPIngestService,
+    load_streaming_runtime_config,
+)
 from core.event_bus import get_event_bus
 from core.runtime import get_runtime_supervisor
 from inference.context.context_engine import ContextEngine
@@ -211,6 +216,27 @@ class StreamProcessor:
 
         self.stream_id = stream_id
         self.source = source
+        self.camera_id = stream_id[4:] if stream_id.startswith("cam_") else stream_id
+        self.source_type = "rtsp" if str(source).lower().startswith("rtsp://") else (
+            "file" if str(source).lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v")) else "webcam"
+        )
+        self._streaming_config = load_streaming_runtime_config()
+        processing_cfg = self._streaming_config.get("streaming", {}).get("processing", {})
+        self._drop_policy = str(processing_cfg.get("drop_policy", "drop_oldest")).lower()
+        self._ingest_queue_maxsize = int(processing_cfg.get("frame_queue_size", _INGEST_QUEUE_MAXSIZE))
+        self._ingest_service = RTSPIngestService(
+            camera_id=self.camera_id,
+            source=source,
+            source_type=self.source_type,
+            config=self._streaming_config,
+        )
+        self._dropped_frames_total = 0
+        self._frames_processed_total = 0
+        self._last_processed_at: str | None = None
+        self._last_source_timestamp: str | None = None
+        self._last_pipeline_latency_ms: float = 0.0
+        self._preview_clients_active = 0
+        self._processed_frame_times: deque[float] = deque(maxlen=180)
 
         # ── per-stream inference components (isolated, no shared state) ───────
         self._engine = DetectionEngine(model_pool=model_pool)
@@ -231,7 +257,7 @@ class StreamProcessor:
         self._runtime_supervisor = get_runtime_supervisor()
 
         # ── 3-thread pipeline queues ──────────────────────────────────────────
-        self._ingest_queue: queue.Queue = queue.Queue(maxsize=_INGEST_QUEUE_MAXSIZE)
+        self._ingest_queue: queue.Queue = queue.Queue(maxsize=self._ingest_queue_maxsize)
         self._result_queue: queue.PriorityQueue = queue.PriorityQueue(
             maxsize=_RESULT_QUEUE_MAXSIZE
         )
@@ -325,6 +351,7 @@ class StreamProcessor:
         for thread in (self._ingest_thread, self._inference_thread, self._postproc_thread):
             if thread is not None:
                 thread.join(timeout=10.0)
+        self._ingest_service.close()
         self._status = "stopped"
         logger.info(
             json.dumps({
@@ -346,6 +373,7 @@ class StreamProcessor:
         sm = get_stream_metrics(self.stream_id)
         return {
             "stream_id": self.stream_id,
+            "camera_id": self.camera_id,
             "source": self.source,
             "status": self._status,
             "running": self.is_running,
@@ -355,7 +383,88 @@ class StreamProcessor:
             "ingest_queue_depth": self._ingest_queue.qsize(),
             "result_queue_depth": self._result_queue.qsize(),
             "metrics": sm.snapshot() if sm else {},
+            "health": self.get_stream_health(),
+            "stats": self.get_stream_stats(),
         }
+
+    def get_stream_health(self) -> dict:
+        ingest_snapshot = self._ingest_service.snapshot()
+        return {
+            "camera_id": self.camera_id,
+            "status": "stopped" if self._status == "stopped" else ingest_snapshot.get("status", self._status),
+            "source_type": self.source_type,
+            "last_frame_at": ingest_snapshot.get("last_frame_at"),
+            "fps_decode": float(ingest_snapshot.get("fps_decode", 0.0) or 0.0),
+            "fps_processed": self._fps_processed(),
+            "frame_queue_depth": self._ingest_queue.qsize(),
+            "dropped_frames_total": self._dropped_frames_total,
+            "reconnect_attempts": int(ingest_snapshot.get("reconnect_attempts", 0) or 0),
+            "latency_ms": round(max(self._last_pipeline_latency_ms, float(ingest_snapshot.get("latency_ms", 0.0) or 0.0)), 2),
+            "last_error": ingest_snapshot.get("last_error"),
+        }
+
+    def get_stream_stats(self) -> dict:
+        ingest_snapshot = self._ingest_service.snapshot()
+        return {
+            "camera_id": self.camera_id,
+            "stream_id": self.stream_id,
+            "source_type": self.source_type,
+            "last_frame_at": ingest_snapshot.get("last_frame_at"),
+            "last_source_timestamp": self._last_source_timestamp or ingest_snapshot.get("last_source_timestamp"),
+            "source_base_timestamp": ingest_snapshot.get("source_base_timestamp"),
+            "fps_decode": float(ingest_snapshot.get("fps_decode", 0.0) or 0.0),
+            "fps_processed": self._fps_processed(),
+            "frame_queue_depth": self._ingest_queue.qsize(),
+            "dropped_frames_total": self._dropped_frames_total,
+            "frames_decoded_total": int(ingest_snapshot.get("frames_decoded_total", 0) or 0),
+            "frames_processed_total": self._frames_processed_total,
+            "reconnect_attempts": int(ingest_snapshot.get("reconnect_attempts", 0) or 0),
+            "latency_ms": round(self._last_pipeline_latency_ms, 2),
+            "preview_clients_active": self._preview_clients_active,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def get_preview_frame_jpeg(self) -> tuple[bytes | None, str | None]:
+        return self._ingest_service.get_latest_preview_jpeg()
+
+    def increment_preview_clients(self, delta: int) -> int:
+        self._preview_clients_active = max(0, self._preview_clients_active + delta)
+        try:
+            get_metrics().stream_preview_clients_active = self._preview_clients_active
+        except Exception:
+            pass
+        try:
+            metrics.stream_preview_clients_active = self._preview_clients_active
+        except Exception:
+            pass
+        return self._preview_clients_active
+
+    def _fps_processed(self) -> float:
+        if len(self._processed_frame_times) < 2:
+            return 0.0
+        elapsed = self._processed_frame_times[-1] - self._processed_frame_times[0]
+        return round(len(self._processed_frame_times) / elapsed, 2) if elapsed > 0 else 0.0
+
+    def _record_stream_metric(self, name: str, count: int = 1) -> None:
+        try:
+            get_metrics().increment(name, count)
+        except Exception:
+            pass
+        try:
+            metrics.increment(name, count)
+        except Exception:
+            pass
+
+    def _record_frame_drop(self, count: int = 1, *, latency_violation: bool = False) -> None:
+        self._dropped_frames_total += count
+        get_metrics().record_frame_dropped(count)
+        try:
+            metrics.frames_dropped += count
+        except Exception:
+            pass
+        self._record_stream_metric("stream_frames_dropped_total", count)
+        if latency_violation:
+            get_metrics().record_latency_violation()
 
     # ── Thread 1: frame ingestion ─────────────────────────────────────────────
 
@@ -365,76 +474,73 @@ class StreamProcessor:
 
         Respects the _skip_next_event signal: when the inference thread sets it
         (because the batch was slow), the next readable frame is discarded rather
-        than enqueued.  Frames are also silently dropped when _ingest_queue is
+        than enqueued. Frames are also silently dropped when _ingest_queue is
         full so the ingest thread never blocks the capture loop.
         """
-        cap = cv2.VideoCapture(self.source)
-        if not cap.isOpened():
-            logger.error(
-                "StreamProcessor '%s': cannot open source '%s'",
-                self.stream_id, self.source,
-            )
-            self._status = "error"
-            self._ingest_queue.put(None)  # propagate sentinel so downstream exits
-            return
-
-        _is_file = isinstance(self.source, str) and self.source.lower().endswith(
-            (".mp4", ".avi", ".mov", ".mkv", ".webm")
-        )
-        frame_id = 0
         self._status = "running"
 
         try:
             while not self._stop_event.is_set():
-                ret, frame = cap.read()
-                if not ret:
-                    if _is_file:
-                        break  # end of file — flush then exit
-                    time.sleep(0.05)  # live camera blip: retry
-                    continue
+                packet = self._ingest_service.read_packet(self._stop_event)
+                if packet is None:
+                    snapshot = self._ingest_service.snapshot()
+                    if not self._stop_event.is_set():
+                        self._status = str(snapshot.get("status") or "stopped")
+                    break
+                self._record_stream_metric("stream_frames_decoded_total")
 
-                # Latency-budget drop: inference thread signalled us to shed load.
                 if self._skip_next_event.is_set():
                     self._skip_next_event.clear()
-                    get_metrics().record_frame_dropped()
-                    metrics.frames_dropped += 1
-                    get_metrics().record_latency_violation()
+                    self._record_frame_drop(latency_violation=True)
                     logger.debug(
-                        "StreamProcessor '%s': frame %d dropped — latency budget signal",
-                        self.stream_id, frame_id,
+                        "StreamProcessor '%s': frame %d dropped - latency budget signal",
+                        self.stream_id,
+                        packet.frame_index,
                     )
-                    frame_id += 1
                     continue
 
-                resized = cv2.resize(frame, _RESIZE_DIM)
+                packet.frame = cv2.resize(packet.frame, _RESIZE_DIM)
+                self._last_source_timestamp = packet.source_timestamp
                 try:
-                    self._ingest_queue.put_nowait((frame_id, resized))
+                    self._ingest_queue.put_nowait(packet)
+                    try:
+                        get_metrics().stream_queue_depth = self._ingest_queue.qsize()
+                    except Exception:
+                        pass
+                    try:
+                        metrics.stream_queue_depth = self._ingest_queue.qsize()
+                    except Exception:
+                        pass
                 except queue.Full:
-                    get_metrics().record_frame_dropped()
-                    metrics.frames_dropped += 1
-                frame_id += 1
-
+                    if self._drop_policy == "drop_oldest":
+                        try:
+                            dropped = self._ingest_queue.get_nowait()
+                        except queue.Empty:
+                            dropped = None
+                        self._record_frame_drop()
+                        if dropped is not None:
+                            try:
+                                self._ingest_queue.put_nowait(packet)
+                            except queue.Full:
+                                self._record_frame_drop()
+                    else:
+                        self._record_frame_drop()
         finally:
-            cap.release()
+            self._ingest_service.close()
 
-        # Send sentinel to unblock the inference thread.
         self._ingest_queue.put(None)
-
-    # ── Thread 2: batched GPU inference ──────────────────────────────────────
 
     def _inference_loop(self) -> None:
         """
         Accumulate frames from _ingest_queue into variable-size batches and
-        dispatch each full batch to _run_batch().  Propagates shutdown sentinel.
+        dispatch each full batch to _run_batch(). Propagates shutdown sentinel.
         """
-        batch_frames: List[np.ndarray] = []
-        batch_ids: List[int] = []
+        batch_packets: List[DecodedFramePacket] = []
 
         def _flush() -> None:
-            if batch_frames:
-                self._run_batch(list(batch_frames), list(batch_ids))
-                batch_frames.clear()
-                batch_ids.clear()
+            if batch_packets:
+                self._run_batch(list(batch_packets))
+                batch_packets.clear()
 
         while True:
             try:
@@ -451,26 +557,25 @@ class StreamProcessor:
                 self._result_queue.put(None)
                 break
 
-            fid, frame = item
-            batch_frames.append(frame)
-            batch_ids.append(fid)
-
-            if len(batch_frames) < self._batch_size:
-                continue  # keep filling the batch
+            batch_packets.append(item)
+            if len(batch_packets) < self._batch_size:
+                continue
 
             _flush()
 
-    def _run_batch(self, frames: List[np.ndarray], frame_ids: List[int]) -> None:
+    def _run_batch(self, decoded_packets: List[DecodedFramePacket]) -> None:
         """
         Run a single predict_batch() GPU call, adaptively resize the batch,
         enforce the latency budget, and enqueue resulting packets by priority.
         """
         self._circuit_breaker.check_and_transition()
-        if not frames:
+        if not decoded_packets:
             return
+
+        frames = [packet.frame for packet in decoded_packets]
+        frame_ids = [packet.frame_index for packet in decoded_packets]
         if self._circuit_breaker.is_open:
-            get_metrics().record_frame_dropped(len(frames))
-            metrics.frames_dropped += len(frames)
+            self._record_frame_drop(len(frames))
             return
 
         t0 = time.monotonic()
@@ -479,35 +584,60 @@ class StreamProcessor:
             batch_ms = (time.monotonic() - t0) * 1000.0
             n = max(1, len(frames))
             per_frame_ms = batch_ms / n
+            now_monotonic = time.monotonic()
+            spread_seconds = max(batch_ms / 1000.0, 1e-6)
+            interval_seconds = spread_seconds / n
 
-            # Adaptive batch size: grow when fast, shrink when slow.
             if not DETERMINISTIC_MODE:
                 if per_frame_ms < _BATCH_GROW_THRESHOLD_MS:
                     self._batch_size = min(_BATCH_SIZE_MAX, self._batch_size + 1)
                 elif per_frame_ms > _BATCH_SHRINK_THRESHOLD_MS:
                     self._batch_size = max(_BATCH_SIZE_MIN, self._batch_size - 1)
 
-            # Latency budget: signal ingest to drop the next frame.
             if per_frame_ms > _MAX_PIPELINE_MS:
                 self._skip_next_event.set()
                 logger.warning(
-                    "StreamProcessor '%s': per-frame %.1f ms > budget %.1f ms "
-                    "— dropping next frame",
-                    self.stream_id, per_frame_ms, _MAX_PIPELINE_MS,
+                    "StreamProcessor '%s': per-frame %.1f ms > budget %.1f ms - dropping next frame",
+                    self.stream_id,
+                    per_frame_ms,
+                    _MAX_PIPELINE_MS,
                 )
 
-            # Update rolling latency and context-suppression flag.
             self._recent_pipeline_ms.append(per_frame_ms)
             avg_ms = (
                 sum(self._recent_pipeline_ms) / len(self._recent_pipeline_ms)
                 if self._recent_pipeline_ms else 0.0
             )
+            try:
+                get_metrics().stream_processing_latency_ms = round(per_frame_ms, 2)
+            except Exception:
+                pass
+            try:
+                metrics.stream_processing_latency_ms = round(per_frame_ms, 2)
+            except Exception:
+                pass
             metrics.avg_latency_ms = avg_ms
             metrics.max_latency_ms = max(metrics.max_latency_ms, per_frame_ms)
             self._skip_context_next = avg_ms > _MAX_PIPELINE_MS
 
-            # Score and enqueue each packet with priority for postproc ordering.
-            for packet in packets:
+            for index, packet in enumerate(packets):
+                source_packet = decoded_packets[index] if index < len(decoded_packets) else None
+                if source_packet is not None:
+                    packet.timestamp = source_packet.timestamp
+                    packet.camera_id = self.camera_id
+                    packet.frame_width = source_packet.width
+                    packet.frame_height = source_packet.height
+                    packet.image = source_packet.frame
+                    packet.metadata = {
+                        **(packet.metadata or {}),
+                        **source_packet.metadata,
+                        "stream_frame_id": source_packet.frame_id,
+                        "source_timestamp": source_packet.source_timestamp,
+                        "source_frame_index": source_packet.frame_index,
+                        "fps_estimate": source_packet.fps_estimate,
+                        "source_type": self.source_type,
+                    }
+                    self._last_source_timestamp = source_packet.source_timestamp
                 priority = _frame_priority(packet)
                 with self._seq_lock:
                     seq = self._batch_seq
@@ -525,10 +655,20 @@ class StreamProcessor:
 
             self._circuit_breaker.record_success()
             self._cb_frame_results.append(True)
+            self._frames_processed_total += len(packets)
+            self._last_processed_at = datetime.now(timezone.utc).isoformat()
+            self._last_pipeline_latency_ms = per_frame_ms
+            for idx in range(len(packets)):
+                self._processed_frame_times.append(now_monotonic - spread_seconds + (interval_seconds * (idx + 1)))
+            self._record_stream_metric("stream_frames_processed_total", len(packets))
             metrics.frames_processed += len(packets)
 
         except Exception as exc:
-            logger.error({"stage": "inference", "error": str(exc), "frame_id": frame_ids[0] if frame_ids else None})
+            logger.error({
+                "stage": "inference",
+                "error": str(exc),
+                "frame_id": frame_ids[0] if frame_ids else None,
+            })
             sm = get_stream_metrics(self.stream_id)
             if sm is not None:
                 sm.record_failure()
@@ -536,8 +676,6 @@ class StreamProcessor:
             self._cb_frame_results.append(False)
 
         self._check_circuit_breaker()
-
-    # ── Thread 3: tracking, events, publish ───────────────────────────────────
 
     def _postproc_loop(self) -> None:
         """

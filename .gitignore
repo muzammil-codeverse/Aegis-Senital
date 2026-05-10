@@ -14,6 +14,7 @@ env/
 dist/
 build/
 .pytest_cache/
+.pytest_tmp/
 .mypy_cache/
 *.db
 *.sqlite3
@@ -79,6 +80,8 @@ backend/output/
 # Training/evaluation outputs
 runs/
 storage/
+storage/hls/
+storage/replay/
 storage/evaluation_runs/
 
 # Dataset/model caches
@@ -94,6 +97,7 @@ phone_model/**/*.png
 
 # Local machine settings
 .claude/settings.local.json
+.claude/settings.json
 
 # Runtime logs
 logs/
@@ -104,6 +108,9 @@ datasets/
 runs/
 runtime_state/
 storage/test_outputs/
+storage/cases/
+storage/osint/
+storage/osint_uploads/
 
 # Local machine-specific evaluation benchmark overrides
 configs/evaluation/evaluation.local.yaml

@@ -171,8 +171,16 @@ def permission_for_request(method: str, path: str) -> str | None:
     if path == "/process-video":
         return "camera:control"
 
-    if path in {"/streams", "/api/streams"} or path.startswith("/api/streams/"):
-        return "camera:read" if method == "GET" else "camera:control"
+    if path in {"/streams", "/api/streams"}:
+        return "stream:read" if method == "GET" else "stream:write"
+    if path.startswith("/api/streams/"):
+        if "/replay/" in path:
+            return "stream:replay"
+        if path.endswith("/start") or path.endswith("/stop") or path.endswith("/restart"):
+            return "stream:write"
+        if "/webrtc/" in path and method != "GET":
+            return "stream:write" if path.endswith("/stop") else "stream:read"
+        return "stream:read" if method == "GET" else "stream:write"
     if path in {"/streams/add", "/streams/remove"}:
         return "camera:control"
 

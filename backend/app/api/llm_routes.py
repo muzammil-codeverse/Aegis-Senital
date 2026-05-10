@@ -13,7 +13,6 @@ from app.models.llm_models import (
 )
 from app.models.security_models import UserAccount
 from app.services.audit_log_service import get_audit_log_service
-from app.services.llm_service import get_llm_service
 
 router = APIRouter()
 
@@ -33,11 +32,21 @@ def _audit(request: Request, current_user: UserAccount, action: str, metadata: d
         pass
 
 
+def get_llm_service():
+    from app.services.llm_service import get_llm_service as _service_getter
+
+    return _service_getter()
+
+
+def _get_llm_service():
+    return get_llm_service()
+
+
 @router.get("/api/llm/status")
 def get_llm_status_api(
     current_user: UserAccount = Depends(require_api_permission("llm:read")),
 ):
-    return {"item": get_llm_service().status(), "status": "ok"}
+    return {"item": _get_llm_service().status(), "status": "ok"}
 
 
 @router.post("/api/llm/verify-provider")
@@ -46,7 +55,7 @@ def verify_llm_provider_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
-    result = get_llm_service().verify_provider(
+    result = _get_llm_service().verify_provider(
         model_override=body.model,
         include_escalation=body.include_escalation,
         include_final_report=body.include_final_report,
@@ -71,7 +80,7 @@ def summarize_case_api(
     body: LlmSummaryRequest,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
-    service = get_llm_service()
+    service = _get_llm_service()
     try:
         output = service.summarize_case(case_id, body, actor=current_user.username)
     except KeyError:
@@ -89,7 +98,7 @@ def summarize_timeline_api(
     body: LlmTimelineSummaryRequest,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
-    service = get_llm_service()
+    service = _get_llm_service()
     try:
         output = service.summarize_timeline(case_id, body.model_dump(mode="json"), actor=current_user.username)
     except KeyError:
@@ -105,7 +114,7 @@ def summarize_evidence_api(
     body: LlmEvidenceSummaryRequest,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
-    service = get_llm_service()
+    service = _get_llm_service()
     try:
         output = service.summarize_evidence(case_id, body.model_dump(mode="json"), actor=current_user.username)
     except KeyError:
@@ -121,7 +130,7 @@ def draft_report_api(
     body: LlmReportRequest,
     current_user: UserAccount = Depends(require_api_permission("llm:report")),
 ):
-    service = get_llm_service()
+    service = _get_llm_service()
     try:
         output = service.draft_report(case_id, body.model_dump(mode="json"), actor=current_user.username)
     except KeyError:
@@ -139,7 +148,7 @@ def case_query_api(
     body: LlmQueryRequest,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
-    service = get_llm_service()
+    service = _get_llm_service()
     try:
         output = service.answer_case_query(
             case_id,

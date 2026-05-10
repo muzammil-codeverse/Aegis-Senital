@@ -6,6 +6,7 @@ import threading
 from datetime import datetime, timezone
 
 from inference.monitoring.metrics import deregister_stream
+from inference.stream.stream_session_manager import get_runtime_stream_session_manager
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class StreamManager:
             proc = StreamProcessor(stream_id=stream_id, source=source, model_pool=self._pool)
             proc.start()
             self._streams[stream_id] = proc
+            get_runtime_stream_session_manager().register(proc)
 
         logger.info(
             json.dumps({
@@ -101,6 +103,7 @@ class StreamManager:
             return False
 
         proc.stop()
+        get_runtime_stream_session_manager().deregister(stream_id)
         deregister_stream(stream_id)
 
         logger.info(
@@ -147,11 +150,14 @@ class StreamManager:
     def health_summary(self) -> dict:
         """Compact health snapshot for the /health endpoint."""
         from inference.monitoring.metrics import all_stream_snapshots
+        runtime_summary = get_runtime_stream_session_manager().health_summary()
         return {
             "active_streams": self.active_count,
             "total_streams": self.total_count,
             "model_pool_loaded": self._pool.is_loaded,
             "stream_metrics": all_stream_snapshots(),
+            "streaming": runtime_summary.get("streaming", {}),
+            "stream_health": runtime_summary.get("streams", []),
         }
 
 

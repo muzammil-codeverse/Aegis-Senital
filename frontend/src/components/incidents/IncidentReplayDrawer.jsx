@@ -5,6 +5,7 @@ import SeverityBadge from '../common/SeverityBadge'
 import LoadingState from '../common/LoadingState'
 import ErrorState from '../common/ErrorState'
 import EmptyState from '../common/EmptyState'
+import ReplayClipPanel from '../streaming/ReplayClipPanel'
 import { formatTimestamp } from '../../utils/time'
 
 export default function IncidentReplayDrawer({ incident, open, onClose }) {
@@ -45,6 +46,7 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
   const ovResults = replay?.open_vocab_results || []
   const currentFrame = frames[frameIdx]
   const currentSegmentation = currentFrame?.segmentation
+  const replayCameraId = currentFrame?.camera_id || frames[0]?.camera_id || incident?.camera_id || null
 
   return (
     <aside className="detail-drawer" aria-label="Incident replay">
@@ -289,6 +291,11 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
                     </li>
                   ))}
                 </ol>
+              </section>
+            )}
+            {replayCameraId && (
+              <section style={{ marginTop: 16 }}>
+                <ReplayClipPanel cameraId={replayCameraId} />
               </section>
             )}
           </>

@@ -13,13 +13,13 @@ from app.api.object_authorization import (
 from app.api.case_routes import router as case_router
 from app.api.llm_routes import router as llm_router
 from app.api.osint_routes import router as osint_router
+from app.api.streaming_routes import router as streaming_router
 from app.api.security_dependencies import (
     get_current_user_from_request,
     require_auth as require_api_auth,
     require_permission as require_api_permission,
 )
 from app.api.websocket_security import authenticate_websocket
-from app.services.video_service import extract_frames
 from app.core.config import load_scenario_config
 from app.core.logging_config import logger
 from app.services.intelligence_response_builder import IntelligenceResponseBuilder
@@ -35,17 +35,34 @@ from app.services.privacy_filter import (
     filter_watchlist_payload,
 )
 from app.services.user_store import get_user_store
-from inference.identity_db import get_db
 from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
-from inference.runtime import get_intelligence_runtime
 
 router = APIRouter()
 router.include_router(case_router)
 router.include_router(llm_router)
 router.include_router(osint_router)
+router.include_router(streaming_router)
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
+
+
+def _get_identity_db():
+    from inference.identity_db import get_db
+
+    return get_db()
+
+
+def _get_intelligence_runtime():
+    from inference.runtime import get_intelligence_runtime
+
+    return get_intelligence_runtime()
+
+
+def _extract_frames(video_path: str, scenario: str) -> dict:
+    from app.services.video_service import extract_frames
+
+    return extract_frames(video_path, scenario=scenario)
 
 
 # ── Stream request/response models ────────────────────────────────────────────
@@ -517,7 +534,7 @@ def health_check():
     identity_health = get_identity_service().get_health()
 
     stream_health = get_stream_manager().health_summary()
-    intelligence_health = get_intelligence_runtime().get_health()
+    intelligence_health = _get_intelligence_runtime().get_health()
 
     return {
         "status": "ok",
@@ -552,7 +569,7 @@ async def process_video(
         tmp_path = tmp.name
 
     try:
-        result = extract_frames(tmp_path, scenario=scenario)
+        result = _extract_frames(tmp_path, scenario=scenario)
     finally:
         os.unlink(tmp_path)
 
@@ -635,8 +652,7 @@ def get_core_metrics():
         base.setdefault(_ho_key, getattr(metrics, _ho_key, 0))
     # Live active_handoffs count from store
     try:
-        from inference.runtime import get_intelligence_runtime
-        base["active_handoffs"] = get_intelligence_runtime().handoff_store.active_count()
+        base["active_handoffs"] = _get_intelligence_runtime().handoff_store.active_count()
     except Exception:
         pass
     # Bridge Phase-24 deployment foundation metrics
@@ -698,7 +714,7 @@ def get_config(scenario: str):
 @router.get("/events")
 def list_events():
     logger.info("Events list requested")
-    events = get_db().get_events(limit=50)
+    events = _get_identity_db().get_events(limit=50)
     return [
         {
             "id": e.get("event_id"),
@@ -715,7 +731,7 @@ def list_events():
 @router.get("/detections")
 def list_detections():
     logger.info("Detections list requested")
-    tracks = get_db().get_tracks(limit=50)
+    tracks = _get_identity_db().get_tracks(limit=50)
     return [
         {
             "id": t.get("track_id"),
@@ -781,7 +797,7 @@ def remove_stream(body: StreamRemoveRequest, request: Request):
 @router.get("/api/incidents")
 @router.get("/incidents")
 def list_incidents_api(request: Request):
-    incidents = get_intelligence_runtime().get_incidents()
+    incidents = _get_intelligence_runtime().get_incidents()
     return _filter_incident_response(IntelligenceResponseBuilder.incident_feed(incidents), request)
 
 
@@ -789,7 +805,7 @@ def list_incidents_api(request: Request):
 @router.get("/incidents/{incident_id}")
 def get_incident_api(incident_id: str, request: Request):
     _require_object_access(request, "incident", incident_id, can_access_incident(_request_user(request), incident_id))
-    runtime = get_intelligence_runtime()
+    runtime = _get_intelligence_runtime()
     incident = runtime.incident_engine.get_incident(incident_id)
     _audit(request, AuditAction.INCIDENT_VIEWED, resource_type="incident", resource_id=incident_id)
     return _filter_incident_response(IntelligenceResponseBuilder.incident_detail(incident), request)
@@ -798,7 +814,7 @@ def get_incident_api(incident_id: str, request: Request):
 @router.get("/api/timeline/{track_id}")
 @router.get("/timeline/{track_id}")
 def get_timeline(track_id: str, request: Request):
-    events = get_intelligence_runtime().get_track_timeline(track_id)
+    events = _get_intelligence_runtime().get_track_timeline(track_id)
     try:
         metrics.increment("forensic_sensitive_reads")
     except Exception:
@@ -810,7 +826,7 @@ def get_timeline(track_id: str, request: Request):
 @router.get("/api/anomalies/live")
 @router.get("/anomalies/live")
 def get_live_anomalies():
-    anomalies = get_intelligence_runtime().get_live_anomalies()
+    anomalies = _get_intelligence_runtime().get_live_anomalies()
     return IntelligenceResponseBuilder.anomalies(anomalies)
 
 
@@ -821,33 +837,33 @@ def list_alerts_api(
     severity: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
 ):
-    response = get_intelligence_runtime().get_alerts(state=state, severity=severity, limit=limit)
+    response = _get_intelligence_runtime().get_alerts(state=state, severity=severity, limit=limit)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_feed_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/live")
 def live_alerts_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
-    response = get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    response = _get_intelligence_runtime().get_live_alert_feed(limit=limit)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_feed_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/operator-queue")
 def operator_queue_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
-    response = get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    response = _get_intelligence_runtime().get_live_alert_feed(limit=limit)
     return _filter_alert_response(IntelligenceResponseBuilder.build_operator_queue_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/{alert_id}")
 def get_alert_api(alert_id: str, request: Request):
     _require_object_access(request, "alert", alert_id, can_access_alert(_request_user(request), alert_id))
-    response = get_intelligence_runtime().get_alert(alert_id)
+    response = _get_intelligence_runtime().get_alert(alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
 
 @router.post("/api/alerts/{alert_id}/acknowledge")
 def acknowledge_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
     operator_id = body.operator_id if body else None
-    response = get_intelligence_runtime().acknowledge_alert(alert_id, operator_id=operator_id)
+    response = _get_intelligence_runtime().acknowledge_alert(alert_id, operator_id=operator_id)
     _audit(request, AuditAction.ALERT_ACKNOWLEDGED, resource_type="alert", resource_id=alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
@@ -855,7 +871,7 @@ def acknowledge_alert_api(alert_id: str, request: Request, body: AlertActionRequ
 @router.post("/api/alerts/{alert_id}/resolve")
 def resolve_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
     operator_id = body.operator_id if body else None
-    response = get_intelligence_runtime().resolve_alert(alert_id, operator_id=operator_id)
+    response = _get_intelligence_runtime().resolve_alert(alert_id, operator_id=operator_id)
     _audit(request, AuditAction.ALERT_RESOLVED, resource_type="alert", resource_id=alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
@@ -863,7 +879,7 @@ def resolve_alert_api(alert_id: str, request: Request, body: AlertActionRequest 
 @router.post("/api/alerts/{alert_id}/escalate")
 def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
     reason = body.reason if body else None
-    response = get_intelligence_runtime().escalate_alert(alert_id, reason=reason)
+    response = _get_intelligence_runtime().escalate_alert(alert_id, reason=reason)
     _audit(
         request,
         AuditAction.ALERT_ESCALATED,
@@ -876,7 +892,7 @@ def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest
 
 @router.get("/api/alerts/{alert_id}/history")
 def alert_history_api(alert_id: str, request: Request):
-    response = get_intelligence_runtime().get_alert_history(alert_id)
+    response = _get_intelligence_runtime().get_alert_history(alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_history_payload(response["items"]), request)
 
 
@@ -1153,7 +1169,7 @@ def get_incident_replay_api(incident_id: str, request: Request):
     except Exception:
         max_frames, include_alerts, include_events, include_timeline = 500, True, True, True
 
-    runtime = get_intelligence_runtime()
+    runtime = _get_intelligence_runtime()
 
     # Resolve incident
     incident = None
@@ -1222,7 +1238,7 @@ async def websocket_frames_endpoint(websocket: WebSocket):
 @router.get("/api/cameras/{camera_id}/heatmap")
 @router.get("/cameras/{camera_id}/heatmap")
 def get_camera_heatmap(camera_id: str):
-    heatmap = get_intelligence_runtime().get_camera_heatmap(camera_id)
+    heatmap = _get_intelligence_runtime().get_camera_heatmap(camera_id)
     return IntelligenceResponseBuilder.heatmap(heatmap, camera_id)
 
 
@@ -1338,8 +1354,7 @@ def get_map_state_api(request: Request):
     _geo_metric("map_alert_markers")
     # Attach active handoffs to map state
     try:
-        from inference.runtime import get_intelligence_runtime
-        handoffs = get_intelligence_runtime().handoff_store.list_active(limit=100)
+        handoffs = _get_intelligence_runtime().handoff_store.list_active(limit=100)
         state["handoffs"] = handoffs
     except Exception:
         state["handoffs"] = []
@@ -1419,8 +1434,7 @@ def get_map_topology_api():
 # ── Handoff endpoints ─────────────────────────────────────────────────────────
 
 def _handoff_store():
-    from inference.runtime import get_intelligence_runtime
-    return get_intelligence_runtime().handoff_store
+    return _get_intelligence_runtime().handoff_store
 
 
 @router.get("/api/handoffs/active")
@@ -1942,7 +1956,7 @@ class OpenVocabScanRequest(BaseModel):
 def _get_open_vocab_scanner():
     """Return the open-vocab scanner from the intelligence runtime (or None)."""
     try:
-        return get_intelligence_runtime().open_vocab_scanner
+        return _get_intelligence_runtime().open_vocab_scanner
     except Exception:
         return None
 
@@ -1954,7 +1968,7 @@ def open_vocab_status_api(
 ):
     """Return open-vocabulary scanner status and metrics."""
     try:
-        runtime = get_intelligence_runtime()
+        runtime = _get_intelligence_runtime()
         status = runtime.get_open_vocab_status()
         _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="open_vocab", detail="Status read")
         return {"item": status, "status": "ok"}
@@ -2067,7 +2081,7 @@ def open_vocab_scan_latest_frame_api(
     """Trigger an open-vocabulary scan on the latest frame from a camera."""
     prompts = (body.prompts if body and body.prompts else None)
     try:
-        runtime = get_intelligence_runtime()
+        runtime = _get_intelligence_runtime()
         result = runtime.scan_open_vocab_latest(camera_id, prompts=prompts)
         _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="camera",
                resource_id=camera_id, metadata={"source": "latest_frame"})
@@ -2089,7 +2103,7 @@ def open_vocab_scan_incident_api(
     """Trigger an open-vocabulary scan on incident frame references."""
     prompts = (body.prompts if body and body.prompts else None)
     try:
-        runtime = get_intelligence_runtime()
+        runtime = _get_intelligence_runtime()
         result = runtime.scan_open_vocab_incident(incident_id, prompts=prompts)
         _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="incident",
                resource_id=incident_id, metadata={"source": "incident"})
@@ -2176,7 +2190,7 @@ def list_open_vocab_results_api(
 ):
     """List recent open-vocabulary scan results."""
     try:
-        runtime = get_intelligence_runtime()
+        runtime = _get_intelligence_runtime()
         response = runtime.get_open_vocab_results(limit=limit)
         return response
     except Exception as exc:
@@ -2211,7 +2225,7 @@ def get_open_vocab_results_by_camera_api(
 ):
     """List open-vocabulary scan results for a specific camera."""
     try:
-        runtime = get_intelligence_runtime()
+        runtime = _get_intelligence_runtime()
         response = runtime.get_open_vocab_results(camera_id=camera_id, limit=limit)
         return response
     except Exception as exc:
@@ -2227,7 +2241,7 @@ def get_open_vocab_results_by_incident_api(
 ):
     """List open-vocabulary scan results for a specific incident."""
     try:
-        runtime = get_intelligence_runtime()
+        runtime = _get_intelligence_runtime()
         response = runtime.get_open_vocab_results(incident_id=incident_id, limit=limit)
         return response
     except Exception as exc:

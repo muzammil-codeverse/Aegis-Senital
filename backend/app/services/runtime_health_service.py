@@ -249,11 +249,58 @@ class RuntimeHealthService:
             "last_error": health.get("last_error"),
         }
 
+    def _check_streaming(self) -> dict:
+        try:
+            from app.services.rtsp_ingest_service import load_streaming_runtime_config
+            from app.services.hls_service import get_hls_service
+            from app.services.webrtc_service import AIORTC_AVAILABLE, AIORTC_IMPORT_ERROR
+            from inference.stream.stream_session_manager import get_runtime_stream_session_manager
+
+            cfg = load_streaming_runtime_config().get("streaming", {})
+            summary = get_runtime_stream_session_manager().health_summary().get("streaming", {})
+            enabled = bool(cfg.get("enabled", True))
+            hls_enabled = bool(cfg.get("hls", {}).get("enabled", False))
+            webrtc_enabled = bool(cfg.get("webrtc", {}).get("enabled", False))
+            ffmpeg_available = bool(get_hls_service().ffmpeg_available)
+            production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
+            missing: list[str] = []
+            if enabled and hls_enabled and not ffmpeg_available:
+                missing.append("ffmpeg")
+            if enabled and webrtc_enabled and not AIORTC_AVAILABLE:
+                missing.append("aiortc")
+            if not enabled:
+                status = "disabled"
+            elif missing and production_mode:
+                status = "error"
+            elif missing:
+                status = "degraded"
+            else:
+                status = summary.get("status", "healthy")
+            return {
+                **summary,
+                "enabled": enabled,
+                "status": status,
+                "hls_enabled": hls_enabled,
+                "webrtc_enabled": webrtc_enabled,
+                "ffmpeg_available": ffmpeg_available,
+                "aiortc_available": AIORTC_AVAILABLE,
+                "last_error": AIORTC_IMPORT_ERROR if (webrtc_enabled and not AIORTC_AVAILABLE) else summary.get("last_error"),
+                "missing_dependencies": missing,
+            }
+        except Exception as exc:
+            return {
+                "enabled": False,
+                "status": "degraded",
+                "last_error": str(exc)[:120],
+                "missing_dependencies": [],
+            }
+
     def get_health(self, include_sensitive: bool = False) -> dict:
         """Return aggregated health status for all subsystems."""
         case_management = self._check_case_management()
         llm = self._check_llm()
         osint_enrichment = self._check_osint_enrichment()
+        streaming = self._check_streaming()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -268,6 +315,7 @@ class RuntimeHealthService:
             "case_management": case_management,
             "llm": llm,
             "osint_enrichment": osint_enrichment,
+            "streaming": streaming,
         }
 
         if not include_sensitive:
@@ -291,6 +339,7 @@ class RuntimeHealthService:
             "case_management": case_management,
             "llm": llm,
             "osint_enrichment": osint_enrichment,
+            "streaming": streaming,
         }
 
     def is_alive(self) -> bool:
@@ -353,6 +402,11 @@ class RuntimeHealthService:
         if osint_enrichment.get("enabled") and osint_enrichment.get("status") in {"failed", "error", "degraded"}:
             failures.append(
                 f"osint_enrichment: {osint_enrichment.get('last_error') or osint_enrichment.get('status')}"
+            )
+        streaming = self._check_streaming()
+        if streaming.get("enabled") and streaming.get("status") == "error":
+            failures.append(
+                f"streaming: {', '.join(streaming.get('missing_dependencies', [])) or streaming.get('last_error') or 'dependency failure'}"
             )
 
         return {

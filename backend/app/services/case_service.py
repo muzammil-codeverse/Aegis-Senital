@@ -28,8 +28,6 @@ from app.repositories.case_repository import (
 from app.services.case_export_service import CaseExportService
 from app.services.case_timeline_service import CaseTimelineService
 from app.services.evidence_integrity import compute_sha256, safe_evidence_metadata, verify_evidence_hash
-from inference.identity_db import get_db
-from inference.runtime import get_intelligence_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -404,6 +402,8 @@ class CaseService:
                 }
 
         try:
+            from inference.identity_db import get_db
+
             for record in get_db().get_events(limit=2000):
                 metadata = record.get("metadata", {}) or {}
                 payload = _payload_to_dict(metadata.get("payload") or record)
@@ -413,6 +413,8 @@ class CaseService:
             pass
 
         try:
+            from inference.runtime import get_intelligence_runtime
+
             runtime = get_intelligence_runtime()
             ov_results = runtime.get_open_vocab_results(limit=500).get("items", [])
             for item in ov_results:

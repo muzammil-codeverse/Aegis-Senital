@@ -131,6 +131,20 @@ class SystemMetrics:
         self.case_auto_dedup_total = 0
         self.case_auto_create_failures_total = 0
         self.case_repository_latency_ms = 0.0
+        # Phase 33 - streaming transport metrics
+        self.stream_frames_decoded_total = 0
+        self.stream_frames_processed_total = 0
+        self.stream_frames_dropped_total = 0
+        self.stream_reconnect_attempts_total = 0
+        self.stream_offline_transitions_total = 0
+        self.stream_online_transitions_total = 0
+        self.stream_decode_latency_ms = 0.0
+        self.stream_processing_latency_ms = 0.0
+        self.stream_preview_clients_active = 0
+        self.stream_webrtc_sessions_total = 0
+        self.stream_hls_segments_written_total = 0
+        self.stream_replay_clips_created_total = 0
+        self.stream_queue_depth = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

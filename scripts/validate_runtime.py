@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -40,6 +41,26 @@ def _try_import(module: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _resolve_ffmpeg_binary() -> str | None:
+    explicit = (os.environ.get("AEGIS_FFMPEG_PATH") or os.environ.get("FFMPEG_BINARY") or "").strip()
+    if explicit:
+        return explicit
+
+    discovered = shutil.which("ffmpeg")
+    if discovered:
+        return discovered
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_app_data:
+        winget_link = Path(local_app_data) / "Microsoft" / "WinGet" / "Links" / "ffmpeg.exe"
+        try:
+            target = os.readlink(str(winget_link))
+            return target.replace("\\\\?\\", "")
+        except OSError:
+            pass
+    return None
 
 
 def _get_nested(data: dict, path: str, default=None):
@@ -303,6 +324,45 @@ def validate_osint_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_streaming_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[Streaming]")
+    config_path = ROOT / "configs" / "runtime" / "streaming.yaml"
+    if not config_path.exists():
+        results.append(check("streaming config", False, str(config_path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("streaming config parseable", False, str(exc), required=True))
+        return results
+
+    streaming_cfg = cfg.get("streaming", cfg)
+    enabled = bool(streaming_cfg.get("enabled", True))
+    webrtc_enabled = bool(streaming_cfg.get("webrtc", {}).get("enabled", False))
+    hls_enabled = bool(streaming_cfg.get("hls", {}).get("enabled", False))
+    replay_enabled = bool(streaming_cfg.get("replay", {}).get("enabled", False))
+    results.append(check("streaming enabled", True, "enabled" if enabled else "disabled", required=False))
+    results.append(check("streaming webrtc", True, "enabled" if webrtc_enabled else "disabled", required=False))
+    results.append(check("streaming hls", True, "enabled" if hls_enabled else "disabled", required=False))
+    results.append(check("streaming replay", True, "enabled" if replay_enabled else "disabled", required=False))
+    if not enabled:
+        return results
+
+    hls_dir = ROOT / str(streaming_cfg.get("hls", {}).get("output_dir") or "storage/hls")
+    replay_dir = ROOT / str(streaming_cfg.get("replay", {}).get("output_dir") or "storage/replay")
+    hls_dir.mkdir(parents=True, exist_ok=True)
+    replay_dir.mkdir(parents=True, exist_ok=True)
+    results.append(check("streaming hls output", os.access(str(hls_dir), os.W_OK), str(hls_dir), required=profile == "production"))
+    results.append(check("streaming replay output", os.access(str(replay_dir), os.W_OK), str(replay_dir), required=profile == "production"))
+
+    aiortc_available = _try_import("aiortc")
+    ffmpeg_available = bool(_resolve_ffmpeg_binary())
+    results.append(check("aiortc", aiortc_available, "available" if aiortc_available else "missing", required=profile == "production" and webrtc_enabled))
+    results.append(check("ffmpeg", ffmpeg_available, "available" if ffmpeg_available else "missing", required=profile == "production" and hls_enabled))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -330,6 +390,7 @@ def validate(profile: str) -> None:
         "configs/runtime/case_management.yaml",
         "configs/runtime/llm.yaml",
         "configs/runtime/osint_enrichment.yaml",
+        "configs/runtime/streaming.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -455,6 +516,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(osint_results)
+
+    streaming_results = validate_streaming_configuration(profile)
+    for r in streaming_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(streaming_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)
