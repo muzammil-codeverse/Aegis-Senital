@@ -350,7 +350,7 @@ class RuntimeHealthService:
         if llm.get("enabled") and llm.get("status") == "error":
             failures.append(f"llm: {llm.get('detail') or llm.get('status')}")
         osint_enrichment = self._check_osint_enrichment()
-        if osint_enrichment.get("enabled") and osint_enrichment.get("status") in {"failed", "error"}:
+        if osint_enrichment.get("enabled") and osint_enrichment.get("status") in {"failed", "error", "degraded"}:
             failures.append(
                 f"osint_enrichment: {osint_enrichment.get('last_error') or osint_enrichment.get('status')}"
             )

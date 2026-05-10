@@ -192,7 +192,15 @@ class LlmService:
                 "response_preview": None,
             }
         provider = self._get_provider("openai")
-        assert isinstance(provider, OpenAIResponsesProvider)
+        if not hasattr(provider, "verify_model"):
+            return {
+                "status": "error",
+                "detail": "OpenAI provider does not support model verification.",
+                "provider": "openai",
+                "model": default_model,
+                "models_checked": [],
+                "response_preview": None,
+            }
         model_checks: list[dict[str, Any]] = []
         requested_models = [("default", default_model, "low")]
         if include_escalation:
@@ -217,9 +225,12 @@ class LlmService:
                 "response_preview": self._truncate_text(self._sanitize_text(text), 240),
             }
         except Exception as exc:
+            failed_model = default_model
+            if model_checks:
+                failed_model = str(model_checks[-1].get("model") or failed_model)
             return {
                 "status": "error",
-                "detail": str(exc),
+                "detail": f"Model '{failed_model}' verification failed: {exc}",
                 "provider": "openai",
                 "model": default_model,
                 "models_checked": model_checks,
