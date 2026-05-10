@@ -10,6 +10,8 @@ from app.api.object_authorization import (
     can_access_identity,
     can_access_incident,
 )
+from app.api.case_routes import router as case_router
+from app.api.llm_routes import router as llm_router
 from app.api.security_dependencies import (
     get_current_user_from_request,
     require_auth as require_api_auth,
@@ -38,6 +40,8 @@ from inference.monitoring.metrics import get_metrics
 from inference.runtime import get_intelligence_runtime
 
 router = APIRouter()
+router.include_router(case_router)
+router.include_router(llm_router)
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
 

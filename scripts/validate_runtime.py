@@ -216,6 +216,51 @@ def validate_identity_feature_dependencies(policy: dict, profile: str) -> list[d
     return results
 
 
+def validate_llm_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[LLM Configuration]")
+    config_path = ROOT / "configs" / "runtime" / "llm.yaml"
+    if not config_path.exists():
+        results.append(check("llm config", False, str(config_path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("llm config parseable", False, str(exc), required=True))
+        return results
+
+    llm_cfg = cfg.get("llm", cfg)
+    enabled = bool(llm_cfg.get("enabled", False))
+    provider = str(llm_cfg.get("provider") or llm_cfg.get("default_provider") or "local_stub").lower()
+    results.append(check("llm enabled", True, "enabled" if enabled else "disabled", required=False))
+    results.append(check("llm provider", True, provider, required=False))
+    if not enabled:
+        return results
+
+    providers = dict(llm_cfg.get("providers") or {})
+    openai_cfg = dict(providers.get("openai") or {})
+    local_stub_cfg = dict(providers.get("local_stub") or {})
+    api_key_env = str(openai_cfg.get("api_key_env") or "OPENAI_API_KEY")
+    api_key_present = bool(os.environ.get(api_key_env, "").strip())
+    fallback_allowed = bool((llm_cfg.get("development") or {}).get("allow_local_stub_if_openai_key_missing", True))
+    production_fail = bool((llm_cfg.get("production") or {}).get("fail_if_openai_key_missing", True))
+
+    if provider == "openai":
+        results.append(check("openai package", _try_import("openai"), "available" if _try_import("openai") else "missing; install: pip install openai", required=True))
+        key_required = profile == "production" and production_fail
+        if api_key_present:
+            results.append(check(api_key_env, True, "configured", required=key_required))
+        else:
+            detail = "missing"
+            if profile == "development" and fallback_allowed and bool(local_stub_cfg.get("enabled", True)):
+                detail = "missing; local_stub fallback is allowed in development"
+            results.append(check(api_key_env, False, detail, required=key_required))
+    else:
+        results.append(check("local_stub provider", bool(local_stub_cfg.get("enabled", True)), "enabled" if local_stub_cfg.get("enabled", True) else "disabled", required=False))
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -240,6 +285,8 @@ def validate(profile: str) -> None:
         "configs/runtime/deployment.yaml",
         "configs/runtime/dependency_policy.yaml",
         "configs/runtime/identity.yaml",
+        "configs/runtime/case_management.yaml",
+        "configs/runtime/llm.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -334,6 +381,31 @@ def validate(profile: str) -> None:
     _record(check("POSTGRES_DSN", bool(dsn), "configured" if dsn else "not set (optional)", required=False))
     redis_url = os.environ.get("REDIS_URL", "")
     _record(check("REDIS_URL", bool(redis_url), "configured" if redis_url else "not set (optional)", required=False))
+
+    # Case management
+    print("\n[Case Management]")
+    case_cfg_path = ROOT / "configs" / "runtime" / "case_management.yaml"
+    case_cfg = yaml.safe_load(case_cfg_path.read_text(encoding="utf-8")) if case_cfg_path.exists() else {}
+    case_mgmt = (case_cfg or {}).get("case_management", {})
+    enabled = bool(case_mgmt.get("enabled", True))
+    _record(check("case management enabled", True, "enabled" if enabled else "disabled", required=False))
+    if enabled:
+        storage_cfg = case_mgmt.get("storage", {})
+        jsonl_dir = ROOT / str(storage_cfg.get("jsonl_dir", "storage/cases"))
+        jsonl_dir.mkdir(parents=True, exist_ok=True)
+        _record(check("storage/cases", os.access(str(jsonl_dir), os.W_OK), str(jsonl_dir), required=profile == "development"))
+        prod_backend = str(storage_cfg.get("production_backend", "postgres")).lower()
+        require_pg = bool(storage_cfg.get("require_postgres_in_production", True))
+        if profile == "production" and prod_backend == "postgres" and require_pg:
+            case_dsn = os.environ.get("POSTGRES_DSN") or os.environ.get("AEGIS_POSTGRES_DSN") or os.environ.get("DB_URL")
+            _record(check("case management postgres dsn", bool(case_dsn), "configured" if case_dsn else "missing POSTGRES_DSN", required=True))
+
+    # LLM configuration
+    llm_results = validate_llm_configuration(profile)
+    for r in llm_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(llm_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)

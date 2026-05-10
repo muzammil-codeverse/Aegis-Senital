@@ -36,6 +36,7 @@ export default function CommandOverview({
   // Incident props
   incidents,
   incidentState,
+  caseState,
   // Metrics / health
   metricsState,
   health,
@@ -178,7 +179,9 @@ export default function CommandOverview({
             loading={anomaliesLoading}
             error={anomaliesError}
             onRetry={onRefreshAnomalies}
+            caseState={caseState}
           />
+          <RecentCasesPanel caseState={caseState} health={health} />
           <CrossCameraPanel
             activeHandoffs={activeHandoffs}
             recentHandoffs={recentHandoffs}
@@ -207,7 +210,7 @@ export default function CommandOverview({
   )
 }
 
-function RecentAnomalies({ anomalies = [], loading, error, onRetry }) {
+function RecentAnomalies({ anomalies = [], loading, error, onRetry, caseState }) {
   return (
     <section className="panel anomalies-panel">
       <div className="panel-header">
@@ -227,9 +230,76 @@ function RecentAnomalies({ anomalies = [], loading, error, onRetry }) {
               <span>{formatTimestamp(anomaly.timestamp)}</span>
               <strong>{anomaly.anomaly_type || anomaly.type || 'anomaly'}</strong>
               <em>{formatPercent(anomaly.score || anomaly.risk_score)}</em>
+              <div className="button-row">
+                {caseState?.relatedCaseByEvent?.(anomaly.window_id || anomaly.anomaly_id) ? (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => caseState.selectCase(caseState.relatedCaseByEvent(anomaly.window_id || anomaly.anomaly_id).case_id)}
+                  >
+                    View Case
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      const sourceId = anomaly.window_id || anomaly.anomaly_id
+                      if (!sourceId) return
+                      caseState?.createCaseFromEvent?.(sourceId).then(created => {
+                        if (created?.case_id) caseState.selectCase(created.case_id)
+                      }).catch(() => {})
+                    }}
+                  >
+                    Create Case
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ol>
+      )}
+    </section>
+  )
+}
+
+function RecentCasesPanel({ caseState, health }) {
+  const items = caseState?.cases?.slice(0, 5) || []
+  const caseHealth = health?.case_management || health?.checks?.case_management || {}
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Case Management</p>
+          <h2>Recent Cases</h2>
+        </div>
+        <span className="count-pill">{caseState?.cases?.length || 0}</span>
+      </div>
+      <div className="metric-strip case-metric-strip">
+        <article className="metric-tile"><span>Open</span><strong>{caseState?.openCount || 0}</strong></article>
+        <article className="metric-tile"><span>Critical</span><strong>{caseState?.criticalCount || 0}</strong></article>
+        <article className="metric-tile"><span>Review</span><strong>{caseState?.requiringReviewCount || 0}</strong></article>
+      </div>
+      <div className="health-grid case-health-grid">
+        <span>Status</span><strong>{caseHealth.status || 'unknown'}</strong>
+        <span>Storage</span><strong>{caseHealth.storage || 'unknown'}</strong>
+        <span>Open Cases</span><strong>{caseHealth.open_case_count ?? 0}</strong>
+      </div>
+      {items.length === 0 ? (
+        <EmptyState message="No recent cases available." />
+      ) : (
+        <div className="stack-list">
+          {items.map(item => (
+            <article key={item.case_id} className="case-subcard">
+              <div className="alert-card-header">
+                <strong>{item.title || item.case_id}</strong>
+                <span className="state-chip">{item.status}</span>
+              </div>
+              <p className="drawer-description">{item.description || 'Possible incident requires operator review.'}</p>
+              <button type="button" className="text-button" onClick={() => caseState?.selectCase?.(item.case_id)}>View Case</button>
+            </article>
+          ))}
+        </div>
       )}
     </section>
   )

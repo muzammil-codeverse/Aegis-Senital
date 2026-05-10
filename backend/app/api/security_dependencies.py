@@ -153,6 +153,12 @@ def permission_for_request(method: str, path: str) -> str | None:
         return "admin"
     if path.startswith("/api/audit/"):
         return "audit:read"
+    if path.startswith("/api/llm/"):
+        if method == "GET":
+            return "llm:read"
+        if path.endswith("/report"):
+            return "llm:report"
+        return "llm:write"
     if path == "/api/security/roles":
         return None
 
@@ -210,6 +216,16 @@ def permission_for_request(method: str, path: str) -> str | None:
         if method == "GET":
             return "watchlist:read"
         return "watchlist:write"
+    if path == "/api/cases" or path.startswith("/api/cases/"):
+        if method == "GET":
+            if path.endswith("/export"):
+                return "case:export"
+            return "case:read"
+        if path.endswith("/assign"):
+            return "case:assign"
+        if any(path.endswith(suffix) for suffix in ("/close", "/reopen", "/dismiss", "/archive")):
+            return "case:close"
+        return "case:write"
 
     if path.startswith("/api/"):
         return None

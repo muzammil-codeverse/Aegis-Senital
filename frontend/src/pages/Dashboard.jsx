@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getLiveAnomalies } from '../api/camerasApi'
 import { normalizeError } from '../api/client'
 import AlertDetailDrawer from '../components/alerts/AlertDetailDrawer'
+import CaseDetailDrawer from '../components/cases/CaseDetailDrawer'
 import CommandOverview from '../components/dashboard/CommandOverview'
 import { useCameras } from '../hooks/useCameras'
 import { useLatestFrames } from '../hooks/useLatestFrames'
@@ -13,7 +14,7 @@ import { getStreams } from '../api/camerasApi'
 import { compareSeverity } from '../utils/severity'
 import { DASHBOARD_POLL_MS } from '../config'
 
-export default function Dashboard({ alertState, incidentState, metricsState, websocketState, health }) {
+export default function Dashboard({ alertState, incidentState, caseState, metricsState, websocketState, health }) {
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
@@ -102,6 +103,11 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
   }, [refreshAnomalies])
 
   const mergedAlerts = useMemo(() => mergeAlerts(alertState.alerts, websocketState.alerts), [alertState.alerts, websocketState.alerts])
+  const selectedAlertEventId = alertState.selectedAlert?.event_ids?.[0]
+  const relatedCase = useMemo(
+    () => caseState?.relatedCaseByEvent?.(selectedAlertEventId) || null,
+    [caseState, selectedAlertEventId],
+  )
 
   // Alert count per camera_id
   const alertCountByCameraId = useMemo(() => {
@@ -151,6 +157,7 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
         // Incident props
         incidents={incidentState.incidents}
         incidentState={incidentState}
+        caseState={caseState}
         // Metrics / health
         metricsState={metricsState}
         health={health}
@@ -181,6 +188,34 @@ export default function Dashboard({ alertState, incidentState, metricsState, web
         onResolve={alertState.resolve}
         onEscalate={alertState.escalate}
         busy={alertState.actionLoading}
+        relatedCase={relatedCase}
+        onViewCase={() => relatedCase && caseState.selectCase(relatedCase.case_id)}
+        onCreateCaseFromEvent={() => {
+          if (!selectedAlertEventId) return
+          caseState.createCaseFromEvent(selectedAlertEventId).then(created => {
+            if (created?.case_id) caseState.selectCase(created.case_id)
+          }).catch(() => {})
+        }}
+        caseBusy={caseState?.actionLoading}
+      />
+      <CaseDetailDrawer
+        open={Boolean(caseState?.selectedCase)}
+        caseItem={caseState?.selectedCase}
+        loading={caseState?.detailLoading}
+        error={caseState?.error}
+        timeline={caseState?.timeline}
+        evidence={caseState?.evidence}
+        notes={caseState?.notes}
+        busy={caseState?.actionLoading}
+        onClose={() => caseState?.selectCase(null)}
+        onAssign={(assignedTo, reason) => caseState?.assignCase(caseState.selectedCase.case_id, assignedTo, reason)}
+        onAddEvidence={payload => caseState?.addEvidence(caseState.selectedCase.case_id, payload)}
+        onAddNote={payload => caseState?.addNote(caseState.selectedCase.case_id, payload)}
+        onResolve={reason => caseState?.closeCase(caseState.selectedCase.case_id, reason)}
+        onReopen={reason => caseState?.reopenCase(caseState.selectedCase.case_id, reason)}
+        onDismiss={reason => caseState?.dismissCase(caseState.selectedCase.case_id, reason)}
+        onArchive={reason => caseState?.archiveCase(caseState.selectedCase.case_id, reason)}
+        onExport={format => caseState?.exportCase(caseState.selectedCase.case_id, format)}
       />
     </>
   )

@@ -4,6 +4,7 @@ const NAV_ITEMS = [
   { id: 'dashboard', label: 'Command', permission: 'camera:read' },
   { id: 'alerts', label: 'Alerts', permission: 'alert:read' },
   { id: 'incidents', label: 'Incidents', permission: 'incident:read' },
+  { id: 'cases', label: 'Cases', permission: 'case:read' },
   { id: 'system', label: 'System', permission: 'metrics:read' },
   { id: 'forensics', label: 'Forensics', permission: 'forensics:read' },
   { id: 'identities', label: 'Identities', permission: 'identity:read' },

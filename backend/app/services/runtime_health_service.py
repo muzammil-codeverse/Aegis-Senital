@@ -133,7 +133,7 @@ class RuntimeHealthService:
 
     def _check_event_bus(self) -> dict:
         try:
-            from core.event_bus.event_bus import EventBus  # noqa: F401
+            from core.event_bus.distributed_event_bus import DistributedEventBus  # noqa: F401
             return {"status": "ok", "detail": None}
         except Exception as e:
             return {"status": "degraded", "detail": str(e)[:120]}
@@ -181,8 +181,57 @@ class RuntimeHealthService:
             "liveness_enabled": bool(health.get("liveness_enabled", False)),
         }
 
+    def _check_case_management(self) -> dict:
+        try:
+            from app.services.case_service import get_case_service
+
+            health = get_case_service().health()
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "storage": "unknown",
+                "status": "failed" if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} else "degraded",
+                "case_count": 0,
+                "open_case_count": 0,
+                "last_error": str(exc)[:120],
+            }
+        return {
+            "enabled": bool(health.get("enabled", False)),
+            "storage": health.get("storage", "unknown"),
+            "status": health.get("status", "disabled"),
+            "case_count": int(health.get("case_count", 0)),
+            "open_case_count": int(health.get("open_case_count", 0)),
+            "last_error": health.get("last_error"),
+        }
+
+    def _check_llm(self) -> dict:
+        try:
+            from app.services.llm_service import get_llm_service
+
+            health = get_llm_service().health()
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "status": "error" if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} else "degraded",
+                "detail": str(exc)[:120],
+                "provider": "unknown",
+                "active_provider": "unknown",
+                "openai_key_present": False,
+            }
+        return {
+            "enabled": bool(health.get("enabled", False)),
+            "status": health.get("status", "disabled"),
+            "detail": health.get("detail"),
+            "provider": health.get("provider", "unknown"),
+            "active_provider": health.get("active_provider", "unknown"),
+            "openai_key_present": bool(health.get("openai_key_present", False)),
+            "using_fallback": bool(health.get("using_fallback", False)),
+        }
+
     def get_health(self, include_sensitive: bool = False) -> dict:
         """Return aggregated health status for all subsystems."""
+        case_management = self._check_case_management()
+        llm = self._check_llm()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -194,6 +243,8 @@ class RuntimeHealthService:
             "model_registry": self._check_model_registry(),
             "event_bus": self._check_event_bus(),
             "security": self._check_security(),
+            "case_management": case_management,
+            "llm": llm,
         }
 
         if not include_sensitive:
@@ -214,6 +265,8 @@ class RuntimeHealthService:
             "status": overall,
             "generated_at": time.time(),
             "checks": checks,
+            "case_management": case_management,
+            "llm": llm,
         }
 
     def is_alive(self) -> bool:
@@ -264,6 +317,14 @@ class RuntimeHealthService:
             identity = self._check_identity()
             if identity["status"] == "error":
                 failures.append(f"identity: {identity.get('detail') or identity['status']}")
+        case_management = self._check_case_management()
+        if case_management.get("enabled") and case_management.get("status") == "failed":
+            failures.append(
+                f"case_management: {case_management.get('last_error') or case_management.get('status')}"
+            )
+        llm = self._check_llm()
+        if llm.get("enabled") and llm.get("status") == "error":
+            failures.append(f"llm: {llm.get('detail') or llm.get('status')}")
 
         return {
             "ready": len(failures) == 0,

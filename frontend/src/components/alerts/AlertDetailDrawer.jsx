@@ -16,6 +16,10 @@ export default function AlertDetailDrawer({
   onResolve,
   onEscalate,
   busy,
+  relatedCase,
+  onViewCase,
+  onCreateCaseFromEvent,
+  caseBusy,
 }) {
   if (!open) return null
   return (
@@ -39,6 +43,19 @@ export default function AlertDetailDrawer({
             <span>Risk {formatPercent(alert.risk_score)}</span>
             <span>Confidence {formatPercent(alert.confidence)}</span>
           </div>
+          {(relatedCase || alert?.event_ids?.[0]) && (
+            <div className="button-row">
+              {relatedCase ? (
+                <button type="button" className="text-button" disabled={caseBusy} onClick={onViewCase}>
+                  View Case
+                </button>
+              ) : (
+                <button type="button" className="text-button" disabled={caseBusy} onClick={onCreateCaseFromEvent}>
+                  Create Case From Event
+                </button>
+              )}
+            </div>
+          )}
           <p className="drawer-description">{alert.description}</p>
           <div className="drawer-grid">
             <span>Alert ID</span><strong>{alert.alert_id}</strong>

@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from app.models.case_models import CaseExport, CaseReport
+from app.repositories.case_repository import CaseRepository, get_case_repository
+from app.services.case_timeline_service import CaseTimelineService
+
+
+DEFAULT_MODEL_CAVEATS = [
+    "Automated detections are decision-support signals and require operator review.",
+    "Possible identity matches require operator validation before operational use.",
+    "Segmentation and anomaly metadata may be partial when upstream assets are unavailable.",
+]
+
+DEFAULT_OPERATOR_REVIEW_CAVEAT = (
+    "This report is an automated decision-support draft based on available system evidence. "
+    "It requires operator review and must not be treated as a final attribution, identity confirmation, or criminality determination."
+)
+
+
+class CaseExportService:
+    def __init__(
+        self,
+        repository: CaseRepository | None = None,
+        timeline_service: CaseTimelineService | None = None,
+    ) -> None:
+        self._repository = repository or get_case_repository()
+        self._timeline_service = timeline_service or CaseTimelineService(self._repository)
+
+    def build_report(self, case_id: str, generated_by: str = "system") -> CaseReport:
+        case = self._repository.get_case(case_id)
+        if case is None:
+            raise KeyError(case_id)
+        timeline = self._timeline_service.build_timeline(case_id)
+        evidence = self._repository.list_evidence(case_id)
+        notes = self._repository.list_notes(case_id)
+        audit_summary = self._repository.list_audit_logs(case_id)
+        return CaseReport(
+            case_id=case_id,
+            generated_by=generated_by,
+            case=case.model_dump(mode="json"),
+            timeline=[item.model_dump(mode="json") for item in timeline],
+            evidence=[item.model_dump(mode="json") for item in evidence],
+            notes=[item.model_dump(mode="json") for item in notes],
+            audit_summary=[item.model_dump(mode="json") for item in audit_summary],
+            model_caveats=list(DEFAULT_MODEL_CAVEATS),
+            operator_review_caveat=DEFAULT_OPERATOR_REVIEW_CAVEAT,
+            metadata={"assigned_to": case.assigned_to, "status": case.status},
+        )
+
+    def export_case(self, case_id: str, format: str = "json", generated_by: str = "system") -> CaseExport:
+        lowered_format = str(format).lower()
+        if lowered_format not in {"json", "markdown"}:
+            raise ValueError(f"Unsupported case export format '{format}'")
+        report = self.build_report(case_id, generated_by=generated_by)
+        if lowered_format == "json":
+            content = json.dumps(report.model_dump(mode="json"), indent=2, sort_keys=True)
+        else:
+            content = self._render_markdown(report)
+        export = CaseExport(
+            case_id=case_id,
+            format=lowered_format,
+            report_type="case_export",
+            content=content,
+            generated_by=generated_by,
+            metadata={"report_id": report.report_id},
+        )
+        self._repository.add_report(export)
+        return export
+
+    @staticmethod
+    def _render_markdown(report: CaseReport) -> str:
+        case = report.case
+        evidence = report.evidence
+        notes = report.notes
+        audit_summary = report.audit_summary
+        timeline = report.timeline
+
+        lines = [
+            f"# Case Report: {case.get('title', report.case_id)}",
+            "",
+            "## Case Metadata",
+            f"- Case ID: {case.get('case_id')}",
+            f"- Status: {case.get('status')}",
+            f"- Priority: {case.get('priority')}",
+            f"- Severity: {case.get('severity')}",
+            f"- Assigned Operator: {case.get('assigned_to') or 'Unassigned'}",
+            f"- Created By: {case.get('created_by')}",
+            f"- Created At: {case.get('created_at')}",
+            f"- Updated At: {case.get('updated_at')}",
+            "",
+            "## Summary",
+            case.get("description") or "No operator summary provided.",
+            "",
+            "## Timeline",
+        ]
+        for item in timeline:
+            lines.append(
+                f"- {item.get('timestamp')}: {item.get('title')} - {item.get('description') or 'No detail provided.'}"
+            )
+
+        lines.extend(["", "## Evidence"])
+        if evidence:
+            for item in evidence:
+                lines.append(
+                    f"- {item.get('evidence_type')} | {item.get('timestamp') or item.get('created_at')} | "
+                    f"{item.get('title') or item.get('source_event_id') or item.get('evidence_id')}"
+                )
+        else:
+            lines.append("- No evidence items recorded.")
+
+        lines.extend(["", "## Notes"])
+        if notes:
+            for item in notes:
+                lines.append(f"- {item.get('created_at')} | {item.get('created_by')}: {item.get('note')}")
+        else:
+            lines.append("- No operator notes recorded.")
+
+        lines.extend(["", "## Audit Summary"])
+        if audit_summary:
+            for item in audit_summary:
+                lines.append(
+                    f"- {item.get('timestamp')} | {item.get('actor')} | {item.get('action')} | {item.get('detail') or 'Recorded'}"
+                )
+        else:
+            lines.append("- No case audit entries recorded.")
+
+        lines.extend(["", "## Model Caveats"])
+        for caveat in report.model_caveats:
+            lines.append(f"- {caveat}")
+
+        lines.extend(["", "## Operator Review Caveat", report.operator_review_caveat])
+        return "\n".join(lines)

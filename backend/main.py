@@ -16,6 +16,8 @@ from app.api.websocket_security import authenticate_websocket
 from app.models.database import init_db
 from app.services.video_service import bootstrap_inference_runtime
 from app.services.auth_service import get_auth_service
+from app.services.case_service import get_case_service
+from app.services.llm_service import get_llm_service
 from app.security.config import get_auth_config
 from app.core.logging_config import logger
 from inference.logging_setup import configure_logging
@@ -87,6 +89,14 @@ async def startup():
         logger.info("Camera registry initialized: %s cameras", snapshot["total"])
     except Exception as exc:
         logger.warning("Camera registry init failed: %s", exc)
+    try:
+        get_case_service()
+    except Exception as exc:
+        logger.warning("Case service init failed: %s", exc)
+    try:
+        get_llm_service()
+    except Exception as exc:
+        logger.warning("LLM service init failed: %s", exc)
     logger.info("Aegis Sentinel startup complete.")
 
 

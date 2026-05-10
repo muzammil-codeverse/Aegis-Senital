@@ -4,12 +4,14 @@ import SessionExpiredBanner from './components/auth/SessionExpiredBanner'
 import AppShell from './components/layout/AppShell'
 import { useAlerts } from './hooks/useAlerts'
 import { useAuth } from './hooks/useAuth'
+import { useCases } from './hooks/useCases'
 import { useIncidents } from './hooks/useIncidents'
 import { useMetrics } from './hooks/useMetrics'
 import { useSystemHealth } from './hooks/useSystemHealth'
 import { useWebSocketAlerts } from './hooks/useWebSocketAlerts'
 import AlertsPage from './pages/AlertsPage'
 import AuditLogPage from './pages/AuditLogPage'
+import CasesPage from './pages/CasesPage'
 import Dashboard from './pages/Dashboard'
 import ForensicsPage from './pages/ForensicsPage'
 import IdentityPage from './pages/IdentityPage'
@@ -19,7 +21,7 @@ import ModelsPage from './pages/ModelsPage'
 import SystemHealthPage from './pages/SystemHealthPage'
 
 const VALID_PAGES = new Set([
-  'dashboard', 'alerts', 'incidents', 'system', 'forensics',
+  'dashboard', 'alerts', 'incidents', 'cases', 'system', 'forensics',
   'identities', 'watchlist', 'models', 'audit', 'security', 'login',
 ])
 
@@ -27,6 +29,7 @@ const PAGE_PERMISSIONS = {
   dashboard: 'camera:read',
   alerts: 'alert:read',
   incidents: 'incident:read',
+  cases: 'case:read',
   system: 'metrics:read',
   forensics: 'forensics:read',
   identities: 'identity:read',
@@ -60,9 +63,11 @@ export default function App() {
 }
 
 function AuthenticatedApp() {
+  const auth = useAuth()
   const [currentPage, setCurrentPage] = useState(pageFromHash())
   const alertState = useAlerts()
   const incidentState = useIncidents()
+  const caseState = useCases({ enabled: auth.hasPermission('case:read') })
   const metricsState = useMetrics()
   const websocketState = useWebSocketAlerts()
   const health = useSystemHealth(metricsState.metrics, metricsState.error, metricsState.stale)
@@ -82,10 +87,11 @@ function AuthenticatedApp() {
   const sharedProps = useMemo(() => ({
     alertState,
     incidentState,
+    caseState,
     metricsState,
     websocketState,
     health,
-  }), [alertState, health, incidentState, metricsState, websocketState])
+  }), [alertState, caseState, health, incidentState, metricsState, websocketState])
 
   function navigate(pageId) {
     window.location.hash = pageId === 'dashboard' ? '' : pageId
@@ -112,6 +118,7 @@ function AuthenticatedApp() {
 function renderPage(page, props) {
   if (page === 'alerts') return <AlertsPage {...props} />
   if (page === 'incidents') return <IncidentsPage {...props} />
+  if (page === 'cases') return <CasesPage caseState={props.caseState} />
   if (page === 'system') return <SystemHealthPage {...props} />
   if (page === 'forensics') return <ForensicsPage {...props} />
   if (page === 'identities') return <IdentityPage />

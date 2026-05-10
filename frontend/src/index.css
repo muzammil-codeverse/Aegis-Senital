@@ -716,6 +716,33 @@ select {
   color: var(--muted);
 }
 
+.case-status-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.case-status-open,
+.case-status-investigating {
+  border-color: rgba(86, 211, 100, 0.45);
+  color: var(--green);
+}
+
+.case-status-resolved {
+  border-color: rgba(37, 208, 200, 0.45);
+  color: var(--cyan);
+}
+
+.case-status-dismissed,
+.case-status-archived {
+  border-color: rgba(132, 146, 166, 0.35);
+  color: var(--muted);
+}
+
 .incident-layout {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
@@ -780,6 +807,178 @@ select {
   color: var(--muted);
   font-style: normal;
   text-align: right;
+}
+
+.case-subcard {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 7px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.case-inline-form,
+.case-create-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.case-inline-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+}
+
+.case-create-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.case-filter-row {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+}
+
+.case-metric-strip {
+  margin-bottom: 12px;
+}
+
+.case-health-grid {
+  margin-bottom: 12px;
+}
+
+.llm-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.llm-badge-row.compact {
+  margin: 0 0 10px;
+}
+
+.llm-badge {
+  border: 1px solid var(--border);
+  background: rgba(37, 208, 200, 0.08);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.llm-badge.success {
+  border-color: rgba(86, 211, 100, 0.45);
+  color: var(--green);
+}
+
+.llm-badge.danger {
+  border-color: rgba(255, 92, 108, 0.45);
+  color: var(--red);
+}
+
+.llm-badge.muted {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
+.llm-output-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.llm-output-grid h4 {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.llm-output-card {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 7px;
+  padding: 10px;
+}
+
+.llm-content {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  color: var(--text);
+  font-family: "IBM Plex Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.llm-preview {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.llm-sources {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.llm-sources strong {
+  color: var(--text-strong);
+}
+
+.llm-sources ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.llm-query-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.report-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.report-drawer {
+  width: min(720px, 96vw);
+  height: 100vh;
+  overflow-y: auto;
+  padding: 16px;
+  border-left: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--panel), #0f151d);
+  box-shadow: var(--shadow);
+}
+
+.report-meta {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 10px;
+  color: var(--muted);
+  margin: 14px 0;
+}
+
+.report-meta strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.report-body {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 8px;
+  padding: 12px;
 }
 
 .metric-strip {
@@ -988,7 +1187,10 @@ select {
   .page-grid.two-column,
   .incident-layout,
   .filter-row,
-  .inline-form.user-form {
+  .inline-form.user-form,
+  .case-inline-form,
+  .case-create-form,
+  .case-filter-row {
     display: grid;
     grid-template-columns: 1fr;
   }
@@ -1003,5 +1205,10 @@ select {
 
   .metric-strip {
     grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .llm-output-grid,
+  .llm-query-form {
+    grid-template-columns: 1fr;
   }
 }

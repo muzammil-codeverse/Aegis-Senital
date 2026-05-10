@@ -1,0 +1,41 @@
+case_management:
+  enabled: true
+  storage:
+    dev_backend: "jsonl"
+    production_backend: "postgres"
+    jsonl_dir: "storage/cases"
+    require_postgres_in_production: true
+
+  auto_create:
+    enabled: true
+    min_severity: "high"
+    require_operator_review: true
+    event_types:
+      - weapon_detected
+      - open_vocab_scan_result
+      - anomaly_event
+      - identity_match
+      - restricted_zone_intrusion
+
+  deduplication:
+    enabled: true
+    window_seconds: 300
+    same_camera_merge: true
+    same_track_merge: true
+    same_event_type_merge: true
+
+  evidence:
+    store_raw_frames: false
+    store_snapshots_if_available: true
+    compute_sha256: true
+    max_items_per_case: 500
+
+  export:
+    enabled: true
+    formats:
+      - json
+      - markdown
+
+  retention:
+    default_case_retention_days: 180
+    archived_case_retention_days: 365
