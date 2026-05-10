@@ -8,7 +8,9 @@ then writes JSONL + metadata.csv to datasets/training/anomaly_video/.
 Usage:
     python scripts/prepare_video_anomaly_dataset.py --all
     python scripts/prepare_video_anomaly_dataset.py --source ucf_crime
-    python scripts/prepare_video_anomaly_dataset.py --all --clip-length 5 --stride 2.5
+    python scripts/prepare_video_anomaly_dataset.py --all --clip-length 16 --stride 8 --sample-rate 5
+    python scripts/prepare_video_anomaly_dataset.py --all --metadata-only
+    python scripts/prepare_video_anomaly_dataset.py --all --extract-clips --clip-length 16
 """
 from __future__ import annotations
 
@@ -85,16 +87,32 @@ def _collect_videos(raw_dir: Path) -> list[dict]:
     return items
 
 
+def _get_video_duration(video_path: str) -> float | None:
+    """Return video duration in seconds using decord if available, else None."""
+    try:
+        import decord
+        vr = decord.VideoReader(video_path)
+        fps = vr.get_avg_fps()
+        if fps > 0:
+            return len(vr) / fps
+    except Exception:
+        pass
+    return None
+
+
 def _make_clips(
     video_items: list[dict],
     source_name: str,
     clip_length: float,
     stride: float,
+    sample_rate: int = 5,
 ) -> list[dict]:
     """Generate JSONL clip entries (no actual video splitting at this stage)."""
     clips: list[dict] = []
     for item in video_items:
         base = Path(item["video_path"]).stem
+        duration = _get_video_duration(item["video_path"])
+        max_start = min(duration - clip_length, 600.0) if duration else 600.0
         start = 0.0
         clip_idx = 0
         while True:
@@ -108,12 +126,37 @@ def _make_clips(
                 "start_sec": round(start, 2),
                 "end_sec": round(end, 2),
                 "source": source_name,
+                "sample_rate": sample_rate,
             })
             clip_idx += 1
             start += stride
-            if start > 600.0:  # safety limit: don't generate infinite clips for unknown-length videos
+            if start > max_start:
                 break
     return clips
+
+
+def _extract_clip(
+    video_path: str,
+    out_path: str,
+    start_sec: float,
+    end_sec: float,
+) -> bool:
+    """Extract a physical clip using ffmpeg subprocess."""
+    import subprocess
+    duration = end_sec - start_sec
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-ss", str(start_sec), "-i", video_path,
+        "-t", str(duration),
+        "-c:v", "libx264", "-an",
+        out_path,
+    ]
+    try:
+        subprocess.run(cmd, check=True, timeout=120)
+        return True
+    except Exception as exc:
+        logger.warning("ffmpeg failed for %s at %.1f: %s", video_path, start_sec, exc)
+        return False
 
 
 def _load_config() -> dict:
@@ -150,8 +193,17 @@ def main() -> None:
     parser.add_argument("--source", help="Process a single source by name")
     parser.add_argument("--clip-length", type=float, default=5.0, help="Clip length in seconds (default 5)")
     parser.add_argument("--stride", type=float, default=2.5, help="Clip stride in seconds (default 2.5)")
+    parser.add_argument("--sample-rate", type=int, default=5, help="Frame sample rate stored in JSONL metadata (default 5)")
     parser.add_argument("--train-ratio", type=float, default=0.70, help="Train split ratio")
     parser.add_argument("--val-ratio", type=float, default=0.15, help="Val split ratio")
+    parser.add_argument(
+        "--metadata-only", action="store_true",
+        help="Scan sources and write metadata.csv + dataset_summary.json only; skip JSONL splits",
+    )
+    parser.add_argument(
+        "--extract-clips", action="store_true",
+        help="Physically extract clip files via ffmpeg (slow; requires ffmpeg on PATH)",
+    )
     args = parser.parse_args()
 
     if not args.all and not args.source:
@@ -178,7 +230,7 @@ def main() -> None:
             continue
         logger.info("Scanning %s in %s ...", name, raw_dir)
         videos = _collect_videos(raw_dir)
-        clips = _make_clips(videos, name, args.clip_length, args.stride)
+        clips = _make_clips(videos, name, args.clip_length, args.stride, sample_rate=args.sample_rate)
         all_clips.extend(clips)
         source_counts[name] = len(clips)
         logger.info("  %d videos → %d clips", len(videos), len(clips))
@@ -186,6 +238,50 @@ def main() -> None:
     if not all_clips:
         logger.warning("No clips generated. Check that raw dataset directories are populated.")
         return
+
+    _OUT_DIR.mkdir(parents=True, exist_ok=True)
+    _write_csv(all_clips, _OUT_DIR / "metadata.csv")
+
+    label_dist: dict[str, int] = {}
+    for c in all_clips:
+        label_dist[c["label"]] = label_dist.get(c["label"], 0) + 1
+
+    summary = {
+        "total_clips": len(all_clips),
+        "clip_length_sec": args.clip_length,
+        "stride_sec": args.stride,
+        "sample_rate": args.sample_rate,
+        "label_distribution": label_dist,
+        "source_clip_counts": source_counts,
+    }
+
+    if args.metadata_only:
+        with open(_OUT_DIR / "dataset_summary.json", "w", encoding="utf-8") as fh:
+            json.dump(summary, fh, indent=2)
+        logger.info("Metadata-only mode: wrote metadata.csv + dataset_summary.json")
+        logger.info("Label distribution: %s", label_dist)
+        return
+
+    if args.extract_clips:
+        clips_out_dir = _OUT_DIR / "clips"
+        clips_out_dir.mkdir(parents=True, exist_ok=True)
+        n_ok = 0
+        n_fail = 0
+        for clip in all_clips:
+            clip_filename = f"{clip['clip_id']}.mp4"
+            out_path = clips_out_dir / clip["label"] / clip_filename
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_path.exists():
+                clip["extracted_path"] = str(out_path)
+                n_ok += 1
+                continue
+            ok = _extract_clip(clip["video_path"], str(out_path), clip["start_sec"], clip["end_sec"])
+            if ok:
+                clip["extracted_path"] = str(out_path)
+                n_ok += 1
+            else:
+                n_fail += 1
+        logger.info("Extraction: %d ok, %d failed — clips at %s", n_ok, n_fail, clips_out_dir)
 
     random.shuffle(all_clips)
     n = len(all_clips)
@@ -195,26 +291,13 @@ def main() -> None:
     val = all_clips[n_train:n_train + n_val]
     test = all_clips[n_train + n_val:]
 
-    _OUT_DIR.mkdir(parents=True, exist_ok=True)
     _write_jsonl(train, _OUT_DIR / "train.jsonl")
     _write_jsonl(val, _OUT_DIR / "val.jsonl")
     _write_jsonl(test, _OUT_DIR / "test.jsonl")
-    _write_csv(all_clips, _OUT_DIR / "metadata.csv")
 
-    label_dist: dict[str, int] = {}
-    for c in all_clips:
-        label_dist[c["label"]] = label_dist.get(c["label"], 0) + 1
-
-    summary = {
-        "total_clips": n,
-        "train_clips": len(train),
-        "val_clips": len(val),
-        "test_clips": len(test),
-        "clip_length_sec": args.clip_length,
-        "stride_sec": args.stride,
-        "label_distribution": label_dist,
-        "source_clip_counts": source_counts,
-    }
+    summary["train_clips"] = len(train)
+    summary["val_clips"] = len(val)
+    summary["test_clips"] = len(test)
     with open(_OUT_DIR / "dataset_summary.json", "w", encoding="utf-8") as fh:
         json.dump(summary, fh, indent=2)
     logger.info("Dataset summary: %s", summary)

@@ -27,10 +27,15 @@ class AnomalyBenchmarkRunner:
         self,
         dataset_dir: str = "datasets/training/anomaly_video",
         output_dir: str | None = None,
+        provider: str = "rule_only",
+        model_path: str | None = None,
     ) -> None:
         self._dataset_dir = Path(dataset_dir)
         self._output_dir = Path(output_dir) if output_dir else _RESULTS_DIR
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._provider = provider
+        self._model_path = model_path
+        self._adapter = self._build_adapter()
 
     def run(self, split: str = "test") -> BenchmarkResult | None:
         jsonl_path = self._dataset_dir / f"{split}.jsonl"
@@ -95,6 +100,29 @@ class AnomalyBenchmarkRunner:
         self._log_result(result)
         return result
 
+    def _build_adapter(self):
+        """Build the model adapter for offline evaluation."""
+        try:
+            from inference.anomaly.pretrained_adapter import RuleOnlyAdapter, PretrainedVideoAdapter, build_adapter
+            from inference.anomaly.violence_adapter import ViolenceVisualAdapter
+            if self._provider == "pretrained":
+                cfg = {"type": "pretrained", "model_path": self._model_path or ""}
+                adapter = build_adapter(cfg)
+            elif self._provider == "violence_adapter":
+                adapter = ViolenceVisualAdapter(
+                    model_path=self._model_path or "models/anomaly/violence_yolo11.pt",
+                    is_production=False,
+                )
+            else:
+                adapter = RuleOnlyAdapter()
+            adapter.load()
+            if not adapter.is_loaded() and self._provider != "rule_only":
+                logger.warning("[AnomalyBenchmark] Provider '%s' adapter not loaded — falling back to simulated scoring", self._provider)
+            return adapter
+        except Exception as exc:
+            logger.warning("[AnomalyBenchmark] Failed to build adapter: %s — using simulated scoring", exc)
+            return None
+
     def _offline_predict(self, record: dict) -> tuple[str, float]:
         """
         Simulate a prediction from the label + metadata for offline benchmarking.
@@ -121,7 +149,14 @@ class AnomalyBenchmarkRunner:
 
     def _write_report(self, result: BenchmarkResult, metrics: dict, split: str) -> None:
         ts = int(time.time())
-        report = {**result.to_dict(), "metrics": metrics, "split": split, "timestamp": ts}
+        report = {
+            **result.to_dict(),
+            "metrics": metrics,
+            "split": split,
+            "timestamp": ts,
+            "provider": self._provider,
+            "model_path": self._model_path,
+        }
         out = self._output_dir / f"anomaly_benchmark_{split}_{ts}.json"
         with open(out, "w", encoding="utf-8") as fh:
             json.dump(report, fh, indent=2)

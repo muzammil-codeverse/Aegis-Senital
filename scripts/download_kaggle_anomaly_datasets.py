@@ -16,7 +16,6 @@ import argparse
 import json
 import logging
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -40,72 +39,65 @@ def _load_config() -> dict:
 
 
 def _resolve_token() -> bool:
-    """Configure Kaggle credentials from environment or ~/.kaggle/access_token.
+    """Configure Kaggle credentials from environment or ~/.kaggle/kaggle.json.
     Returns True if credentials are available."""
+    kaggle_dir = Path.home() / ".kaggle"
+    kaggle_dir.mkdir(parents=True, exist_ok=True)
+    kaggle_json = kaggle_dir / "kaggle.json"
+
     token = os.environ.get("KAGGLE_API_TOKEN", "").strip()
     if token:
-        kaggle_dir = Path.home() / ".kaggle"
-        kaggle_dir.mkdir(parents=True, exist_ok=True)
-        token_file = kaggle_dir / "access_token"
-        token_file.write_text(token)
+        # Write kaggle.json with token-based auth (kaggle v2 format)
+        import json as _json
+        cfg = {"auth_method": "token", "token": token}
+        kaggle_json.write_text(_json.dumps(cfg, indent=2))
         try:
-            token_file.chmod(0o600)
+            kaggle_json.chmod(0o600)
         except Exception:
             pass
         logger.info("Kaggle token resolved from KAGGLE_API_TOKEN environment variable.")
         return True
 
-    token_file = Path.home() / ".kaggle" / "access_token"
-    if token_file.exists():
-        logger.info("Kaggle token found at %s", token_file)
-        return True
-
-    kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
     if kaggle_json.exists():
         logger.info("Kaggle credentials found at %s", kaggle_json)
         return True
 
+    # Legacy: access_token file (v1 style — not used in v2, but check presence)
+    token_file = kaggle_dir / "access_token"
+    if token_file.exists():
+        logger.warning(
+            "Found %s but kaggle v2 requires kaggle.json — set KAGGLE_API_TOKEN env var.", token_file
+        )
+
     logger.error(
         "No Kaggle credentials found.\n"
-        "  Option 1: set KAGGLE_API_TOKEN environment variable\n"
-        "  Option 2: write token to ~/.kaggle/access_token\n"
-        "  Option 3: place kaggle.json in ~/.kaggle/"
+        "  Set KAGGLE_API_TOKEN environment variable (KGAT_... token).\n"
+        "  Or place kaggle.json in ~/.kaggle/ with {\"auth_method\": \"token\", \"token\": \"KGAT_...\"}"
     )
     return False
 
 
 def _download_dataset(slug: str, zip_dir: str, force: bool = False) -> bool:
-    """Shell out to kaggle CLI to download a dataset. Returns True on success."""
+    """Download a Kaggle dataset using the Python API. Returns True on success."""
     Path(zip_dir).mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable, "-m", "kaggle",
-        "datasets", "download",
-        "-d", slug,
-        "-p", zip_dir,
-        "--unzip",
-    ]
-    if force:
-        cmd.append("--force")
-
     logger.info("Downloading dataset: %s → %s", slug, zip_dir)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-        if result.returncode != 0:
-            logger.error("kaggle CLI failed for '%s':\n%s", slug, result.stderr[:500])
-            return False
+        import kaggle.api as kapi
+        kapi.authenticate()
+        kapi.dataset_download_files(
+            dataset=slug,
+            path=zip_dir,
+            unzip=True,
+            force=force,
+            quiet=False,
+        )
         logger.info("Download complete: %s", slug)
         return True
-    except FileNotFoundError:
-        logger.error(
-            "kaggle CLI not found. Install with: pip install kaggle\n"
-            "Then retry."
-        )
-        return False
-    except subprocess.TimeoutExpired:
-        logger.error("Download timed out for %s", slug)
+    except ImportError:
+        logger.error("kaggle package not installed. Run: pip install kaggle")
         return False
     except Exception as exc:
-        logger.error("Unexpected error downloading %s: %s", slug, exc)
+        logger.error("kaggle download failed for '%s': %s", slug, exc)
         return False
 
 

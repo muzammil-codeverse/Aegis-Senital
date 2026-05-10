@@ -3,7 +3,9 @@ Evaluate anomaly detection models against prepared datasets.
 
 Usage:
     python scripts/evaluate_anomaly_models.py --split test
-    python scripts/evaluate_anomaly_models.py --split test --dataset-dir datasets/training/anomaly_video
+    python scripts/evaluate_anomaly_models.py --split test --provider rule_only
+    python scripts/evaluate_anomaly_models.py --split test --provider pretrained --model-path models/anomaly/videomae_ucf_xd_binary/best
+    python scripts/evaluate_anomaly_models.py --split test --provider violence_adapter --model-path models/anomaly/violence_yolo11.pt
     python scripts/evaluate_anomaly_models.py --check-policy
 
 GPU check is performed before any inference to ensure CUDA is available.
@@ -42,6 +44,15 @@ def main() -> None:
     parser.add_argument("--output-dir", default="storage/evaluation_runs/anomaly")
     parser.add_argument("--check-policy", action="store_true", help="Print acceptance policy and exit")
     parser.add_argument("--skip-gpu-check", action="store_true", help="Skip GPU availability check")
+    parser.add_argument(
+        "--provider", default="rule_only",
+        choices=["rule_only", "pretrained", "violence_adapter"],
+        help="Model provider to evaluate (default: rule_only)",
+    )
+    parser.add_argument(
+        "--model-path", default=None,
+        help="Path to model weights for pretrained/violence_adapter providers",
+    )
     args = parser.parse_args()
 
     if args.check_policy:
@@ -56,11 +67,15 @@ def main() -> None:
     if not args.skip_gpu_check:
         _check_gpu()
 
+    logger.info("Provider: %s | Model path: %s", args.provider, args.model_path or "(default)")
+
     from backend.app.evaluation.runners.anomaly_benchmark_runner import AnomalyBenchmarkRunner
 
     runner = AnomalyBenchmarkRunner(
         dataset_dir=args.dataset_dir,
         output_dir=args.output_dir,
+        provider=args.provider,
+        model_path=args.model_path,
     )
     result = runner.run(split=args.split)
 
