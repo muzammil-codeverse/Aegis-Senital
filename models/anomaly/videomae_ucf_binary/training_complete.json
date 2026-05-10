@@ -1,0 +1,11 @@
+{
+  "complete": true,
+  "total_epochs": 5,
+  "best_epoch": 4,
+  "best_val_loss": 0.3888,
+  "best_val_acc": 0.8378,
+  "task": "binary",
+  "dataset": "ucf_crime",
+  "clips_train": 520,
+  "clips_val": 111
+}

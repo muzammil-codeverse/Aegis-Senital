@@ -209,7 +209,7 @@ def _collate(batch: list[dict]):
 def train(args) -> None:
     import torch
     from torch.utils.data import DataLoader
-    from torch.cuda.amp import GradScaler, autocast
+    from torch.amp import GradScaler, autocast
 
     _check_gpu(args.device)
 
@@ -222,21 +222,56 @@ def train(args) -> None:
     num_labels = len(set(label_map.values()))
     logger.info("Task: %s | Labels (%d): %s", args.task, num_labels, label_map)
 
+    # Resolve resume checkpoint and start epoch
+    start_epoch = 1
+    resume_path: str | None = None
+    out_dir_probe = Path(args.output_dir)
+    if args.resume_from:
+        rp = Path(args.resume_from)
+        if rp.exists():
+            resume_path = str(rp)
+            # Infer completed epoch from directory name like epoch_02
+            import re as _re
+            m = _re.search(r"epoch_(\d+)", rp.name)
+            if m:
+                start_epoch = int(m.group(1)) + 1
+            logger.info("Resuming from %s — start_epoch=%d", resume_path, start_epoch)
+        else:
+            logger.warning("--resume-from path not found: %s — starting from scratch", args.resume_from)
+    elif args.auto_resume:
+        # Auto-detect latest epoch checkpoint in output dir
+        epoch_dirs = sorted(out_dir_probe.glob("epoch_*"), key=lambda p: p.name)
+        if epoch_dirs:
+            resume_path = str(epoch_dirs[-1])
+            import re as _re
+            m = _re.search(r"epoch_(\d+)", epoch_dirs[-1].name)
+            if m:
+                start_epoch = int(m.group(1)) + 1
+            logger.info("Auto-resume from %s — start_epoch=%d", resume_path, start_epoch)
+
+    if start_epoch > args.epochs:
+        logger.info("Training already complete (start_epoch=%d > total_epochs=%d). Nothing to do.", start_epoch, args.epochs)
+        return
+
     # Load model
-    logger.info("Loading model: %s", args.model_name)
+    model_source = resume_path or args.model_name
+    logger.info("Loading model: %s (start_epoch=%d)", model_source, start_epoch)
     try:
         from transformers import VideoMAEForVideoClassification, VideoMAEConfig
 
-        local_model_path = Path("models/anomaly/pretrained") / args.model_name.split("/")[-1].lower().replace("-", "_")
-        model_path = str(local_model_path) if local_model_path.exists() else args.model_name
+        if resume_path:
+            load_path = resume_path
+        else:
+            local_model_path = Path("models/anomaly/pretrained") / args.model_name.split("/")[-1].lower().replace("-", "_")
+            load_path = str(local_model_path) if local_model_path.exists() else args.model_name
 
         model = VideoMAEForVideoClassification.from_pretrained(
-            model_path,
+            load_path,
             num_labels=num_labels,
             ignore_mismatched_sizes=True,
         )
     except Exception as exc:
-        logger.error("Failed to load model '%s': %s", args.model_name, exc)
+        logger.error("Failed to load model '%s': %s", model_source, exc)
         logger.error("Download it first: python scripts/download_pretrained_anomaly_models.py --models videomae_kinetics")
         sys.exit(1)
 
@@ -262,7 +297,7 @@ def train(args) -> None:
     )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
-    scaler = GradScaler(enabled=args.fp16)
+    scaler = GradScaler("cuda", enabled=args.fp16)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -271,8 +306,19 @@ def train(args) -> None:
         args.epochs, args.batch_size, args.fp16, args.device, len(train_records),
     )
 
+    # Load best_val_loss from existing best/ dir if resuming
     best_val_loss = float("inf")
-    for epoch in range(1, args.epochs + 1):
+    best_state_path = out_dir / "best_state.json"
+    if resume_path and best_state_path.exists():
+        try:
+            with open(best_state_path) as fh:
+                bs = json.load(fh)
+                best_val_loss = bs.get("val_loss", float("inf"))
+            logger.info("Loaded prior best_val_loss=%.4f from %s", best_val_loss, best_state_path)
+        except Exception:
+            pass
+
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         epoch_loss = 0.0
         t0 = time.time()
@@ -280,7 +326,7 @@ def train(args) -> None:
             pixel_values = batch["pixel_values"].to(args.device)
             labels = batch["labels"].to(args.device)
             optimizer.zero_grad()
-            with autocast(enabled=args.fp16):
+            with autocast("cuda", enabled=args.fp16):
                 outputs = model(pixel_values=pixel_values, labels=labels)
                 loss = outputs.loss
             scaler.scale(loss).backward()
@@ -306,7 +352,7 @@ def train(args) -> None:
             for batch in val_loader:
                 pixel_values = batch["pixel_values"].to(args.device)
                 labels = batch["labels"].to(args.device)
-                with autocast(enabled=args.fp16):
+                with autocast("cuda", enabled=args.fp16):
                     outputs = model(pixel_values=pixel_values, labels=labels)
                 val_loss += outputs.loss.item()
                 preds = outputs.logits.argmax(dim=-1)
@@ -319,11 +365,17 @@ def train(args) -> None:
         if args.save_every_epoch or avg_val_loss < best_val_loss:
             ckpt_path = out_dir / f"epoch_{epoch:02d}"
             model.save_pretrained(str(ckpt_path))
+            # Persist epoch metadata so orchestrator and --auto-resume can read it
+            with open(ckpt_path / "epoch_state.json", "w") as fh:
+                json.dump({"epoch": epoch, "val_loss": avg_val_loss, "val_acc": val_acc,
+                           "train_loss": avg_train_loss}, fh, indent=2)
             logger.info("Checkpoint saved: %s", ckpt_path)
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 best_path = out_dir / "best"
                 model.save_pretrained(str(best_path))
+                with open(best_state_path, "w") as fh:
+                    json.dump({"epoch": epoch, "val_loss": best_val_loss, "val_acc": val_acc}, fh, indent=2)
                 logger.info("Best model updated: %s (val_loss=%.4f)", best_path, best_val_loss)
 
     # Save final
@@ -331,9 +383,13 @@ def train(args) -> None:
     model.save_pretrained(str(final_path))
     logger.info("Training complete. Final model: %s", final_path)
 
-    # Save label map
+    # Save label map and completion marker
     with open(out_dir / "label_map.json", "w") as fh:
         json.dump(label_map, fh, indent=2)
+    with open(out_dir / "training_complete.json", "w") as fh:
+        json.dump({"complete": True, "total_epochs": args.epochs,
+                   "best_val_loss": best_val_loss, "task": args.task}, fh, indent=2)
+    logger.info("Completion marker written: %s/training_complete.json", out_dir)
 
 
 def main() -> None:
@@ -351,6 +407,10 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--fp16", action="store_true")
     parser.add_argument("--save-every-epoch", action="store_true")
+    parser.add_argument("--resume-from", default=None,
+                        help="Path to a saved epoch_XX checkpoint dir to resume from")
+    parser.add_argument("--auto-resume", action="store_true",
+                        help="Auto-detect latest epoch checkpoint in --output-dir and resume")
     args = parser.parse_args()
     train(args)
 

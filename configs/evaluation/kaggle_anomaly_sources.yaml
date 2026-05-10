@@ -9,7 +9,7 @@ ucf_crime:
 xd_violence:
   kaggle_slug: "bypktt/xd-violence"
   fallback_slug: "nguhaduong/xd-violence-video-dataset"
-  raw_dir: "datasets/raw/anomaly/xd_violence"
+  raw_dir: "datasets/raw/anomaly/kaggle_zips"
   zip_dir: "datasets/raw/anomaly/kaggle_zips"
   role: "violence_anomaly"
   required: true

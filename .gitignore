@@ -1,3 +1,6 @@
+# Runtime orchestration state (auto-generated, not committed)
+runtime_state/
+
 # Python
 __pycache__/
 *.py[cod]

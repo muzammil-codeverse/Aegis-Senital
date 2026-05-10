@@ -1,0 +1,10 @@
+{
+  "normal": 0,
+  "violence": 1,
+  "theft": 1,
+  "explosion": 1,
+  "arrest": 1,
+  "shooting": 1,
+  "traffic_accident": 1,
+  "vandalism": 1
+}

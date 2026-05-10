@@ -1,0 +1,8 @@
+{
+  "videomae_kinetics": {
+    "name": "videomae_kinetics",
+    "status": "success",
+    "local_dir": "models/anomaly/pretrained/videomae_kinetics",
+    "error": null
+  }
+}

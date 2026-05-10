@@ -48,6 +48,7 @@ LABEL_MAP: dict[str, str] = {
     "burglary": "theft", "robbery": "theft", "shoplifting": "theft", "stealing": "theft",
     # traffic
     "roadaccidents": "traffic_accident", "road accident": "traffic_accident",
+    "caraccident": "traffic_accident", "car accident": "traffic_accident",
     # vandalism
     "vandalism": "vandalism",
     # arrest
@@ -132,11 +133,19 @@ def _get_video_duration(video_path: str) -> float | None:
     return None
 
 
+_frame_dir_cache: dict[str, set[str]] = {}
+
+
 def _count_frames(frame_dir: str, prefix: str, ext: str) -> int:
-    """Count how many frames exist for a given video prefix in a directory."""
-    import glob as _glob
-    pattern = f"{frame_dir}/{prefix}_*{ext}"
-    return len(_glob.glob(pattern))
+    """Count frames for a video prefix using a cached directory listing."""
+    if frame_dir not in _frame_dir_cache:
+        try:
+            _frame_dir_cache[frame_dir] = {f for f in os.listdir(frame_dir) if f.endswith(ext)}
+        except Exception:
+            _frame_dir_cache[frame_dir] = set()
+    stems = _frame_dir_cache[frame_dir]
+    needle = f"{prefix}_"
+    return sum(1 for s in stems if s.startswith(needle))
 
 
 def _make_clips(
@@ -242,9 +251,10 @@ def _write_csv(records: list[dict], path: Path) -> None:
     if not records:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = list(records[0].keys())
+    # Collect union of all field names (mixed video/frame records have different keys)
+    fields: list[str] = list(dict.fromkeys(k for rec in records for k in rec.keys()))
     with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore", restval="")
         writer.writeheader()
         writer.writerows(records)
     logger.info("Wrote metadata CSV: %s (%d rows)", path, len(records))
@@ -254,6 +264,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare video anomaly training dataset")
     parser.add_argument("--all", action="store_true", help="Process all configured sources")
     parser.add_argument("--source", help="Process a single source by name")
+    parser.add_argument("--sources", nargs="+", help="Process multiple named sources and merge output")
+    parser.add_argument("--merge", action="store_true", help="Merge all specified sources into unified JSONL splits")
     parser.add_argument("--clip-length", type=float, default=5.0, help="Clip length in seconds (default 5)")
     parser.add_argument("--stride", type=float, default=2.5, help="Clip stride in seconds (default 2.5)")
     parser.add_argument("--sample-rate", type=int, default=5, help="Frame sample rate stored in JSONL metadata (default 5)")
@@ -269,7 +281,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.all and not args.source:
+    if not args.all and not args.source and not args.sources:
         parser.print_help()
         sys.exit(0)
 
@@ -277,6 +289,12 @@ def main() -> None:
     sources_to_process: dict[str, dict] = {}
     if args.all:
         sources_to_process = config
+    elif args.sources:
+        for s in args.sources:
+            if s not in config:
+                logger.error("Unknown source: %s", s)
+                sys.exit(1)
+        sources_to_process = {s: config[s] for s in args.sources}
     else:
         if args.source not in config:
             logger.error("Unknown source: %s", args.source)
