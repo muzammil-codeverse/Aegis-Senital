@@ -112,25 +112,64 @@ class AnomalyClipDataset:
 
     def __getitem__(self, idx: int):
         import torch
-        import numpy as np
         rec = self.records[idx]
         label_str = rec.get("label", "normal")
         label_id = self.label_map.get(label_str, 1 if label_str != "normal" else 0)
         label = torch.tensor(label_id, dtype=torch.long)
 
-        video_path = rec.get("video_path", "")
-        start_sec = float(rec.get("start_sec", 0.0))
-        end_sec = float(rec.get("end_sec", start_sec + 5.0))
-
-        frames = self._decode_clip(video_path, start_sec, end_sec)
+        clip_type = rec.get("clip_type", "video")
+        if clip_type == "frames":
+            frames = self._load_frame_sequence(
+                rec.get("video_path", ""),
+                rec.get("frame_prefix", ""),
+                rec.get("frame_ext", ".png"),
+                rec.get("num_frames", 0),
+            )
+        else:
+            video_path = rec.get("video_path", "")
+            start_sec = float(rec.get("start_sec", 0.0))
+            end_sec = float(rec.get("end_sec", start_sec + 5.0))
+            frames = self._decode_clip(video_path, start_sec, end_sec)
         return {"pixel_values": frames, "labels": label}
+
+    def _load_frame_sequence(self, frame_dir: str, prefix: str, ext: str, total_frames: int):
+        import torch
+        import glob
+        from PIL import Image as PILImage
+        import numpy as np
+
+        pattern = os.path.join(frame_dir, f"{prefix}_*{ext}")
+        paths = sorted(glob.glob(pattern), key=lambda p: int(
+            os.path.splitext(os.path.basename(p))[0].rsplit("_", 1)[-1]
+        ))
+        if not paths:
+            return torch.randn(self.clip_len, 3, self.image_size, self.image_size)
+
+        step = max(1, len(paths) // self.clip_len)
+        selected = paths[::step][: self.clip_len]
+        if len(selected) < self.clip_len:
+            selected += [selected[-1]] * (self.clip_len - len(selected))
+
+        frames_list = []
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        for p in selected:
+            try:
+                img = PILImage.open(p).convert("RGB").resize(
+                    (self.image_size, self.image_size), PILImage.BILINEAR
+                )
+                arr = np.array(img, dtype=np.float32) / 255.0
+                arr = (arr - mean) / std
+                frames_list.append(torch.from_numpy(arr).permute(2, 0, 1))  # [C, H, W]
+            except Exception:
+                frames_list.append(torch.zeros(3, self.image_size, self.image_size))
+        return torch.stack(frames_list)  # [T, C, H, W]
 
     def _decode_clip(self, video_path: str, start_sec: float, end_sec: float):
         import torch
         import numpy as np
 
         if not os.path.exists(video_path):
-            # Fallback: random tensor for pipeline testing
             return torch.randn(self.clip_len, 3, self.image_size, self.image_size)
 
         try:
@@ -150,7 +189,6 @@ class AnomalyClipDataset:
                 indices += [indices[-1]] * (self.clip_len - len(indices))
             frames = vr.get_batch(indices[:self.clip_len])  # [T, H, W, C]
             frames = frames.float() / 255.0
-            # Normalize ImageNet
             mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 1, 1, 3)
             std = torch.tensor([0.229, 0.224, 0.225]).view(1, 1, 1, 3)
             frames = (frames - mean) / std

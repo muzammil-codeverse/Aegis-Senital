@@ -34,8 +34,9 @@ _VIDEO_EXTS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv"}
 _FRAME_EXTS = {".jpg", ".jpeg", ".png"}
 
 LABEL_MAP: dict[str, str] = {
-    # normal
-    "normal": "normal",
+    # normal — UCF-Crime uses "NormalVideos" folder name
+    "normal": "normal", "normalvideos": "normal", "normalvideo": "normal",
+    "normal_videos": "normal", "normal_videos_event": "normal",
     # violence
     "fighting": "violence", "fight": "violence", "assault": "violence",
     "abuse": "violence", "riot": "violence", "violence": "violence",
@@ -70,20 +71,51 @@ def _canonical_label(folder_name: str) -> str:
 
 
 def _collect_videos(raw_dir: Path) -> list[dict]:
-    """Recursively find all video files, inferring label from parent folder."""
+    """Recursively find all video files OR frame-sequence directories.
+
+    Frame sequences: directories containing *.png/jpg files named
+    {video_name}_{frame_number}.ext (e.g., Abuse028_x264_0.png).
+    Each unique {video_name} becomes one item with type="frames".
+    """
     items: list[dict] = []
+    seen_video_names: set[str] = set()
+
     for path in raw_dir.rglob("*"):
-        if path.suffix.lower() not in _VIDEO_EXTS:
-            continue
-        folder_label = path.parent.name
-        label = _canonical_label(folder_label)
-        is_anomaly = label != "normal"
-        items.append({
-            "video_path": str(path),
-            "folder_label": folder_label,
-            "label": label,
-            "is_anomaly": is_anomaly,
-        })
+        if path.is_file() and path.suffix.lower() in _VIDEO_EXTS:
+            folder_label = path.parent.name
+            label = _canonical_label(folder_label)
+            items.append({
+                "video_path": str(path),
+                "folder_label": folder_label,
+                "label": label,
+                "is_anomaly": label != "normal",
+                "type": "video",
+            })
+        elif path.is_file() and path.suffix.lower() in _FRAME_EXTS:
+            # Group by unique video name: strip trailing _{digits} from stem
+            import re as _re
+            stem = path.stem
+            m = _re.match(r"^(.+?)_(\d+)$", stem)
+            if not m:
+                continue
+            video_name = m.group(1)
+            frame_dir = str(path.parent)
+            key = f"{frame_dir}/{video_name}"
+            if key in seen_video_names:
+                continue
+            seen_video_names.add(key)
+            folder_label = path.parent.name
+            label = _canonical_label(folder_label)
+            items.append({
+                "video_path": frame_dir,
+                "frame_prefix": video_name,
+                "frame_ext": path.suffix.lower(),
+                "folder_label": folder_label,
+                "label": label,
+                "is_anomaly": label != "normal",
+                "type": "frames",
+            })
+
     return items
 
 
@@ -100,6 +132,13 @@ def _get_video_duration(video_path: str) -> float | None:
     return None
 
 
+def _count_frames(frame_dir: str, prefix: str, ext: str) -> int:
+    """Count how many frames exist for a given video prefix in a directory."""
+    import glob as _glob
+    pattern = f"{frame_dir}/{prefix}_*{ext}"
+    return len(_glob.glob(pattern))
+
+
 def _make_clips(
     video_items: list[dict],
     source_name: str,
@@ -107,31 +146,55 @@ def _make_clips(
     stride: float,
     sample_rate: int = 5,
 ) -> list[dict]:
-    """Generate JSONL clip entries (no actual video splitting at this stage)."""
+    """Generate JSONL clip entries for both video files and frame sequences."""
     clips: list[dict] = []
     for item in video_items:
-        base = Path(item["video_path"]).stem
-        duration = _get_video_duration(item["video_path"])
-        max_start = min(duration - clip_length, 600.0) if duration else 600.0
-        start = 0.0
-        clip_idx = 0
-        while True:
-            end = start + clip_length
-            clip_id = f"{source_name}_{base}_{clip_idx:04d}"
+        if item.get("type") == "frames":
+            # Frame-sequence mode: one clip = 16 consecutive frames
+            prefix = item["frame_prefix"]
+            frame_dir = item["video_path"]
+            ext = item["frame_ext"]
+            n_frames = _count_frames(frame_dir, prefix, ext)
+            if n_frames < 16:
+                continue
+            clip_id = f"{source_name}_{prefix}_frames"
             clips.append({
-                "video_path": item["video_path"],
+                "video_path": frame_dir,
+                "frame_prefix": prefix,
+                "frame_ext": ext,
+                "clip_type": "frames",
                 "clip_id": clip_id,
                 "label": item["label"],
                 "is_anomaly": item["is_anomaly"],
-                "start_sec": round(start, 2),
-                "end_sec": round(end, 2),
+                "num_frames": n_frames,
+                "clip_frames": 16,
                 "source": source_name,
                 "sample_rate": sample_rate,
             })
-            clip_idx += 1
-            start += stride
-            if start > max_start:
-                break
+        else:
+            base = Path(item["video_path"]).stem
+            duration = _get_video_duration(item["video_path"])
+            max_start = min(duration - clip_length, 600.0) if duration else 600.0
+            start = 0.0
+            clip_idx = 0
+            while True:
+                end = start + clip_length
+                clip_id = f"{source_name}_{base}_{clip_idx:04d}"
+                clips.append({
+                    "video_path": item["video_path"],
+                    "clip_type": "video",
+                    "clip_id": clip_id,
+                    "label": item["label"],
+                    "is_anomaly": item["is_anomaly"],
+                    "start_sec": round(start, 2),
+                    "end_sec": round(end, 2),
+                    "source": source_name,
+                    "sample_rate": sample_rate,
+                })
+                clip_idx += 1
+                start += stride
+                if start > max_start:
+                    break
     return clips
 
 

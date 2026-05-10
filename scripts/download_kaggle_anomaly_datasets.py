@@ -116,7 +116,9 @@ def _save_manifest(manifest: dict) -> None:
 
 
 def download_source(name: str, cfg: dict, force: bool, continue_on_error: bool) -> dict:
-    zip_dir = cfg.get("zip_dir", f"datasets/raw/anomaly/kaggle_zips")
+    # Download directly to raw_dir so extraction lands in the right place.
+    # zip_dir is kept only for backward compatibility; raw_dir takes precedence.
+    raw_dir = cfg.get("raw_dir", f"datasets/raw/anomaly/{name}")
     primary_slug = cfg.get("kaggle_slug", "")
     fallback_slug = cfg.get("fallback_slug", "")
 
@@ -128,7 +130,7 @@ def download_source(name: str, cfg: dict, force: bool, continue_on_error: bool) 
         "error": None,
     }
 
-    success = _download_dataset(primary_slug, zip_dir, force=force)
+    success = _download_dataset(primary_slug, raw_dir, force=force)
     if success:
         entry["status"] = "success"
         entry["slug_used"] = primary_slug
@@ -136,7 +138,7 @@ def download_source(name: str, cfg: dict, force: bool, continue_on_error: bool) 
 
     if fallback_slug:
         logger.info("Primary slug failed, trying fallback: %s", fallback_slug)
-        success = _download_dataset(fallback_slug, zip_dir, force=force)
+        success = _download_dataset(fallback_slug, raw_dir, force=force)
         if success:
             entry["status"] = "success"
             entry["slug_used"] = fallback_slug

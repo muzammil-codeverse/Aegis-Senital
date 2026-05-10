@@ -1,7 +1,7 @@
 ucf_crime:
   kaggle_slug: "odins0n/ucf-crime-dataset"
   fallback_slug: "bypktt/ucf-crimes"
-  raw_dir: "datasets/raw/anomaly/ucf_crime"
+  raw_dir: "datasets/raw/anomaly/kaggle_zips"
   zip_dir: "datasets/raw/anomaly/kaggle_zips"
   role: "broad_surveillance_anomaly"
   required: true
