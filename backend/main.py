@@ -20,11 +20,30 @@ from inference.logging_setup import configure_logging
 from ml.runtime import system_boot_check
 from app.services.websocket_alert_service import websocket_alert_service
 
+
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://[::1]:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://[::1]:4173",
+)
+
+
+def _get_allowed_cors_origins() -> list[str]:
+    raw_value = os.getenv("CORS_ALLOW_ORIGINS", "")
+    if not raw_value.strip():
+        return list(_DEFAULT_CORS_ORIGINS)
+    return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+
+
 app = FastAPI(title="Sentinel AI System", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_get_allowed_cors_origins(),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
