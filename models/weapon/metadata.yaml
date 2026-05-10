@@ -1,31 +1,55 @@
 task: weapon_detection
 active_weight: models/weapon/current.pt
-source_weight: weapon_model/aegis_models/weapon_run_v1/20260503_131745/weapon/weights/best.pt
-source_data_yaml: weapon_model/aegis_models/weapon_run_v1/20260503_131745/dataset_config.yaml
-selected_reason: best.pt from completed weapon training run (YOLOv8n, 48 epochs, best at epoch 45)
-architecture: YOLOv8n
+source_weight: runs/detect/runs/aegis_weapon/yolo11s_weapon_v2/weights/best.pt
+source_data_yaml: datasets/training/weapon_v2/data.yaml
+selected_reason: >
+  Best-fitness checkpoint from YOLO11s weapon_v2 training stopped at epoch 30 by
+  Phase 29.5 quality gate. Replaces YOLOv8n 5-class model. Adds 4 new classes
+  (machete, sickle, axe, sword). Test mAP50=0.737 vs legacy 0.691. p95=25.7ms.
+architecture: YOLO11s
 class_names:
   - pistol
   - rifle
   - knife
-  - grenade
   - shotgun
-nc: 5
+  - grenade
+  - machete
+  - sickle
+  - axe
+  - sword
+nc: 9
 training_summary:
-  best_epoch: 45
-  final_epoch: 48
-  total_epochs_configured: 50
-  best_map50: 0.6907
-  best_map50_95: 0.39034
-  best_precision: 0.75265
-  best_recall: 0.66449
-  train_images: 11870
-  batch_size: 16
+  stopped_epoch: 30
+  total_epochs_configured: 80
+  best_val_map50: 0.8200
+  best_val_map50_95: 0.5650
+  test_map50: 0.7367
+  test_map50_95: 0.4908
+  test_precision: 0.7659
+  test_recall: 0.7677
+  test_f1: 0.7668
+  test_p95_latency_ms: 25.673
+  per_class_ap50:
+    pistol: 0.7988
+    rifle: 0.7697
+    knife: 0.4836
+    shotgun: 0.4308
+    grenade: null
+    machete: 0.8121
+    sickle: 0.9943
+    axe: 0.7958
+    sword: 0.8081
+  train_images: 26961
+  batch_size: 8
   image_size: 640
   training_completed: false
-  note: Training ran to epoch 48 of 50 (results.csv has 48 rows). best.pt = epoch 45 weights.
-dataset_status:
-  original_path: /content/datasets/weapon
-  original_path_valid: false
-  note: Colab absolute path — dataset not on this machine. Roboflow download needed for evaluation.
-created_at: "2026-05-09T23:38:00+00:00"
+  note: >
+    Stopped at epoch 30 per quality gate policy. Best.pt by YOLO fitness score.
+    Grenade has 0 test instances. Knife (0.484) and shotgun (0.431) remain weak.
+legacy_backup: models/weapon/legacy_current_backup.pt
+legacy_model:
+  architecture: YOLOv8n
+  nc: 5
+  best_epoch: 45
+  map50: 0.6907
+promoted_at: "2026-05-10T15:10:00+00:00"

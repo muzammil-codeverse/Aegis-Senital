@@ -54,9 +54,9 @@ anomaly:
     min_duration_seconds: 2.0
 
   video_model:
-    enabled: false
-    provider: "pretrained_adapter"
-    model_path: "models/anomaly/current.pt"
+    enabled: true
+    provider: "pretrained"
+    model_path: "models/anomaly/current"
     fail_if_missing_in_production: true
 
   acceptance_policy:

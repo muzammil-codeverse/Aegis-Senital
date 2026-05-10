@@ -11,7 +11,7 @@
     "v1": {
       "model_name": "weapon_detector",
       "version": "v1",
-      "path": "models/weapon/current.pt",
+      "path": "models/weapon/legacy_current_backup.pt",
       "classes": ["pistol", "rifle", "knife", "grenade", "shotgun"],
       "nc": 5,
       "mAP50": 0.6907,
@@ -21,7 +21,26 @@
       "created_at": "2026-05-03T13:17:45+00:00",
       "framework": "YOLOv8",
       "architecture": "YOLOv8n",
-      "notes": "Custom-trained weapon detector. 5 classes: pistol, rifle, knife, grenade, shotgun. Trained on 11870 images."
+      "notes": "Legacy YOLOv8n 5-class model. Superseded by v2."
+    },
+    "v2": {
+      "model_name": "weapon_detector",
+      "version": "v2",
+      "path": "models/weapon/current.pt",
+      "classes": ["pistol", "rifle", "knife", "shotgun", "grenade", "machete", "sickle", "axe", "sword"],
+      "nc": 9,
+      "mAP50": 0.7367,
+      "mAP50_95": 0.4908,
+      "precision": 0.7659,
+      "recall": 0.7677,
+      "f1": 0.7668,
+      "p95_latency_ms": 25.673,
+      "stopped_epoch": 30,
+      "training_dataset": "weapon_v2",
+      "created_at": "2026-05-10T15:10:00+00:00",
+      "framework": "Ultralytics",
+      "architecture": "YOLO11s",
+      "notes": "YOLO11s 9-class model. Stopped at epoch 30 by Phase 29.5 quality gate. Test mAP50=0.737 on 1586 test images. Weak classes: knife (0.484), shotgun (0.431)."
     }
   },
   "phone_detector": {
