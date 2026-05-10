@@ -153,6 +153,10 @@ def permission_for_request(method: str, path: str) -> str | None:
         return "admin"
     if path.startswith("/api/audit/"):
         return "audit:read"
+    if path == "/api/analytics/export":
+        return "analytics:export"
+    if path.startswith("/api/analytics"):
+        return "analytics:read"
     if path.startswith("/api/llm/"):
         if method == "GET":
             return "llm:read"

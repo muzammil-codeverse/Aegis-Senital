@@ -10,6 +10,7 @@ from app.api.object_authorization import (
     can_access_identity,
     can_access_incident,
 )
+from app.api.analytics_routes import router as analytics_router
 from app.api.case_routes import router as case_router
 from app.api.llm_routes import router as llm_router
 from app.api.osint_routes import router as osint_router
@@ -39,6 +40,7 @@ from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
 
 router = APIRouter()
+router.include_router(analytics_router)
 router.include_router(case_router)
 router.include_router(llm_router)
 router.include_router(osint_router)

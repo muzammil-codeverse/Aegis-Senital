@@ -50,6 +50,8 @@ rbac:
   supervisor:
     - "camera:read"
     - "camera:control"
+    - "analytics:read"
+    - "analytics:export"
     - "stream:read"
     - "stream:write"
     - "stream:replay"
@@ -80,6 +82,8 @@ rbac:
     - "osint:summarize"
   analyst:
     - "camera:read"
+    - "analytics:read"
+    - "analytics:export"
     - "stream:read"
     - "stream:replay"
     - "alert:read"
@@ -106,6 +110,7 @@ rbac:
   operator:
     - "camera:read"
     - "camera:control"
+    - "analytics:read"
     - "stream:read"
     - "stream:replay"
     - "alert:read"
@@ -125,6 +130,7 @@ rbac:
     - "osint:summarize"
   viewer:
     - "camera:read"
+    - "analytics:read"
     - "stream:read"
     - "alert:read"
     - "incident:read"

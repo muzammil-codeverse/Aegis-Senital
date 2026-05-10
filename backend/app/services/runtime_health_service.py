@@ -295,12 +295,35 @@ class RuntimeHealthService:
                 "missing_dependencies": [],
             }
 
+    def _check_analytics(self) -> dict:
+        production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
+        try:
+            from app.services.analytics_service import get_analytics_service
+
+            health = get_analytics_service().get_health().model_dump(mode="json")
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "storage": "unknown",
+                "status": "failed" if production_mode else "degraded",
+                "sources": {},
+                "last_error": str(exc)[:120],
+            }
+        return {
+            "enabled": bool(health.get("enabled", False)),
+            "storage": health.get("storage", "unknown"),
+            "status": health.get("status", "disabled"),
+            "sources": dict(health.get("sources") or {}),
+            "last_error": health.get("last_error"),
+        }
+
     def get_health(self, include_sensitive: bool = False) -> dict:
         """Return aggregated health status for all subsystems."""
         case_management = self._check_case_management()
         llm = self._check_llm()
         osint_enrichment = self._check_osint_enrichment()
         streaming = self._check_streaming()
+        analytics = self._check_analytics()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -316,6 +339,7 @@ class RuntimeHealthService:
             "llm": llm,
             "osint_enrichment": osint_enrichment,
             "streaming": streaming,
+            "analytics": analytics,
         }
 
         if not include_sensitive:
@@ -340,6 +364,7 @@ class RuntimeHealthService:
             "llm": llm,
             "osint_enrichment": osint_enrichment,
             "streaming": streaming,
+            "analytics": analytics,
         }
 
     def is_alive(self) -> bool:
@@ -407,6 +432,11 @@ class RuntimeHealthService:
         if streaming.get("enabled") and streaming.get("status") == "error":
             failures.append(
                 f"streaming: {', '.join(streaming.get('missing_dependencies', [])) or streaming.get('last_error') or 'dependency failure'}"
+            )
+        analytics = self._check_analytics()
+        if analytics.get("enabled") and analytics.get("status") in {"failed", "error"}:
+            failures.append(
+                f"analytics: {analytics.get('last_error') or analytics.get('status')}"
             )
 
         return {

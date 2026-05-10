@@ -74,6 +74,9 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
           <h2>Supervisor View</h2>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
+            Analytics
+          </button>
           <span className={`health-pill health-${status}`}>{status}</span>
           {subsystemStatus && subsystemStatus !== status && (
             <span className={`health-pill health-${subsystemStatus}`} style={{ fontSize: '0.6rem' }}>

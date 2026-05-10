@@ -11,6 +11,7 @@ import { useSystemHealth } from './hooks/useSystemHealth'
 import { useWebSocketAlerts } from './hooks/useWebSocketAlerts'
 import AlertsPage from './pages/AlertsPage'
 import AuditLogPage from './pages/AuditLogPage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import CasesPage from './pages/CasesPage'
 import Dashboard from './pages/Dashboard'
 import ForensicsPage from './pages/ForensicsPage'
@@ -22,7 +23,7 @@ import SystemHealthPage from './pages/SystemHealthPage'
 
 const VALID_PAGES = new Set([
   'dashboard', 'alerts', 'incidents', 'cases', 'system', 'forensics',
-  'identities', 'watchlist', 'models', 'audit', 'security', 'login',
+  'identities', 'watchlist', 'models', 'audit', 'analytics', 'security', 'login',
 ])
 
 const PAGE_PERMISSIONS = {
@@ -30,6 +31,7 @@ const PAGE_PERMISSIONS = {
   alerts: 'alert:read',
   incidents: 'incident:read',
   cases: 'case:read',
+  analytics: 'analytics:read',
   system: 'metrics:read',
   forensics: 'forensics:read',
   identities: 'identity:read',
@@ -119,6 +121,7 @@ function renderPage(page, props) {
   if (page === 'alerts') return <AlertsPage {...props} />
   if (page === 'incidents') return <IncidentsPage {...props} />
   if (page === 'cases') return <CasesPage caseState={props.caseState} />
+  if (page === 'analytics') return <AnalyticsPage />
   if (page === 'system') return <SystemHealthPage {...props} />
   if (page === 'forensics') return <ForensicsPage {...props} />
   if (page === 'identities') return <IdentityPage />

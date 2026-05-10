@@ -145,6 +145,15 @@ class SystemMetrics:
         self.stream_hls_segments_written_total = 0
         self.stream_replay_clips_created_total = 0
         self.stream_queue_depth = 0
+        # Phase 34 - analytics metrics
+        self.analytics_requests_total = 0
+        self.analytics_failures_total = 0
+        self.analytics_query_latency_ms = 0.0
+        self.analytics_exports_total = 0
+        self.analytics_cache_hits_total = 0
+        self.analytics_cache_misses_total = 0
+        self.analytics_source_missing_total = 0
+        self.analytics_risk_score_computed_total = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

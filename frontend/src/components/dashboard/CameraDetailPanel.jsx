@@ -83,6 +83,16 @@ export default function CameraDetailPanel({ camera, onClose, relatedAlerts = [] 
           <h3 style={{ margin: 0, fontSize: '0.85rem', color: '#e6e6e6' }}>{camera.name}</h3>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => {
+              window.sessionStorage.setItem('aegis.analytics.camera', camera.camera_id)
+              window.location.hash = 'analytics'
+            }}
+          >
+            Analytics
+          </button>
           <SeverityBadge severity={camera.riskSeverity || 'info'} compact />
           {onClose && (
             <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#4b5563', cursor: 'pointer', fontSize: '0.9rem', padding: 0 }}>✕</button>

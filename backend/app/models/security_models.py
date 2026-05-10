@@ -53,6 +53,7 @@ class AuditAction(Enum):
     OPEN_VOCAB_SCAN = "open_vocab_scan"
     OPEN_VOCAB_PROMPT_CREATED = "open_vocab_prompt_created"
     OPEN_VOCAB_PROMPT_UPDATED = "open_vocab_prompt_updated"
+    ANALYTICS_EXPORTED = "analytics_exported"
 
 
 SENSITIVE_AUDIT_KEYS = {

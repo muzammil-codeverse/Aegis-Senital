@@ -1,0 +1,52 @@
+analytics:
+  enabled: true
+
+  storage:
+    dev_backend: "jsonl"
+    production_backend: "postgres"
+    require_postgres_in_production: true
+
+  aggregation:
+    default_window_hours: 24
+    max_window_days: 90
+    bucket_sizes:
+      - "5m"
+      - "15m"
+      - "1h"
+      - "1d"
+    default_bucket: "1h"
+
+  sources:
+    events: true
+    cases: true
+    evidence: true
+    anomaly: true
+    identity: true
+    open_vocab: true
+    streaming: true
+    model_metrics: true
+    system_health: true
+
+  risk_scoring:
+    enabled: true
+    severity_weights:
+      low: 1
+      medium: 3
+      high: 7
+      critical: 12
+    case_weight: 5
+    unresolved_case_multiplier: 1.5
+    repeated_camera_multiplier: 1.2
+
+  cache:
+    enabled: true
+    ttl_seconds: 30
+
+  export:
+    enabled: true
+    formats:
+      - "json"
+      - "csv"
+
+  production:
+    fail_if_required_storage_missing: true

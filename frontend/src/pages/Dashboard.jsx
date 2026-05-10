@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getDashboardOverview } from '../api/analyticsApi'
 import { getLiveAnomalies } from '../api/camerasApi'
 import { normalizeError } from '../api/client'
 import AlertDetailDrawer from '../components/alerts/AlertDetailDrawer'
@@ -18,6 +19,8 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
+  const [analyticsPreview, setAnalyticsPreview] = useState(null)
+  const [analyticsPreviewError, setAnalyticsPreviewError] = useState(null)
 
   const {
     mapState,
@@ -102,6 +105,22 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
     return () => window.clearInterval(timer)
   }, [refreshAnomalies])
 
+  const refreshAnalyticsPreview = useCallback(async () => {
+    try {
+      const response = await getDashboardOverview({ bucket: '1h' })
+      setAnalyticsPreview(response.item)
+      setAnalyticsPreviewError(null)
+    } catch (err) {
+      setAnalyticsPreviewError(normalizeError(err))
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshAnalyticsPreview()
+    const timer = window.setInterval(refreshAnalyticsPreview, 30000)
+    return () => window.clearInterval(timer)
+  }, [refreshAnalyticsPreview])
+
   const mergedAlerts = useMemo(() => mergeAlerts(alertState.alerts, websocketState.alerts), [alertState.alerts, websocketState.alerts])
   const selectedAlertEventId = alertState.selectedAlert?.event_ids?.[0]
   const relatedCase = useMemo(
@@ -139,6 +158,24 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
 
   return (
     <>
+      <section className="panel analytics-preview-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Analytics Preview</p>
+            <h2>Supervisor Snapshot</h2>
+          </div>
+          <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
+            Open Analytics
+          </button>
+        </div>
+        {analyticsPreviewError ? <p className="muted">{analyticsPreviewError}</p> : null}
+        <div className="metric-strip">
+          <article className="metric-tile"><span>Highest-risk camera</span><strong>{analyticsPreview?.risk?.highest_risk_camera || 'N/A'}</strong></article>
+          <article className="metric-tile"><span>Critical events 24h</span><strong>{analyticsPreview?.summary?.critical_events ?? 0}</strong></article>
+          <article className="metric-tile"><span>Cases requiring review</span><strong>{analyticsPreview?.summary?.cases_requiring_review ?? 0}</strong></article>
+          <article className="metric-tile"><span>Degraded streams</span><strong>{analyticsPreview?.summary?.degraded_streams ?? 0}</strong></article>
+        </div>
+      </section>
       <CommandOverview
         // Camera props
         cameras={cameras}

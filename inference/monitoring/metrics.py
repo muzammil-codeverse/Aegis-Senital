@@ -185,6 +185,15 @@ class SystemMetrics:
         self.stream_hls_segments_written_total: int = 0
         self.stream_replay_clips_created_total: int = 0
         self.stream_queue_depth: int = 0
+        # Phase 34 - analytics metrics
+        self.analytics_requests_total: int = 0
+        self.analytics_failures_total: int = 0
+        self.analytics_query_latency_ms: float = 0.0
+        self.analytics_exports_total: int = 0
+        self.analytics_cache_hits_total: int = 0
+        self.analytics_cache_misses_total: int = 0
+        self.analytics_source_missing_total: int = 0
+        self.analytics_risk_score_computed_total: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -449,6 +458,14 @@ class SystemMetrics:
                 "stream_hls_segments_written_total": self.stream_hls_segments_written_total,
                 "stream_replay_clips_created_total": self.stream_replay_clips_created_total,
                 "stream_queue_depth": self.stream_queue_depth,
+                "analytics_requests_total": self.analytics_requests_total,
+                "analytics_failures_total": self.analytics_failures_total,
+                "analytics_query_latency_ms": self.analytics_query_latency_ms,
+                "analytics_exports_total": self.analytics_exports_total,
+                "analytics_cache_hits_total": self.analytics_cache_hits_total,
+                "analytics_cache_misses_total": self.analytics_cache_misses_total,
+                "analytics_source_missing_total": self.analytics_source_missing_total,
+                "analytics_risk_score_computed_total": self.analytics_risk_score_computed_total,
             }
 
 

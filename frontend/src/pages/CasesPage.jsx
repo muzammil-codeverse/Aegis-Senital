@@ -83,7 +83,12 @@ export default function CasesPage({ caseState }) {
               <p className="eyebrow">Manual Case Intake</p>
               <h2>Create Case</h2>
             </div>
-            <span className="count-pill">{caseState.openCount} open</span>
+            <div className="button-row">
+              <span className="count-pill">{caseState.openCount} open</span>
+              <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
+                Open Analytics
+              </button>
+            </div>
           </div>
           <div className="metric-strip">
             <article className="metric-tile"><span>Open Cases</span><strong>{caseState.openCount}</strong></article>
