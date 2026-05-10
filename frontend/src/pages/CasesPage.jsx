@@ -4,6 +4,7 @@ import GeneratedReportDrawer from '../components/cases/GeneratedReportDrawer'
 import LlmSafetyBadge from '../components/cases/LlmSafetyBadge'
 import CaseList from '../components/cases/CaseList'
 import { useAuth } from '../hooks/useAuth'
+import { useCaseEnrichment } from '../hooks/useCaseEnrichment'
 
 export default function CasesPage({ caseState }) {
   const auth = useAuth()
@@ -30,6 +31,18 @@ export default function CasesPage({ caseState }) {
   const filteredCases = useMemo(() => caseState.cases, [caseState.cases])
   const canGenerateLlm = auth.hasPermission('llm:write')
   const canGenerateReport = auth.hasPermission('llm:report')
+  const canReadEnrichment = auth.hasPermission('osint:read')
+  const canWriteEnrichment = auth.hasPermission('osint:write')
+  const canSummarizeEnrichment = auth.hasPermission('osint:summarize')
+  const enrichmentState = useCaseEnrichment({
+    caseId: caseState.selectedCase?.case_id,
+    enabled: canReadEnrichment && Boolean(caseState.selectedCase?.case_id),
+    onChanged: async () => {
+      if (caseState.selectedCase?.case_id) {
+        await caseState.selectCase(caseState.selectedCase.case_id)
+      }
+    },
+  })
 
   useEffect(() => {
     if (caseState.generatedReport) {
@@ -142,6 +155,30 @@ export default function CasesPage({ caseState }) {
             Verify Provider
           </button>
         </section>
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">OSINT Safety</p>
+              <h2>Manual Enrichment</h2>
+            </div>
+            <span className="count-pill">{caseState.selectedCase ? (enrichmentState.sources.length || 0) : 'case'}</span>
+          </div>
+          <div className="button-row">
+            <span className="state-chip">Analyst-provided enrichment</span>
+            <span className="state-chip">Requires operator review</span>
+            <span className="state-chip">Not independently verified</span>
+          </div>
+          <p className="drawer-description">
+            Manual source links, uploaded documents, and analyst notes can be attached to a selected case without any automatic scraping or external identity lookup.
+          </p>
+          <div className="drawer-grid case-health-grid">
+            <span>Mode</span><strong>analyst_provided_only</strong>
+            <span>Selected Case</span><strong>{caseState.selectedCase?.case_id || 'Select a case'}</strong>
+            <span>Sources</span><strong>{enrichmentState.sources.length}</strong>
+            <span>Summaries</span><strong>{enrichmentState.summaries.length}</strong>
+          </div>
+          {!canReadEnrichment ? <p className="drawer-description">Your role can view case details, but OSINT enrichment access is restricted.</p> : null}
+        </section>
       </div>
       <CaseDetailDrawer
         open={Boolean(caseState.selectedCase)}
@@ -161,6 +198,11 @@ export default function CasesPage({ caseState }) {
         generatedReport={caseState.generatedReport}
         canGenerateLlm={canGenerateLlm}
         canGenerateReport={canGenerateReport}
+        showEnrichment={canReadEnrichment}
+        enrichmentState={enrichmentState}
+        canReadEnrichment={canReadEnrichment}
+        canWriteEnrichment={canWriteEnrichment}
+        canSummarizeEnrichment={canSummarizeEnrichment}
         onClose={() => caseState.selectCase(null)}
         onAssign={(assignedTo, reason) => caseState.assignCase(caseState.selectedCase.case_id, assignedTo, reason)}
         onAddEvidence={payload => caseState.addEvidence(caseState.selectedCase.case_id, payload)}

@@ -261,6 +261,48 @@ def validate_llm_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_osint_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[OSINT Enrichment]")
+    config_path = ROOT / "configs" / "runtime" / "osint_enrichment.yaml"
+    if not config_path.exists():
+        results.append(check("osint enrichment config", False, str(config_path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("osint enrichment config parseable", False, str(exc), required=True))
+        return results
+
+    osint_cfg = cfg.get("osint_enrichment", cfg)
+    enabled = bool(osint_cfg.get("enabled", False))
+    mode = str(osint_cfg.get("mode") or "analyst_provided_only")
+    results.append(check("osint enrichment enabled", True, "enabled" if enabled else "disabled", required=False))
+    results.append(check("osint enrichment mode", mode == "analyst_provided_only", mode, required=True))
+    if not enabled:
+        return results
+
+    uploads_cfg = dict(osint_cfg.get("uploads") or {})
+    upload_dir = ROOT / str(uploads_cfg.get("storage_dir") or "storage/osint_uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    results.append(check("storage/osint_uploads", os.access(str(upload_dir), os.W_OK), str(upload_dir), required=profile == "development"))
+
+    jsonl_dir = ROOT / "storage" / "osint"
+    jsonl_dir.mkdir(parents=True, exist_ok=True)
+    results.append(check("storage/osint", os.access(str(jsonl_dir), os.W_OK), str(jsonl_dir), required=profile == "development"))
+
+    links_cfg = dict(osint_cfg.get("links") or {})
+    results.append(check("osint fetch_full_page disabled", not bool(links_cfg.get("fetch_full_page", False)), "disabled" if not bool(links_cfg.get("fetch_full_page", False)) else "enabled", required=True))
+    results.append(check("osint fetch_preview disabled", not bool(links_cfg.get("fetch_preview", False)), "disabled" if not bool(links_cfg.get("fetch_preview", False)) else "enabled", required=True))
+
+    prod_fail = bool((osint_cfg.get("production") or {}).get("fail_if_storage_unavailable", True))
+    if profile == "production" and prod_fail:
+        dsn = os.environ.get("POSTGRES_DSN") or os.environ.get("AEGIS_POSTGRES_DSN") or os.environ.get("DB_URL")
+        results.append(check("osint enrichment postgres dsn", bool(dsn), "configured" if dsn else "missing POSTGRES_DSN", required=True))
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -287,6 +329,7 @@ def validate(profile: str) -> None:
         "configs/runtime/identity.yaml",
         "configs/runtime/case_management.yaml",
         "configs/runtime/llm.yaml",
+        "configs/runtime/osint_enrichment.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -406,6 +449,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(llm_results)
+
+    osint_results = validate_osint_configuration(profile)
+    for r in osint_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(osint_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)

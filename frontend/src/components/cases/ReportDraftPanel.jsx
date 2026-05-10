@@ -9,6 +9,7 @@ export default function ReportDraftPanel({
   onOpenReport,
   canGenerate,
   canReport,
+  enrichmentCount = 0,
 }) {
   return (
     <section className="drawer-section">
@@ -27,6 +28,7 @@ export default function ReportDraftPanel({
           Open Generated Report
         </button>
       </div>
+      {enrichmentCount > 0 ? <p className="drawer-description">Analyst-provided enrichment will be included as source-grounded context when available.</p> : null}
       {!output ? (
         <EmptyState message="No generated report is ready yet." />
       ) : (

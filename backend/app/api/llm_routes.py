@@ -46,8 +46,22 @@ def verify_llm_provider_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
-    result = get_llm_service().verify_provider(model_override=body.model)
-    _audit(request, current_user, "llm_provider_verification_requested", {"model": body.model, "result": result.get("status")})
+    result = get_llm_service().verify_provider(
+        model_override=body.model,
+        include_escalation=body.include_escalation,
+        include_final_report=body.include_final_report,
+    )
+    _audit(
+        request,
+        current_user,
+        "llm_provider_verification_requested",
+        {
+            "model": body.model,
+            "include_escalation": body.include_escalation,
+            "include_final_report": body.include_final_report,
+            "result": result.get("status"),
+        },
+    )
     return {"item": result, "status": "ok" if result.get("status") == "ok" else "error"}
 
 

@@ -2,12 +2,13 @@ segmentation:
   enabled: true
   provider: "sam2"
   device: "cuda"
-  auto_load: false
+  auto_load: true
   fail_open: true
   max_masks_per_frame: 20
   min_box_area_px: 64
   mask_encoding: "rle"
   fallback_box_mask: false
+  model_path: "sam2_t.pt"
   sam2:
-    checkpoint_path: "models/segmentation/sam2/checkpoint.pt"
+    checkpoint_path: "sam2_t.pt"
     model_config: "configs/segmentation/sam2.yaml"

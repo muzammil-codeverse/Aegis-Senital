@@ -99,6 +99,9 @@ class LlmService:
         local_stub_cfg = dict(providers.get("local_stub") or {})
         provider_name = str(self._config.get("provider") or self._config.get("default_provider") or "local_stub").lower()
         api_key_env = str(openai_cfg.get("api_key_env") or "OPENAI_API_KEY")
+        model_env = str(openai_cfg.get("model_env") or "OPENAI_LLM_MODEL")
+        escalation_model_env = str(openai_cfg.get("escalation_model_env") or "OPENAI_LLM_ESCALATION_MODEL")
+        final_report_model_env = str(openai_cfg.get("final_report_model_env") or "OPENAI_LLM_FINAL_REPORT_MODEL")
         key_present = bool(os.getenv(api_key_env, "").strip())
         fallback_allowed = bool((self._config.get("development") or {}).get("allow_local_stub_if_openai_key_missing", True))
         enabled = bool(self._config.get("enabled", False))
@@ -142,11 +145,14 @@ class LlmService:
             "default_provider": str(self._config.get("default_provider") or provider_name),
             "openai_key_env": api_key_env,
             "openai_key_present": key_present,
+            "model_env": model_env,
+            "escalation_model_env": escalation_model_env,
+            "final_report_model_env": final_report_model_env,
             "dev_fallback_enabled": fallback_allowed,
             "using_fallback": using_fallback or using_stub_for_tests,
-            "default_model": str(openai_cfg.get("model") or "gpt-5.4-mini"),
-            "escalation_model": str(openai_cfg.get("escalation_model") or "gpt-5.4"),
-            "final_report_model": str(openai_cfg.get("final_report_model") or "gpt-5.5"),
+            "default_model": self._resolve_openai_model("default"),
+            "escalation_model": self._resolve_openai_model("escalation"),
+            "final_report_model": self._resolve_openai_model("final_report"),
             "require_explicit_escalation": bool(((openai_cfg.get("cost_control") or {}).get("require_explicit_escalation", True))),
             "max_input_tokens": int(((openai_cfg.get("cost_control") or {}).get("max_input_tokens") or 120000)),
             "max_output_tokens": int(((openai_cfg.get("cost_control") or {}).get("max_output_tokens") or 1800)),
@@ -157,7 +163,13 @@ class LlmService:
     def health(self) -> dict[str, Any]:
         return self.status()
 
-    def verify_provider(self, model_override: str | None = None) -> dict[str, Any]:
+    def verify_provider(
+        self,
+        model_override: str | None = None,
+        *,
+        include_escalation: bool = False,
+        include_final_report: bool = False,
+    ) -> dict[str, Any]:
         status = self.status()
         provider_name = str(status["provider"])
         default_model = str(model_override or status["default_model"])
@@ -167,6 +179,7 @@ class LlmService:
                 "detail": f"Provider '{provider_name}' is configured instead of OpenAI.",
                 "provider": provider_name,
                 "model": default_model,
+                "models_checked": [],
                 "response_preview": None,
             }
         if not status["openai_key_present"]:
@@ -175,29 +188,32 @@ class LlmService:
                 "detail": "OpenAI provider not verified because OPENAI_API_KEY is missing.",
                 "provider": "openai",
                 "model": default_model,
+                "models_checked": [],
                 "response_preview": None,
             }
         provider = self._get_provider("openai")
-        prompt = "Respond with a single short sentence confirming provider readiness for a case analysis system."
-        instructions = (
-            "You are verifying API connectivity for a case analysis system. "
-            "Return a short safe sentence. Do not mention secrets or sensitive data."
-        )
+        assert isinstance(provider, OpenAIResponsesProvider)
+        model_checks: list[dict[str, Any]] = []
+        requested_models = [("default", default_model, "low")]
+        if include_escalation:
+            requested_models.append(("escalation", status["escalation_model"], "medium"))
+        if include_final_report:
+            requested_models.append(("final_report", status["final_report_model"], "medium"))
         try:
-            text = provider.generate(
-                prompt,
-                context={
-                    "instructions": instructions,
-                    "model": default_model,
-                    "reasoning_effort": "low",
-                    "max_output_tokens": 120,
-                },
-            )
+            for model_kind, model_name, effort in requested_models:
+                model_checks.append(
+                    {
+                        "kind": model_kind,
+                        **provider.verify_model(str(model_name), reasoning_effort=effort),
+                    }
+                )
+            text = str(model_checks[0].get("response_preview") or "")
             return {
                 "status": "ok",
                 "detail": "OpenAI provider verified successfully.",
                 "provider": "openai",
                 "model": default_model,
+                "models_checked": model_checks,
                 "response_preview": self._truncate_text(self._sanitize_text(text), 240),
             }
         except Exception as exc:
@@ -206,6 +222,7 @@ class LlmService:
                 "detail": str(exc),
                 "provider": "openai",
                 "model": default_model,
+                "models_checked": model_checks,
                 "response_preview": None,
             }
 
@@ -332,6 +349,8 @@ class LlmService:
                 "evidence_count": len(case_context["evidence"]),
                 "timeline_count": len(case_context["timeline"]),
                 "notes_count": len(case_context["notes"]),
+                "enrichment_source_count": len(case_context.get("enrichment_sources") or []),
+                "enrichment_summary_count": len(case_context.get("enrichment_summaries") or []),
                 "question": self._truncate_text(question, 240) if question else "",
                 "requested_format": requested_format,
                 "insufficient_evidence": insufficient,
@@ -363,6 +382,7 @@ class LlmService:
         evidence = evidence[:max_evidence]
         timeline = self._case_service.get_timeline(case_id)[:max_events]
         notes = self._case_service.list_notes(case_id)[:max_notes]
+        enrichment_sources, enrichment_summaries = self._load_enrichment_context(case_id, limit=max_notes)
         case_payload = {
             "case_id": case.case_id,
             "title": self._sanitize_text(case.title),
@@ -419,12 +439,54 @@ class LlmService:
             }
             for item in notes
         ]
+        enrichment_sources_payload = [
+            {
+                "source_id": item.source_id,
+                "source_type": item.source_type,
+                "title": self._sanitize_text(item.title),
+                "description": self._sanitize_text(item.description),
+                "source_reliability": item.source_reliability,
+                "domain": str((item.metadata or {}).get("domain") or ""),
+                "analyst_provided": item.analyst_provided,
+                "created_by": item.created_by,
+                "created_at": item.created_at,
+                "summary": self._sanitize_text(item.summary),
+                "requires_review": item.requires_review,
+                "metadata": self._trim_metadata(item.metadata),
+                "has_uploaded_artifact": bool(item.storage_uri),
+            }
+            for item in enrichment_sources
+        ]
+        enrichment_summaries_payload = [
+            {
+                "summary_id": item.summary_id,
+                "source_ids": list(item.source_ids),
+                "summary": self._sanitize_text(item.summary),
+                "key_points": [self._sanitize_text(point) for point in item.key_points],
+                "limitations": [self._sanitize_text(point) for point in item.limitations],
+                "operator_review_caveat": self._sanitize_text(item.operator_review_caveat),
+                "provider": item.provider,
+                "model": item.model,
+                "created_by": item.created_by,
+                "created_at": item.created_at,
+                "metadata": self._trim_metadata(item.metadata),
+            }
+            for item in enrichment_summaries
+        ]
         return {
             "case": case_payload,
             "evidence": evidence_payload,
             "timeline": timeline_payload,
             "notes": notes_payload,
-            "sources": self._build_sources(case_payload, evidence_payload, timeline_payload),
+            "enrichment_sources": enrichment_sources_payload,
+            "enrichment_summaries": enrichment_summaries_payload,
+            "sources": self._build_sources(
+                case_payload,
+                evidence_payload,
+                timeline_payload,
+                enrichment_sources_payload,
+                enrichment_summaries_payload,
+            ),
         }
 
     def _build_sources(
@@ -432,6 +494,8 @@ class LlmService:
         case_payload: dict[str, Any],
         evidence_payload: list[dict[str, Any]],
         timeline_payload: list[dict[str, Any]],
+        enrichment_sources_payload: list[dict[str, Any]],
+        enrichment_summaries_payload: list[dict[str, Any]],
     ) -> list[dict[str, str]]:
         sources: list[dict[str, str]] = [
             {
@@ -463,6 +527,30 @@ class LlmService:
                     "type": "timeline",
                     "id": str(item["timeline_id"]),
                     "label": item.get("title") or "Timeline item",
+                }
+            )
+        for item in enrichment_sources_payload:
+            key = ("external_source", str(item["source_id"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append(
+                {
+                    "type": "external_source",
+                    "id": str(item["source_id"]),
+                    "label": item.get("title") or "Analyst-provided enrichment",
+                }
+            )
+        for item in enrichment_summaries_payload:
+            key = ("enrichment_summary", str(item["summary_id"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append(
+                {
+                    "type": "enrichment_summary",
+                    "id": str(item["summary_id"]),
+                    "label": "Enrichment summary",
                 }
             )
         return sources
@@ -503,9 +591,9 @@ class LlmService:
                 "used_fallback": used_fallback,
             }
 
-        default_model = str(openai_cfg.get("model") or os.getenv("OPENAI_LLM_MODEL") or "gpt-5.4-mini")
-        escalation_model = str(openai_cfg.get("escalation_model") or os.getenv("OPENAI_LLM_ESCALATION_MODEL") or "gpt-5.4")
-        final_report_model = str(openai_cfg.get("final_report_model") or os.getenv("OPENAI_LLM_FINAL_REPORT_MODEL") or "gpt-5.5")
+        default_model = self._resolve_openai_model("default")
+        escalation_model = self._resolve_openai_model("escalation")
+        final_report_model = self._resolve_openai_model("final_report")
         if task_type in {"draft_case_report", "operator_handoff_report"}:
             model_name = escalation_model
             reasoning_effort = str(reasoning_cfg.get("escalation_effort") or "medium")
@@ -526,6 +614,22 @@ class LlmService:
             "max_output_tokens": int(cost_cfg.get("max_output_tokens") or 1800),
             "used_fallback": used_fallback,
         }
+
+    def _resolve_openai_model(self, model_kind: str) -> str:
+        providers = dict(self._config.get("providers") or {})
+        openai_cfg = dict(providers.get("openai") or {})
+        if model_kind == "default":
+            env_name = str(openai_cfg.get("model_env") or "OPENAI_LLM_MODEL")
+            fallback = str(openai_cfg.get("model") or "gpt-5.4-mini")
+        elif model_kind == "escalation":
+            env_name = str(openai_cfg.get("escalation_model_env") or "OPENAI_LLM_ESCALATION_MODEL")
+            fallback = str(openai_cfg.get("escalation_model") or "gpt-5.4")
+        elif model_kind == "final_report":
+            env_name = str(openai_cfg.get("final_report_model_env") or "OPENAI_LLM_FINAL_REPORT_MODEL")
+            fallback = str(openai_cfg.get("final_report_model") or "gpt-5.5")
+        else:
+            raise ValueError(f"Unsupported model kind '{model_kind}'")
+        return str(os.getenv(env_name, "").strip() or fallback)
 
     def _build_prompt(
         self,
@@ -569,6 +673,7 @@ class LlmService:
             f"'{LLM_INSUFFICIENT_EVIDENCE_RESPONSE}'. "
             "Do not confirm identity, criminality, guilt, or unsupported certainty. "
             "Use careful language such as possible, observed, associated, or operator review required. "
+            "Any enrichment context is analyst-provided only and is not independently verified. "
             "Do not reveal secrets, raw embeddings, file paths, or hidden metadata. "
             f"{format_hint}"
         )
@@ -615,6 +720,19 @@ class LlmService:
                     )
             else:
                 lines.append("- No timeline references were available.")
+        if case_context.get("enrichment_sources"):
+            lines.extend(["", "## Analyst-Provided Enrichment"])
+            for item in case_context["enrichment_sources"]:
+                lines.append(
+                    f"- {item.get('source_id')}: {item.get('title') or 'Manual source'} | "
+                    f"{item.get('source_type')} | reliability={item.get('source_reliability')}"
+                )
+        if case_context.get("enrichment_summaries"):
+            lines.extend(["", "## Enrichment Summaries"])
+            for item in case_context["enrichment_summaries"]:
+                lines.append(
+                    f"- {item.get('summary_id')}: {item.get('summary') or 'No summary provided.'}"
+                )
         if reports_cfg.get("include_model_caveats", True):
             lines.extend(
                 [
@@ -674,11 +792,27 @@ class LlmService:
     def _is_insufficient_context(task_type: str, case_context: dict[str, Any]) -> bool:
         evidence = list(case_context.get("evidence") or [])
         timeline = list(case_context.get("timeline") or [])
+        enrichment_sources = list(case_context.get("enrichment_sources") or [])
+        enrichment_summaries = list(case_context.get("enrichment_summaries") or [])
         if task_type == "evidence_summary":
             return not evidence
         if task_type == "case_query":
-            return not evidence and len(timeline) <= 1
+            return not evidence and len(timeline) <= 1 and not enrichment_sources and not enrichment_summaries
         return False
+
+    def _load_enrichment_context(self, case_id: str, *, limit: int) -> tuple[list[Any], list[Any]]:
+        try:
+            from app.services.osint_service import get_osint_service
+
+            service = get_osint_service()
+            if not service.health().get("enabled", False):
+                return [], []
+            return (
+                service.list_sources(case_id)[: max(0, limit)],
+                service.list_summaries(case_id)[: max(0, limit)],
+            )
+        except Exception:
+            return [], []
 
     @staticmethod
     def _sanitize_text(value: str | None) -> str:

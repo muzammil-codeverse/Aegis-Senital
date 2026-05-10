@@ -103,6 +103,59 @@ class CaseTimelineService:
             )
             seq += 1
 
+        try:
+            from app.services.osint_service import get_osint_service
+
+            osint_service = get_osint_service()
+            enrichment_sources = osint_service.list_sources(case_id) if osint_service.health().get("enabled", False) else []
+            enrichment_summaries = osint_service.list_summaries(case_id) if osint_service.health().get("enabled", False) else []
+        except Exception:
+            enrichment_sources = []
+            enrichment_summaries = []
+
+        for source in enrichment_sources:
+            items.append(
+                CaseTimelineItem(
+                    timeline_id=_stable_timeline_id(case_id, "enrichment_source", source.source_id, source.created_at),
+                    case_id=case_id,
+                    timestamp=source.created_at,
+                    type="enrichment_source_added",
+                    title=source.title or "Analyst-provided enrichment",
+                    description=_enrichment_source_description(source.source_type, source.description),
+                    severity=None,
+                    source_id=source.source_id,
+                    sequence=seq,
+                    metadata={
+                        "source_type": source.source_type,
+                        "source_reliability": source.source_reliability,
+                        "analyst_provided": source.analyst_provided,
+                        "requires_review": source.requires_review,
+                    },
+                )
+            )
+            seq += 1
+
+        for summary in enrichment_summaries:
+            items.append(
+                CaseTimelineItem(
+                    timeline_id=_stable_timeline_id(case_id, "enrichment_summary", summary.summary_id, summary.created_at),
+                    case_id=case_id,
+                    timestamp=summary.created_at,
+                    type="enrichment_summary_generated",
+                    title="Enrichment summary generated",
+                    description=summary.summary,
+                    severity=None,
+                    source_id=summary.summary_id,
+                    sequence=seq,
+                    metadata={
+                        "source_ids": summary.source_ids,
+                        "provider": summary.provider,
+                        "model": summary.model,
+                    },
+                )
+            )
+            seq += 1
+
         for audit in audit_logs:
             if audit.action in {"evidence_added", "note_added"}:
                 continue
@@ -202,3 +255,16 @@ def _audit_description(action: str, metadata: dict[str, Any]) -> str:
     if action == "case_exported":
         return f"Exported as {metadata.get('format') or 'report'}."
     return "Case activity recorded."
+
+
+def _enrichment_source_description(source_type: str, description: str) -> str:
+    if description:
+        return description
+    mapping = {
+        "external_link": "Manual source link added by an analyst.",
+        "uploaded_document": "Analyst-provided document uploaded for enrichment.",
+        "uploaded_image": "Analyst-provided image uploaded for enrichment.",
+        "analyst_note": "Analyst note added for enrichment.",
+        "manual_metadata": "Manual enrichment metadata added.",
+    }
+    return mapping.get(str(source_type), "Analyst-provided enrichment added.")

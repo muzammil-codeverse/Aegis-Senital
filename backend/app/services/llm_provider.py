@@ -86,6 +86,9 @@ class OpenAIResponsesProvider(LlmProvider):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config=config)
         self._api_key_env = str(self._config.get("api_key_env") or "OPENAI_API_KEY")
+        self._model_env = str(self._config.get("model_env") or "OPENAI_LLM_MODEL")
+        self._escalation_model_env = str(self._config.get("escalation_model_env") or "OPENAI_LLM_ESCALATION_MODEL")
+        self._final_report_model_env = str(self._config.get("final_report_model_env") or "OPENAI_LLM_FINAL_REPORT_MODEL")
         self._timeout_seconds = float(self._config.get("timeout_seconds") or 45)
         self._max_retries = max(0, int(self._config.get("max_retries") or 2))
         self._reasoning = dict(self._config.get("reasoning") or {})
@@ -112,9 +115,23 @@ class OpenAIResponsesProvider(LlmProvider):
         )
         return self._client
 
+    def resolve_model_name(self, model_kind: str = "default") -> str:
+        if model_kind == "default":
+            env_name = self._model_env
+            fallback = str(self._config.get("model") or "gpt-5.4-mini")
+        elif model_kind == "escalation":
+            env_name = self._escalation_model_env
+            fallback = str(self._config.get("escalation_model") or "gpt-5.4")
+        elif model_kind == "final_report":
+            env_name = self._final_report_model_env
+            fallback = str(self._config.get("final_report_model") or "gpt-5.5")
+        else:
+            raise ValueError(f"Unsupported model kind '{model_kind}'")
+        return str(os.getenv(env_name, "").strip() or fallback)
+
     def generate(self, prompt: str, *, context: dict | None = None) -> str:
         payload = context or {}
-        model = str(payload.get("model") or self._config.get("model") or "gpt-5.4-mini")
+        model = str(payload.get("model") or self.resolve_model_name("default"))
         reasoning_effort = str(
             payload.get("reasoning_effort")
             or self._reasoning.get("default_effort")
@@ -150,6 +167,31 @@ class OpenAIResponsesProvider(LlmProvider):
 
         message = str(last_error)[:240] if last_error else "unknown provider failure"
         raise RuntimeError(f"OpenAI Responses API request failed: {message}")
+
+    def verify_model(self, model_name: str, *, reasoning_effort: str = "low") -> dict[str, Any]:
+        if not str(model_name or "").strip():
+            raise RuntimeError("Model name is required for verification")
+        model_name = str(model_name).strip()
+        try:
+            text = self.generate(
+                "Respond with a short safe sentence confirming the model is available.",
+                context={
+                    "model": model_name,
+                    "reasoning_effort": reasoning_effort,
+                    "instructions": (
+                        "You are verifying model availability for a safety-sensitive case analysis system. "
+                        "Return one short sentence and do not mention secrets."
+                    ),
+                    "max_output_tokens": 120,
+                },
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Model '{model_name}' verification failed: {exc}") from exc
+        return {
+            "model": model_name,
+            "status": "ok",
+            "response_preview": text.strip(),
+        }
 
     @staticmethod
     def _extract_output_text(response: Any) -> str:

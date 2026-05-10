@@ -1,0 +1,49 @@
+osint_enrichment:
+  enabled: true
+  mode: "analyst_provided_only"
+
+  allowed_sources:
+    external_links: true
+    uploaded_documents: true
+    uploaded_images: true
+    analyst_notes: true
+    manual_metadata: true
+
+  prohibited:
+    automatic_face_web_search: true
+    automatic_social_media_lookup: true
+    automatic_identity_scraping: true
+    automatic_doxxing: true
+    automated_person_attribution: true
+
+  uploads:
+    enabled: true
+    storage_dir: "storage/osint_uploads"
+    max_file_size_mb: 25
+    allowed_extensions:
+      - ".pdf"
+      - ".txt"
+      - ".md"
+      - ".json"
+      - ".csv"
+      - ".png"
+      - ".jpg"
+      - ".jpeg"
+
+  links:
+    enabled: true
+    require_manual_entry: true
+    fetch_preview: false
+    fetch_full_page: false
+
+  llm:
+    summarize_uploaded_text: true
+    summarize_external_link_metadata: true
+    require_source_grounding: true
+    require_operator_review_caveat: true
+
+  audit:
+    log_all_enrichment_actions: true
+
+  production:
+    fail_if_storage_unavailable: true

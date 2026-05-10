@@ -157,6 +157,20 @@ class SystemMetrics:
         self.anomaly_false_alarm_feedback_total: int = 0
         self.segmentation_mask_area_ratio: float = 0.0
         self.segmentation_provider_unavailable_total: int = 0
+        # Phase 30 - case management metrics
+        self.cases_created_total: int = 0
+        self.cases_auto_created_total: int = 0
+        self.cases_updated_total: int = 0
+        self.cases_closed_total: int = 0
+        self.cases_reopened_total: int = 0
+        self.cases_dismissed_total: int = 0
+        self.cases_archived_total: int = 0
+        self.case_evidence_items_total: int = 0
+        self.case_notes_total: int = 0
+        self.case_exports_total: int = 0
+        self.case_auto_dedup_total: int = 0
+        self.case_auto_create_failures_total: int = 0
+        self.case_repository_latency_ms: float = 0.0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -395,6 +409,19 @@ class SystemMetrics:
                 "segmentation_masks_generated_total": self.segmentation_masks_generated_total,
                 "segmentation_mask_area_ratio": self.segmentation_mask_area_ratio,
                 "segmentation_provider_unavailable_total": self.segmentation_provider_unavailable_total,
+                "cases_created_total": self.cases_created_total,
+                "cases_auto_created_total": self.cases_auto_created_total,
+                "cases_updated_total": self.cases_updated_total,
+                "cases_closed_total": self.cases_closed_total,
+                "cases_reopened_total": self.cases_reopened_total,
+                "cases_dismissed_total": self.cases_dismissed_total,
+                "cases_archived_total": self.cases_archived_total,
+                "case_evidence_items_total": self.case_evidence_items_total,
+                "case_notes_total": self.case_notes_total,
+                "case_exports_total": self.case_exports_total,
+                "case_auto_dedup_total": self.case_auto_dedup_total,
+                "case_auto_create_failures_total": self.case_auto_create_failures_total,
+                "case_repository_latency_ms": self.case_repository_latency_ms,
             }
 
 

@@ -117,6 +117,20 @@ class SystemMetrics:
         self.segmentation_masks_generated_total = 0
         self.segmentation_mask_area_ratio = 0.0
         self.segmentation_provider_unavailable_total = 0
+        # Phase 30 - case management metrics
+        self.cases_created_total = 0
+        self.cases_auto_created_total = 0
+        self.cases_updated_total = 0
+        self.cases_closed_total = 0
+        self.cases_reopened_total = 0
+        self.cases_dismissed_total = 0
+        self.cases_archived_total = 0
+        self.case_evidence_items_total = 0
+        self.case_notes_total = 0
+        self.case_exports_total = 0
+        self.case_auto_dedup_total = 0
+        self.case_auto_create_failures_total = 0
+        self.case_repository_latency_ms = 0.0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

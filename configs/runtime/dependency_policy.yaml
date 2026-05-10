@@ -131,8 +131,8 @@ feature_dependencies:
 
   segmentation:
     label: "SAM2 segmentation"
-    module: sam2
-    install_hint: "pip install git+https://github.com/facebookresearch/sam2.git"
+    module: ultralytics
+    install_hint: "pip install ultralytics  # provides SAM2 via ultralytics.SAM"
     config_path: "configs/runtime/segmentation.yaml"
     enabled_path: "segmentation.enabled"
     provider_path: "segmentation.provider"

@@ -5,8 +5,8 @@ model:
   device_preference: cuda
   required: false
   lazy_load: true
-  local_model_path: null
-  local_processor_path: null
+  local_model_path: models\open_vocab\grounding_dino
+  local_processor_path: models\open_vocab\grounding_dino
 thresholds:
   default_box_threshold: 0.35
   default_text_threshold: 0.25
@@ -21,58 +21,57 @@ scan_policy:
   max_concurrent_scans: 2
   scan_timeout_seconds: 15
 prompt_library:
-  - prompt_id: unattended_bag
-    text: "unattended bag or backpack"
-    category: suspicious_object
-    severity: high
-    enabled: true
-    threshold: 0.38
-  - prompt_id: long_object
-    text: "person carrying a long object"
-    category: suspicious_behavior
-    severity: medium
-    enabled: true
-    threshold: 0.40
-  - prompt_id: masked_person
-    text: "masked person"
-    category: identity_obscuration
-    severity: medium
-    enabled: true
-    threshold: 0.40
-  - prompt_id: crowbar
-    text: "crowbar or metal tool"
-    category: forced_entry_tool
-    severity: high
-    enabled: true
-    threshold: 0.35
-  - prompt_id: suspicious_package
-    text: "suspicious package"
-    category: suspicious_object
-    severity: high
-    enabled: true
-    threshold: 0.35
+- prompt_id: unattended_bag
+  text: unattended bag or backpack
+  category: suspicious_object
+  severity: high
+  enabled: true
+  threshold: 0.38
+- prompt_id: long_object
+  text: person carrying a long object
+  category: suspicious_behavior
+  severity: medium
+  enabled: true
+  threshold: 0.4
+- prompt_id: masked_person
+  text: masked person
+  category: identity_obscuration
+  severity: medium
+  enabled: true
+  threshold: 0.4
+- prompt_id: crowbar
+  text: crowbar or metal tool
+  category: forced_entry_tool
+  severity: high
+  enabled: true
+  threshold: 0.35
+- prompt_id: suspicious_package
+  text: suspicious package
+  category: suspicious_object
+  severity: high
+  enabled: true
+  threshold: 0.35
 persistence:
   storage_dir: storage/open_vocab
   recent_retention_seconds: 3600
   max_recent_results: 1000
 uploads:
-  allowed_extensions: [".jpg", ".jpeg", ".png"]
+  allowed_extensions:
+  - .jpg
+  - .jpeg
+  - .png
   max_file_mb: 10
   temp_dir: storage/open_vocab/uploads
-
-# Phase 25 — real-time WebSocket streaming config
 open_vocab_streaming:
   enabled: true
   publish_empty_results: false
   max_detections_per_event: 25
   max_events_per_camera_per_second: 2
-  websocket_topic: "open_vocab"
+  websocket_topic: open_vocab
   persist_results: true
   heartbeat_seconds: 30
   outbound_queue_size: 200
   max_clients: 100
-
-# Phase 25 — camera/stream lifecycle config
 open_vocab_runtime:
   auto_load_on_camera_start: false
   require_open_vocab_for_stream: false

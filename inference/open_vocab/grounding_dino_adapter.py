@@ -51,6 +51,22 @@ class GroundingDINOAdapter(OpenVocabDetectorAdapter):
         except ImportError:
             self._device = "cpu"
 
+        # Check available VRAM before loading the ~890MB model to avoid OOM crashes
+        if self._device == "cuda":
+            try:
+                import torch
+                free_bytes = torch.cuda.mem_get_info()[0]
+                required_bytes = 1024 * 1024 * 1024  # 1GB minimum
+                if free_bytes < required_bytes:
+                    self._unavailable_reason = (
+                        f"Insufficient free VRAM ({free_bytes // 1024 // 1024}MB free, "
+                        f"1024MB needed). Adapter unavailable — free VRAM and retry."
+                    )
+                    logger.warning("GroundingDINO: %s", self._unavailable_reason)
+                    return
+            except Exception:
+                pass
+
         try:
             from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
         except ImportError as e:
@@ -142,7 +158,7 @@ class GroundingDINOAdapter(OpenVocabDetectorAdapter):
             results = self._processor.post_process_grounded_object_detection(
                 outputs,
                 inputs["input_ids"],
-                box_threshold=box_threshold,
+                threshold=box_threshold,
                 text_threshold=text_threshold,
                 target_sizes=[(height, width)],
             )
@@ -152,7 +168,7 @@ class GroundingDINOAdapter(OpenVocabDetectorAdapter):
                 result = results[0]
                 boxes = result.get("boxes", [])
                 scores = result.get("scores", [])
-                labels = result.get("labels", [])
+                labels = result.get("text_labels", result.get("labels", []))
                 for box, score, label in zip(boxes, scores, labels):
                     box_list = [round(float(v), 4) for v in box.tolist()]
                     detections.append({

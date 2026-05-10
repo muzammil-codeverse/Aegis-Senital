@@ -217,6 +217,12 @@ def permission_for_request(method: str, path: str) -> str | None:
             return "watchlist:read"
         return "watchlist:write"
     if path == "/api/cases" or path.startswith("/api/cases/"):
+        if "/enrichment" in path:
+            if method == "GET":
+                return "osint:read"
+            if path.endswith("/summarize"):
+                return "osint:summarize"
+            return "osint:write"
         if method == "GET":
             if path.endswith("/export"):
                 return "case:export"

@@ -72,6 +72,9 @@ rbac:
     - "llm:read"
     - "llm:write"
     - "llm:report"
+    - "osint:read"
+    - "osint:write"
+    - "osint:summarize"
   analyst:
     - "camera:read"
     - "alert:read"
@@ -92,6 +95,9 @@ rbac:
     - "llm:read"
     - "llm:write"
     - "llm:report"
+    - "osint:read"
+    - "osint:write"
+    - "osint:summarize"
   operator:
     - "camera:read"
     - "camera:control"
@@ -107,6 +113,9 @@ rbac:
     - "llm:read"
     - "llm:write"
     - "llm:report"
+    - "osint:read"
+    - "osint:write"
+    - "osint:summarize"
   viewer:
     - "camera:read"
     - "alert:read"
@@ -115,3 +124,4 @@ rbac:
     - "open_vocab:read"
     - "case:read"
     - "llm:read"
+    - "osint:read"

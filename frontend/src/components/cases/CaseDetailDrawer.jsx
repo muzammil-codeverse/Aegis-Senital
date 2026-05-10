@@ -9,6 +9,7 @@ import ReportDraftPanel from './ReportDraftPanel'
 import CaseStatusBadge from './CaseStatusBadge'
 import CaseTimeline from './CaseTimeline'
 import LlmSafetyBadge from './LlmSafetyBadge'
+import CaseEnrichmentPanel from '../osint/CaseEnrichmentPanel'
 import ErrorState from '../common/ErrorState'
 import LoadingState from '../common/LoadingState'
 import { formatDateTime } from '../../utils/time'
@@ -31,6 +32,11 @@ export default function CaseDetailDrawer({
   generatedReport,
   canGenerateLlm,
   canGenerateReport,
+  showEnrichment = false,
+  enrichmentState = null,
+  canReadEnrichment = false,
+  canWriteEnrichment = false,
+  canSummarizeEnrichment = false,
   onClose,
   onAssign,
   onAddEvidence,
@@ -110,6 +116,7 @@ export default function CaseDetailDrawer({
             busy={llmBusy}
             canGenerate={canGenerateLlm}
             canReport={canGenerateReport}
+            enrichmentCount={(enrichmentState?.sources || []).length + (enrichmentState?.summaries || []).length}
             onGenerateDraft={onGenerateDraftReport}
             onGenerateHandoff={onGenerateHandoffReport}
             onOpenReport={onOpenGeneratedReport}
@@ -120,6 +127,14 @@ export default function CaseDetailDrawer({
             canGenerate={canGenerateLlm}
             onAsk={onAskCaseQuestion}
           />
+          {showEnrichment ? (
+            <CaseEnrichmentPanel
+              enrichmentState={enrichmentState}
+              canRead={canReadEnrichment}
+              canWrite={canWriteEnrichment}
+              canSummarize={canSummarizeEnrichment}
+            />
+          ) : null}
           <section className="drawer-section">
             <h3>Timeline</h3>
             <CaseTimeline items={timeline} />

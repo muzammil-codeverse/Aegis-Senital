@@ -13,6 +13,9 @@ llm:
     openai:
       enabled: true
       api_key_env: "OPENAI_API_KEY"
+      model_env: "OPENAI_LLM_MODEL"
+      escalation_model_env: "OPENAI_LLM_ESCALATION_MODEL"
+      final_report_model_env: "OPENAI_LLM_FINAL_REPORT_MODEL"
 
       # Default model for most summaries, evidence explanations, and case Q&A.
       model: "gpt-5.4-mini"

@@ -26,10 +26,15 @@ logger = logging.getLogger(__name__)
 
 
 class Sam2SegmentationAdapter(SegmentationAdapter):
+    """SAM2 segmentation via Ultralytics (sam2_t.pt / sam2_s.pt).
+
+    Uses ultralytics.SAM rather than the standalone Facebook sam2 package.
+    Model auto-downloads on first use via Ultralytics asset hub.
+    """
+
     def __init__(self, config: SegmentationConfig | None = None) -> None:
         self.config = config or SegmentationConfig()
         self._model: Any | None = None
-        self._predictor: Any | None = None
         self._loaded = False
         self._last_error: str | None = None
         self._last_latency_ms: float = 0.0
@@ -48,54 +53,41 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
         return self._device
 
     def load(self) -> None:
-        checkpoint = self.config.sam2.checkpoint
-        model_config = self.config.sam2.config_path
-        if importlib.util.find_spec("sam2") is None:
-            self._last_error = "SAM2 package not installed"
-            raise RuntimeError(self._last_error)
-        if not checkpoint.exists():
-            self._last_error = f"SAM2 checkpoint missing: {checkpoint}"
-            raise RuntimeError(self._last_error)
-        if not model_config.exists():
-            self._last_error = f"SAM2 model config missing: {model_config}"
-            raise RuntimeError(self._last_error)
-
         try:
-            from sam2.build_sam import build_sam2
-            from sam2.sam2_image_predictor import SAM2ImagePredictor
-        except Exception as exc:
-            self._last_error = f"SAM2 import failed: {exc}"
+            from ultralytics import SAM
+        except ImportError as exc:
+            self._last_error = "ultralytics not installed"
             raise RuntimeError(self._last_error) from exc
 
         self._device = self._resolve_device(self.config.device)
+
+        # Prefer absolute checkpoint path from config; fall back to Ultralytics auto-download.
+        checkpoint = self.config.sam2.checkpoint
+        model_path = str(checkpoint) if checkpoint.exists() else "sam2_t.pt"
+
         try:
-            model = build_sam2(str(model_config), str(checkpoint), device=self._device)
-            self._model = model
-            self._predictor = SAM2ImagePredictor(model)
+            self._model = SAM(model_path)
             self._loaded = True
             self._last_error = None
-            logger.info("SAM2 segmentation adapter loaded on %s", self._device)
+            logger.info("SAM2 adapter loaded via Ultralytics (%s) on %s", model_path, self._device)
         except Exception as exc:
             self._loaded = False
             self._model = None
-            self._predictor = None
             self._last_error = f"SAM2 load failed: {exc}"
             raise RuntimeError(self._last_error) from exc
 
     def unload(self) -> None:
-        self._predictor = None
         self._model = None
         self._loaded = False
         try:
             import torch
-
             if self._device == "cuda" and torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:
             pass
 
     def is_loaded(self) -> bool:
-        return self._loaded and self._predictor is not None
+        return self._loaded and self._model is not None
 
     def segment_boxes(
         self,
@@ -131,10 +123,12 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
         t0 = time.monotonic()
         results: list[SegmentationResult] = []
         try:
-            self._predictor.set_image(_to_rgb_array(image))
+            rgb = _to_rgb_array(image)
+            sam_results = self._model(rgb, bboxes=boxes, verbose=False)
+            masks_data = sam_results[0].masks if sam_results else None
             for index, box in enumerate(boxes):
                 label = labels[index] if index < len(labels) else "object"
-                results.append(self._segment_one(index, box, label))
+                results.append(self._segment_one_from_results(index, box, label, masks_data))
         except Exception as exc:
             self._last_error = f"SAM2 segmentation failed: {exc}"
             results = [
@@ -154,7 +148,7 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
     def health(self) -> dict[str, Any]:
         checkpoint = self.config.sam2.checkpoint
         model_config = self.config.sam2.config_path
-        dependency_available = importlib.util.find_spec("sam2") is not None
+        dependency_available = importlib.util.find_spec("ultralytics") is not None
         if not self.config.enabled:
             status = "disabled"
         elif self.is_loaded():
@@ -163,7 +157,7 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
             status = "degraded"
         return {
             "enabled": self.config.enabled,
-            "provider": "sam2",
+            "provider": "sam2-ultralytics",
             "loaded": self.is_loaded(),
             "device": self._device,
             "status": status,
@@ -176,22 +170,25 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
             "last_latency_ms": round(self._last_latency_ms, 3),
         }
 
-    def _segment_one(self, index: int, box: list[float], label: str) -> SegmentationResult:
+    def _segment_one_from_results(
+        self,
+        index: int,
+        box: list[float],
+        label: str,
+        masks_data: Any,
+    ) -> SegmentationResult:
         try:
-            masks, scores, _ = self._predictor.predict(
-                box=np.asarray(box, dtype=np.float32),
-                multimask_output=False,
-            )
-            if masks is None or len(masks) == 0:
+            if masks_data is None or not hasattr(masks_data, "data") or index >= len(masks_data.data):
                 return self._empty_result(
-                    index=index,
-                    bbox=box,
-                    label=label,
-                    status=SEGMENTATION_FAILED,
-                    reason="SAM2 returned no mask",
+                    index=index, bbox=box, label=label,
+                    status=SEGMENTATION_FAILED, reason="SAM2 returned no mask",
                 )
-            mask = np.asarray(masks[0]).astype(np.uint8)
-            score = float(scores[0]) if scores is not None and len(scores) else None
+            mask_tensor = masks_data.data[index]
+            mask = mask_tensor.cpu().numpy().astype(np.uint8)
+            try:
+                score = float(masks_data.conf[index]) if masks_data.conf is not None else None
+            except Exception:
+                score = None
             if self.config.mask_encoding == "polygon":
                 encoded: dict | list | None = mask_to_polygon(mask)
             else:
@@ -209,11 +206,8 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
             )
         except Exception as exc:
             return self._empty_result(
-                index=index,
-                bbox=box,
-                label=label,
-                status=SEGMENTATION_FAILED,
-                reason=str(exc),
+                index=index, bbox=box, label=label,
+                status=SEGMENTATION_FAILED, reason=str(exc),
             )
 
     def _empty_result(
@@ -247,7 +241,6 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
             return requested
         try:
             import torch
-
             if torch.cuda.is_available():
                 return "cuda"
         except Exception:

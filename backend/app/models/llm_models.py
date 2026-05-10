@@ -69,6 +69,8 @@ class LlmVerifyProviderRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     model: str | None = None
+    include_escalation: bool = False
+    include_final_report: bool = False
 
 
 class LlmGeneratedOutput(BaseModel):

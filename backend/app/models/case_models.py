@@ -272,6 +272,8 @@ class CaseReport(CaseBaseModel):
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     notes: list[dict[str, Any]] = Field(default_factory=list)
     audit_summary: list[dict[str, Any]] = Field(default_factory=list)
+    enrichment_sources: list[dict[str, Any]] = Field(default_factory=list)
+    enrichment_summaries: list[dict[str, Any]] = Field(default_factory=list)
     model_caveats: list[str] = Field(default_factory=list)
     operator_review_caveat: str
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -98,5 +98,12 @@ phone_model/**/*.png
 # Runtime logs
 logs/
 
+# Runtime/model artifacts that must stay uncommitted
+models/
+datasets/
+runs/
+runtime_state/
+storage/test_outputs/
+
 # Local machine-specific evaluation benchmark overrides
 configs/evaluation/evaluation.local.yaml

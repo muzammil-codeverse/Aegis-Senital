@@ -228,10 +228,32 @@ class RuntimeHealthService:
             "using_fallback": bool(health.get("using_fallback", False)),
         }
 
+    def _check_osint_enrichment(self) -> dict:
+        try:
+            from app.services.osint_service import get_osint_service
+
+            health = get_osint_service().health()
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "mode": "analyst_provided_only",
+                "storage": "unknown",
+                "status": "failed" if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} else "degraded",
+                "last_error": str(exc)[:120],
+            }
+        return {
+            "enabled": bool(health.get("enabled", False)),
+            "mode": str(health.get("mode") or "analyst_provided_only"),
+            "storage": health.get("storage", "unknown"),
+            "status": health.get("status", "disabled"),
+            "last_error": health.get("last_error"),
+        }
+
     def get_health(self, include_sensitive: bool = False) -> dict:
         """Return aggregated health status for all subsystems."""
         case_management = self._check_case_management()
         llm = self._check_llm()
+        osint_enrichment = self._check_osint_enrichment()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -245,6 +267,7 @@ class RuntimeHealthService:
             "security": self._check_security(),
             "case_management": case_management,
             "llm": llm,
+            "osint_enrichment": osint_enrichment,
         }
 
         if not include_sensitive:
@@ -267,6 +290,7 @@ class RuntimeHealthService:
             "checks": checks,
             "case_management": case_management,
             "llm": llm,
+            "osint_enrichment": osint_enrichment,
         }
 
     def is_alive(self) -> bool:
@@ -325,6 +349,11 @@ class RuntimeHealthService:
         llm = self._check_llm()
         if llm.get("enabled") and llm.get("status") == "error":
             failures.append(f"llm: {llm.get('detail') or llm.get('status')}")
+        osint_enrichment = self._check_osint_enrichment()
+        if osint_enrichment.get("enabled") and osint_enrichment.get("status") in {"failed", "error"}:
+            failures.append(
+                f"osint_enrichment: {osint_enrichment.get('last_error') or osint_enrichment.get('status')}"
+            )
 
         return {
             "ready": len(failures) == 0,

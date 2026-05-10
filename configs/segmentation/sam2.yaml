@@ -1,0 +1,8 @@
+# SAM2 model config for Aegis Sentinel segmentation layer.
+# Provider: Ultralytics SAM2 (sam2_t.pt — tiny variant, auto-downloaded on first use).
+# This file satisfies the config-path check in validate_runtime.py.
+# No additional fields are required for the Ultralytics provider.
+
+provider: ultralytics
+model: sam2_t.pt
+device: cuda

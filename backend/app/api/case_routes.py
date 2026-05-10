@@ -106,12 +106,30 @@ def get_case_api(
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
     evidence = service.list_evidence(case_id)
     timeline = service.get_timeline(case_id)
+    enrichment_sources: list[dict[str, Any]] = []
+    enrichment_summaries: list[dict[str, Any]] = []
+    try:
+        from app.services.osint_service import get_osint_service
+
+        osint_service = get_osint_service()
+        if osint_service.health().get("enabled", False):
+            enrichment_sources = [item.model_dump(mode="json") for item in osint_service.list_sources(case_id)]
+            enrichment_summaries = [item.model_dump(mode="json") for item in osint_service.list_summaries(case_id)]
+    except Exception:
+        enrichment_sources = []
+        enrichment_summaries = []
     return {
         "item": case.model_dump(mode="json"),
+        "enrichment": {
+            "sources": enrichment_sources,
+            "summaries": enrichment_summaries,
+        },
         "references": {
             "evidence_ids": [item.evidence_id for item in evidence],
             "timeline_ids": [item.timeline_id for item in timeline],
             "source_event_ids": list(case.source_event_ids),
+            "enrichment_source_ids": [item.get("source_id") for item in enrichment_sources],
+            "enrichment_summary_ids": [item.get("summary_id") for item in enrichment_summaries],
         },
         "status": "ok",
     }
