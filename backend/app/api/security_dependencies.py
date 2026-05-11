@@ -262,6 +262,10 @@ async def enforce_request_security(request: Request, call_next):
     if not auth_required():
         return await call_next(request)
 
+    # Let the CORS middleware answer browser preflight requests without auth.
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
     path = request.url.path
     if _is_public_path(path):
         return await call_next(request)
