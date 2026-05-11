@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from app.models.analytics_models import AnalyticsTimeRange
+from app.repositories.incident_repository import get_incident_repository
 from app.services.audit_log_service import get_audit_log_service
 from app.services.stream_session_manager import get_stream_session_manager
 from app.repositories.case_repository import get_case_repository
@@ -128,6 +129,7 @@ class AnalyticsRepository:
         case_repository: Any | None = None,
         audit_service: Any | None = None,
         identity_db: Any | None = None,
+        incident_repository: Any | None = None,
         event_bus: Any | None = None,
         runtime_stream_manager: Any | None = None,
         stream_session_manager: Any | None = None,
@@ -143,6 +145,7 @@ class AnalyticsRepository:
         self._case_repository = case_repository or get_case_repository()
         self._audit_service = audit_service or get_audit_log_service()
         self._identity_db = identity_db or get_db()
+        self._incident_repository = incident_repository or get_incident_repository()
         self._event_bus = event_bus or get_event_bus()
         self._runtime_stream_manager = runtime_stream_manager or get_runtime_stream_session_manager()
         self._stream_session_manager = stream_session_manager or get_stream_session_manager()
@@ -209,6 +212,32 @@ class AnalyticsRepository:
             for record in self._identity_db.get_events(limit=int(filters.get("limit") or 5000)):
                 normalized = self._normalize_db_event(record)
                 if normalized is None or not self._match_event(normalized, start, end, filters):
+                    continue
+                seen_ids.add(str(normalized["event_id"]))
+                items.append(normalized)
+        except Exception as exc:
+            self._set_source_status("events", "degraded")
+            self._last_error = str(exc)
+
+        try:
+            had_source = True
+            for record in self._incident_repository.list_events(
+                {
+                    "limit": int(filters.get("limit") or 5000),
+                    "source_type": filters.get("source_type"),
+                    "camera_id": filters.get("camera_id"),
+                    "session_id": filters.get("session_id"),
+                    "case_id": filters.get("case_id"),
+                    "event_type": filters.get("event_type") or filters.get("type"),
+                    "severity": filters.get("severity"),
+                }
+            ):
+                normalized = self._normalize_incident_event(record)
+                if normalized is None:
+                    continue
+                if str(normalized["event_id"]) in seen_ids:
+                    continue
+                if not self._match_event(normalized, start, end, filters):
                     continue
                 seen_ids.add(str(normalized["event_id"]))
                 items.append(normalized)
@@ -644,6 +673,31 @@ class AnalyticsRepository:
             "source": "event_bus",
         }
 
+    def _normalize_incident_event(self, record: Any) -> dict[str, Any] | None:
+        payload = _coerce_model(record)
+        session_id = payload.get("session_id")
+        source_type = str(payload.get("source_type") or "live_stream").lower()
+        camera_id = payload.get("camera_id")
+        if not camera_id and source_type == "uploaded_video" and session_id:
+            camera_id = f"uploaded:{session_id}"
+        return {
+            "event_id": str(payload.get("event_id") or ""),
+            "event_type": str(payload.get("event_type") or "event").lower(),
+            "timestamp": _dt_to_iso(_parse_datetime(payload.get("timestamp"))) or _now_iso(),
+            "severity": str(payload.get("severity") or "medium").lower(),
+            "confidence": float((payload.get("metadata") or {}).get("confidence") or 0.0),
+            "risk_score": float(payload.get("risk_score") or 0.0),
+            "camera_id": str(camera_id) if camera_id else None,
+            "camera_ids": [str(camera_id)] if camera_id else [],
+            "metadata": payload.get("metadata") or {},
+            "source": source_type,
+            "source_type": source_type,
+            "session_id": session_id,
+            "case_id": payload.get("case_id"),
+            "frame_index": payload.get("frame_index"),
+            "time_offset_seconds": payload.get("time_offset_seconds"),
+        }
+
     def _match_event(self, payload: dict[str, Any], start: datetime, end: datetime, filters: dict[str, Any]) -> bool:
         event_at = _parse_datetime(payload.get("timestamp"))
         if event_at is not None and not (start <= event_at <= end):
@@ -653,6 +707,12 @@ class AnalyticsRepository:
         if not _match_scalar_filter(payload.get("severity"), filters.get("severity")):
             return False
         if filters.get("camera_id") and str(filters["camera_id"]) not in {str(payload.get("camera_id") or "")} | {str(item) for item in payload.get("camera_ids", [])}:
+            return False
+        if filters.get("source_type") and str(filters["source_type"]).lower() != str(payload.get("source_type") or payload.get("source") or "").lower():
+            return False
+        if filters.get("session_id") and str(filters["session_id"]) != str(payload.get("session_id") or ""):
+            return False
+        if filters.get("case_id") and str(filters["case_id"]) != str(payload.get("case_id") or ""):
             return False
         if not _match_text(json.dumps(payload.get("metadata") or {}), filters.get("q")):
             return False

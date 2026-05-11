@@ -53,6 +53,10 @@ def test_sensitive_routes_have_explicit_permission_mapping():
         ("GET", "/api/system/health"): "system:read",
         ("GET", "/events"): "event:read",
         ("GET", "/api/alerts/alert_01"): "alert:read",
+        ("POST", "/api/uploaded-videos"): "uploaded_video:write",
+        ("POST", "/api/uploaded-videos/uvs_01/process"): "uploaded_video:process",
+        ("GET", "/api/uploaded-videos/uvs_01/status"): "uploaded_video:read",
+        ("POST", "/api/uploaded-videos/uvs_01/create-case"): "uploaded_video:case",
     }
     for route_key, permission in expected.items():
         method, path = route_key

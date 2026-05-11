@@ -164,9 +164,14 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
             <p className="eyebrow">Analytics Preview</p>
             <h2>Supervisor Snapshot</h2>
           </div>
-          <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
-            Open Analytics
-          </button>
+          <div className="button-row">
+            <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
+              Open Analytics
+            </button>
+            <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
+              Analyze Video
+            </button>
+          </div>
         </div>
         {analyticsPreviewError ? <p className="muted">{analyticsPreviewError}</p> : null}
         <div className="metric-strip">

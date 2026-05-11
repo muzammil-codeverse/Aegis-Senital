@@ -22,6 +22,7 @@ SCOPE_KEYS = {
     "incident": "incident_scopes",
     "alert": "alert_scopes",
     "osint_source": "osint_source_scopes",
+    "uploaded_video": "uploaded_video_scopes",
 }
 
 
@@ -283,6 +284,36 @@ def _osint_source_scope_decision(user: UserAccount | None, source_id: str) -> Ob
     return _case_scope_decision(user, str(source.case_id))
 
 
+def _uploaded_video_scope_decision(user: UserAccount | None, session_id: str) -> ObjectAccessDecision:
+    if user is None:
+        return _deny_decision("anonymous")
+    if auth_required() is False:
+        return _allow_decision("auth_disabled")
+    bypass = _bypass_decision(user, "uploaded_video", session_id)
+    if bypass:
+        return bypass
+    if session_id in _scope_values(user, SCOPE_KEYS["uploaded_video"]):
+        return _allow_decision("uploaded_video_scope")
+    try:
+        from app.services.uploaded_video_service import get_uploaded_video_service
+
+        session = get_uploaded_video_service().get_session(session_id)
+    except Exception:
+        session = None
+    if session is None:
+        return _deny_decision("uploaded_video_not_found")
+    owner_id = str(session.created_by or "").strip()
+    user_ids = {str(getattr(user, "user_id", "") or "").strip(), str(getattr(user, "username", "") or "").strip()}
+    if owner_id and owner_id in user_ids:
+        return _allow_decision("uploaded_video_owner")
+    linked_case_id = str(session.linked_case_id or "").strip()
+    if linked_case_id:
+        case_decision = _case_scope_decision(user, linked_case_id)
+        if case_decision.allowed:
+            return _allow_decision(f"uploaded_video_case_scope:{linked_case_id}")
+    return _deny_decision("uploaded_video_scope_missing")
+
+
 def _clip_metadata(camera_id: str, clip_id: str) -> dict[str, Any] | None:
     try:
         from app.services.replay_clip_service import get_replay_clip_service
@@ -341,6 +372,10 @@ def can_access_osint_source(user, source_id: str) -> bool:
     return _osint_source_scope_decision(user, source_id).allowed
 
 
+def can_access_uploaded_video_session(user, session_id: str) -> bool:
+    return _uploaded_video_scope_decision(user, session_id).allowed
+
+
 def can_access_analytics_scope(
     user: UserAccount | None,
     *,
@@ -363,6 +398,10 @@ def can_access_analytics_scope(
 def can_access_event_payload(user: UserAccount | None, payload: dict[str, Any] | None) -> bool:
     if payload is None:
         return False
+    if payload.get("source_type") == "uploaded_video" and payload.get("session_id"):
+        return can_access_uploaded_video_session(user, str(payload["session_id"]))
+    if payload.get("session_id"):
+        return can_access_uploaded_video_session(user, str(payload["session_id"]))
     camera_ids = list(payload.get("camera_ids", [])) or []
     if payload.get("camera_id"):
         camera_ids.append(str(payload["camera_id"]))
@@ -509,6 +548,10 @@ def ensure_evidence_access(request: Request, user: UserAccount | None, evidence_
 
 def ensure_osint_source_access(request: Request, user: UserAccount | None, source_id: str) -> None:
     _enforce_decision(request, user, "osint_source", source_id, _osint_source_scope_decision(user, source_id))
+
+
+def ensure_uploaded_video_session_access(request: Request, user: UserAccount | None, session_id: str) -> None:
+    _enforce_decision(request, user, "uploaded_video", session_id, _uploaded_video_scope_decision(user, session_id))
 
 
 def ensure_event_payload_access(

@@ -20,10 +20,11 @@ import IncidentsPage from './pages/IncidentsPage'
 import LoginPage from './pages/LoginPage'
 import ModelsPage from './pages/ModelsPage'
 import SystemHealthPage from './pages/SystemHealthPage'
+import UploadedVideoAnalysisPage from './pages/UploadedVideoAnalysisPage'
 
 const VALID_PAGES = new Set([
   'dashboard', 'alerts', 'incidents', 'cases', 'system', 'forensics',
-  'identities', 'watchlist', 'models', 'audit', 'analytics', 'security', 'login',
+  'identities', 'watchlist', 'models', 'audit', 'analytics', 'security', 'uploaded-video-analysis', 'login',
 ])
 
 const PAGE_PERMISSIONS = {
@@ -39,6 +40,7 @@ const PAGE_PERMISSIONS = {
   models: 'model:read',
   audit: 'audit:read',
   security: 'admin',
+  'uploaded-video-analysis': 'uploaded_video:read',
 }
 
 export default function App() {
@@ -129,6 +131,7 @@ function renderPage(page, props) {
   if (page === 'models') return <ModelsPage />
   if (page === 'audit') return <AuditLogPage />
   if (page === 'security') return <AuditLogPage mode="users" />
+  if (page === 'uploaded-video-analysis') return <UploadedVideoAnalysisPage />
   return <Dashboard {...props} />
 }
 

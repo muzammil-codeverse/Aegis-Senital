@@ -554,6 +554,38 @@ TABLE_DEFINITIONS: dict[str, dict[str, Any]] = {
             "CREATE INDEX IF NOT EXISTS idx_model_registry_entries_model_key ON model_registry_entries (model_key)",
         ),
     },
+    "incident_events": {
+        "ddl": """
+        CREATE TABLE IF NOT EXISTS incident_events (
+            incident_id TEXT NOT NULL,
+            event_id TEXT PRIMARY KEY,
+            source_type TEXT NOT NULL,
+            camera_id TEXT NULL,
+            session_id TEXT NULL,
+            case_id TEXT NULL,
+            event_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            risk_score DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+            timestamp TIMESTAMPTZ NOT NULL,
+            frame_index BIGINT NULL,
+            time_offset_seconds DOUBLE PRECISION NULL,
+            track_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            object_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+            identity_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            summary TEXT NOT NULL DEFAULT '',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL
+        )
+        """,
+        "alters": (),
+        "indexes": (
+            "CREATE INDEX IF NOT EXISTS idx_incident_events_source_type ON incident_events (source_type)",
+            "CREATE INDEX IF NOT EXISTS idx_incident_events_camera_id ON incident_events (camera_id)",
+            "CREATE INDEX IF NOT EXISTS idx_incident_events_session_id ON incident_events (session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_incident_events_case_id ON incident_events (case_id)",
+            "CREATE INDEX IF NOT EXISTS idx_incident_events_timestamp ON incident_events (timestamp DESC)",
+        ),
+    },
 }
 
 COMPATIBILITY_STATEMENTS: tuple[str, ...] = (
@@ -589,5 +621,5 @@ REQUIRED_TABLES: tuple[str, ...] = (
     "system_audit_logs",
     "retention_actions",
     "model_registry_entries",
+    "incident_events",
 )
-

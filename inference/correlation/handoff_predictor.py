@@ -93,7 +93,7 @@ def _distance_score(distance_meters: float) -> float:
     return round(1.0 / (1.0 + distance_meters / 100.0), 4)
 
 
-def _get(item: Any, key: str) -> Any:
+def _get(item: Any, key: str, default: Any = None) -> Any:
     if isinstance(item, dict):
-        return item.get(key)
-    return getattr(item, key, None)
+        return item.get(key, default)
+    return getattr(item, key, default)

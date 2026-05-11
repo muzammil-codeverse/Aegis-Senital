@@ -15,5 +15,23 @@ export default function AnalyticsPage() {
     initialFilters: { camera_id: initialCameraId },
   })
 
-  return <AnalyticsCommandCenter analytics={analytics} canExport={auth.hasPermission('analytics:export')} />
+  return (
+    <>
+      <section className="panel analytics-preview-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Uploaded Video</p>
+            <h2>Offline Validation Workflow</h2>
+          </div>
+          <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
+            Open Uploaded Video Analysis
+          </button>
+        </div>
+        <p className="muted">
+          Use the uploaded-video workflow to replay evidence through the same analytics pipeline, then compare event counts and case output from this dashboard.
+        </p>
+      </section>
+      <AnalyticsCommandCenter analytics={analytics} canExport={auth.hasPermission('analytics:export')} />
+    </>
+  )
 }

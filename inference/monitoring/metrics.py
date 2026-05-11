@@ -194,6 +194,15 @@ class SystemMetrics:
         self.analytics_cache_misses_total: int = 0
         self.analytics_source_missing_total: int = 0
         self.analytics_risk_score_computed_total: int = 0
+        # Phase 38 - uploaded video workflow metrics
+        self.uploaded_video_uploads_total: int = 0
+        self.uploaded_video_processing_started_total: int = 0
+        self.uploaded_video_processing_completed_total: int = 0
+        self.uploaded_video_processing_failed_total: int = 0
+        self.uploaded_video_frames_processed_total: int = 0
+        self.uploaded_video_events_generated_total: int = 0
+        self.uploaded_video_processing_latency_ms: float = 0.0
+        self.uploaded_video_active_sessions: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -466,6 +475,14 @@ class SystemMetrics:
                 "analytics_cache_misses_total": self.analytics_cache_misses_total,
                 "analytics_source_missing_total": self.analytics_source_missing_total,
                 "analytics_risk_score_computed_total": self.analytics_risk_score_computed_total,
+                "uploaded_video_uploads_total": self.uploaded_video_uploads_total,
+                "uploaded_video_processing_started_total": self.uploaded_video_processing_started_total,
+                "uploaded_video_processing_completed_total": self.uploaded_video_processing_completed_total,
+                "uploaded_video_processing_failed_total": self.uploaded_video_processing_failed_total,
+                "uploaded_video_frames_processed_total": self.uploaded_video_frames_processed_total,
+                "uploaded_video_events_generated_total": self.uploaded_video_events_generated_total,
+                "uploaded_video_processing_latency_ms": self.uploaded_video_processing_latency_ms,
+                "uploaded_video_active_sessions": self.uploaded_video_active_sessions,
             }
 
 

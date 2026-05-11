@@ -154,6 +154,14 @@ class SystemMetrics:
         self.analytics_cache_misses_total = 0
         self.analytics_source_missing_total = 0
         self.analytics_risk_score_computed_total = 0
+        self.uploaded_video_uploads_total = 0
+        self.uploaded_video_processing_started_total = 0
+        self.uploaded_video_processing_completed_total = 0
+        self.uploaded_video_processing_failed_total = 0
+        self.uploaded_video_frames_processed_total = 0
+        self.uploaded_video_events_generated_total = 0
+        self.uploaded_video_processing_latency_ms = 0.0
+        self.uploaded_video_active_sessions = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

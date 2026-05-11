@@ -263,6 +263,19 @@ def permission_for_request(method: str, path: str) -> str | None:
     if path.startswith("/api/models"):
         return "model:read" if method == "GET" else "model:write"
 
+    if path == "/api/uploaded-videos":
+        return "uploaded_video:read" if method == "GET" else "uploaded_video:write"
+    if path.startswith("/api/uploaded-videos/"):
+        if path.endswith("/process"):
+            return "uploaded_video:process"
+        if path.endswith("/cancel"):
+            return "uploaded_video:process"
+        if path.endswith("/create-case"):
+            return "uploaded_video:case"
+        if path.endswith("/report"):
+            return "uploaded_video:read"
+        return "uploaded_video:read" if method == "GET" else "uploaded_video:write"
+
     if path.startswith("/api/open-vocab/model/"):
         return "open_vocab:read" if method == "GET" else "open_vocab:model"
     if path.startswith("/api/open-vocab/"):

@@ -5,7 +5,7 @@ upload_security:
     provider: placeholder
   classes:
     video:
-      max_file_size_mb: 256
+      max_file_size_mb: 750
       allowed_extensions:
         - .mp4
         - .avi

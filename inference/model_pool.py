@@ -218,28 +218,64 @@ class ModelPool:
                     else self._phone_model
                 )
                 _t_infer = time.monotonic()
-                if isinstance(req, _BatchInferenceRequest):
-                    if DETERMINISTIC_MODE:
-                        req.frames = list(req.frames)
-                    result = model(
-                        req.frames,
-                        verbose=False,
-                        device=self._device,
-                        half=self._use_half,
-                    )
-                else:
-                    result = model(
-                        req.frame,
-                        verbose=False,
-                        device=self._device,
-                        half=self._use_half,
-                    )
+                result = self._run_request(model, req)
                 busy_s = time.monotonic() - _t_infer
                 from inference.monitoring.metrics import get_metrics
                 get_metrics().record_gpu_inference(busy_s)
                 req._result.put(("ok", result))
             except Exception as exc:
                 req._result.put(("error", exc))
+
+    def _run_request(self, model: Any, req: "_InferenceRequest | _BatchInferenceRequest") -> Any:
+        if isinstance(req, _BatchInferenceRequest) and DETERMINISTIC_MODE:
+            req.frames = list(req.frames)
+        try:
+            return self._invoke_model(model, req, half=self._use_half)
+        except Exception as exc:
+            if self._use_half and self._should_retry_fp32(exc):
+                logger.warning(
+                    "ModelPool: FP16 inference failed (%s); retrying in FP32 and disabling half precision",
+                    exc,
+                )
+                self._disable_half_precision(model)
+                return self._invoke_model(model, req, half=False)
+            raise
+
+    def _invoke_model(
+        self,
+        model: Any,
+        req: "_InferenceRequest | _BatchInferenceRequest",
+        *,
+        half: bool,
+    ) -> Any:
+        if isinstance(req, _BatchInferenceRequest):
+            return model(
+                req.frames,
+                verbose=False,
+                device=self._device,
+                half=half,
+            )
+        return model(
+            req.frame,
+            verbose=False,
+            device=self._device,
+            half=half,
+        )
+
+    @staticmethod
+    def _should_retry_fp32(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "half != float" in message or "same dtype" in message
+
+    def _disable_half_precision(self, model: Any) -> None:
+        self._use_half = False
+        for candidate in (model, self._weapon_model, self._phone_model):
+            if candidate is None:
+                continue
+            try:
+                candidate.model.float()
+            except Exception:
+                pass
 
     def shutdown(self) -> None:
         """Signal the GPU worker to stop and wait for it to exit."""

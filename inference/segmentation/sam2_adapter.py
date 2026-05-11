@@ -29,7 +29,8 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
     """SAM2 segmentation via Ultralytics (sam2_t.pt / sam2_s.pt).
 
     Uses ultralytics.SAM rather than the standalone Facebook sam2 package.
-    Model auto-downloads on first use via Ultralytics asset hub.
+    Configured assets must already exist locally; the runtime never silently
+    falls back to asset downloads.
     """
 
     def __init__(self, config: SegmentationConfig | None = None) -> None:
@@ -53,6 +54,19 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
         return self._device
 
     def load(self) -> None:
+        checkpoint = self.config.sam2.checkpoint
+        model_config = self.config.sam2.config_path
+        missing_assets: list[str] = []
+        if not checkpoint.exists():
+            missing_assets.append(f"checkpoint missing: {checkpoint}")
+        if not model_config.exists():
+            missing_assets.append(f"model config missing: {model_config}")
+        if missing_assets:
+            self._loaded = False
+            self._model = None
+            self._last_error = "; ".join(missing_assets)
+            raise RuntimeError(self._last_error)
+
         try:
             from ultralytics import SAM
         except ImportError as exc:
@@ -60,10 +74,7 @@ class Sam2SegmentationAdapter(SegmentationAdapter):
             raise RuntimeError(self._last_error) from exc
 
         self._device = self._resolve_device(self.config.device)
-
-        # Prefer absolute checkpoint path from config; fall back to Ultralytics auto-download.
-        checkpoint = self.config.sam2.checkpoint
-        model_path = str(checkpoint) if checkpoint.exists() else "sam2_t.pt"
+        model_path = str(checkpoint)
 
         try:
             self._model = SAM(model_path)

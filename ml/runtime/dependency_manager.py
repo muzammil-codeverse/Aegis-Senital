@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-import json
 import logging
 import os
 import threading
@@ -10,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from app.repositories.model_registry_repository import get_model_registry_repository
 from ml.runtime.model_router import ModelRouter
 
 REQUIRED_DEPENDENCIES = {
@@ -26,7 +26,6 @@ _BOOT_LOCK = threading.Lock()
 _BOOT_VALIDATED = False
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_REGISTRY_PATH = _PROJECT_ROOT / "models" / "registry.json"
 _REQUIRED_MODEL_TYPES = ("weapon", "phone")
 
 
@@ -241,39 +240,47 @@ def validate_cuda_availability() -> None:
         )
 
 
-def validate_registry_exists() -> dict:
-    if not _REGISTRY_PATH.exists():
+def validate_registry_exists() -> list[dict[str, Any]]:
+    repository = get_model_registry_repository()
+    if not repository.is_available():
         raise RuntimeError(
-            f"[CRITICAL FAILURE] Model registry missing: {_REGISTRY_PATH}. "
-            "System cannot start without registry.json."
+            "[CRITICAL FAILURE] Model registry repository is unavailable. "
+            f"Backend={repository.storage_backend}."
         )
     try:
-        registry = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+        entries = [entry.to_dict() for entry in repository.list_entries()]
     except Exception as exc:
         raise RuntimeError(
-            f"[CRITICAL FAILURE] Model registry unreadable: {_REGISTRY_PATH}. "
+            "[CRITICAL FAILURE] Model registry repository is unreadable. "
             f"Error: {exc}"
         ) from exc
-    return registry
+    if not entries:
+        raise RuntimeError("[CRITICAL FAILURE] Model registry is empty.")
+    return entries
 
 
-def validate_model_files_exist(registry: dict) -> None:
+def validate_model_files_exist(registry: list[dict[str, Any]]) -> None:
+    del registry
     errors: list[str] = []
+    router = ModelRouter()
     for model_type in _REQUIRED_MODEL_TYPES:
-        entry = registry.get(model_type)
-        if entry is None:
-            errors.append(f"Registry missing '{model_type}' entry")
+        try:
+            entry = router.get_model(model_type)
+        except Exception as exc:
+            errors.append(f"Registry missing '{model_type}' model: {exc}")
             continue
-        model_path = Path(entry.get("path", ""))
+        model_path = Path(entry.get("resolved_path") or entry.get("path") or "")
         if not model_path.is_absolute():
             model_path = _PROJECT_ROOT / model_path
         if not model_path.exists():
             errors.append(f"Model file missing for '{model_type}': {model_path}")
-        metadata_path = Path(entry.get("metadata", ""))
-        if not metadata_path.is_absolute():
-            metadata_path = _PROJECT_ROOT / metadata_path
-        if not metadata_path.exists():
-            errors.append(f"Metadata file missing for '{model_type}': {metadata_path}")
+        metadata_ref = entry.get("metadata")
+        if isinstance(metadata_ref, str) and metadata_ref:
+            metadata_path = Path(metadata_ref)
+            if not metadata_path.is_absolute():
+                metadata_path = _PROJECT_ROOT / metadata_path
+            if not metadata_path.exists():
+                errors.append(f"Metadata file missing for '{model_type}': {metadata_path}")
     if errors:
         raise RuntimeError(
             f"[CRITICAL FAILURE] Model file validation failed: {errors}. "
@@ -286,16 +293,10 @@ def validate_test_inference() -> None:
     from ultralytics import YOLO
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    registry = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+    router = ModelRouter()
     for model_type in _REQUIRED_MODEL_TYPES:
-        entry = registry.get(model_type)
-        if entry is None:
-            raise RuntimeError(
-                f"[CRITICAL FAILURE] Registry entry for '{model_type}' missing during test inference."
-            )
-        model_path = Path(entry["path"])
-        if not model_path.is_absolute():
-            model_path = _PROJECT_ROOT / model_path
+        entry = router.get_model(model_type)
+        model_path = Path(entry.get("resolved_path") or entry.get("path") or "")
         try:
             model = YOLO(str(model_path))
             dummy = torch.zeros((1, 3, 640, 640))

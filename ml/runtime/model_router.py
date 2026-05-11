@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from pathlib import Path
 from typing import Any
+
+from app.repositories.model_registry_repository import get_model_registry_repository
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_FACE_MODEL_PATH = "models/buffalo_l"
@@ -27,15 +28,12 @@ class ModelRouter:
     _REQUIRED_TASKS = ("weapon", "phone")
 
     def __init__(self, registry_path: str | Path = "models/registry.json") -> None:
-        self._registry_path = Path(registry_path)
-        self._registry: dict[str, Any] = {}
-        self._mtime: float | None = None
-        self._load_registry(force=True)
+        del registry_path
+        self._repository = get_model_registry_repository()
 
     def get_model(self, task: str = "weapon", version: str = "latest", route_key: str | None = None) -> dict[str, Any]:
-        self._load_registry()
         model_key = self._ALIASES.get(task, task)
-        versions = self._registry.get(model_key)
+        versions = self._repository.grouped_entries().get(model_key) or {}
         if not versions and model_key == "face_recognition":
             payload = self._face_model_payload()
             resolved_path = self.load_model_or_crash(payload["path"])
@@ -70,17 +68,6 @@ class ModelRouter:
 
     def validate_required_models(self) -> dict[str, dict[str, Any]]:
         return {task: self.get_model(task) for task in self._REQUIRED_TASKS}
-
-    def _load_registry(self, force: bool = False) -> None:
-        if not self._registry_path.exists():
-            self._registry = {}
-            self._mtime = None
-            return
-        mtime = self._registry_path.stat().st_mtime
-        if not force and self._mtime == mtime:
-            return
-        self._registry = json.loads(self._registry_path.read_text(encoding="utf-8"))
-        self._mtime = mtime
 
     @staticmethod
     def _latest_version(versions: dict[str, Any]) -> str:

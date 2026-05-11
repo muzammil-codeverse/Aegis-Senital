@@ -24,6 +24,7 @@ from app.api.case_routes import router as case_router
 from app.api.llm_routes import router as llm_router
 from app.api.osint_routes import router as osint_router
 from app.api.streaming_routes import router as streaming_router
+from app.api.uploaded_video_routes import router as uploaded_video_router
 from app.api.security_dependencies import (
     get_current_user_from_request,
     issue_csrf_token,
@@ -56,6 +57,7 @@ router.include_router(case_router)
 router.include_router(llm_router)
 router.include_router(osint_router)
 router.include_router(streaming_router)
+router.include_router(uploaded_video_router)
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
 

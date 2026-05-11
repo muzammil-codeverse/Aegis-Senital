@@ -54,6 +54,13 @@ class AuditAction(Enum):
     OPEN_VOCAB_PROMPT_CREATED = "open_vocab_prompt_created"
     OPEN_VOCAB_PROMPT_UPDATED = "open_vocab_prompt_updated"
     ANALYTICS_EXPORTED = "analytics_exported"
+    UPLOADED_VIDEO_UPLOADED = "uploaded_video_uploaded"
+    UPLOADED_VIDEO_PROCESSING_STARTED = "uploaded_video_processing_started"
+    UPLOADED_VIDEO_PROCESSING_COMPLETED = "uploaded_video_processing_completed"
+    UPLOADED_VIDEO_PROCESSING_FAILED = "uploaded_video_processing_failed"
+    UPLOADED_VIDEO_CASE_CREATED = "uploaded_video_case_created"
+    UPLOADED_VIDEO_CANCELLED = "uploaded_video_cancelled"
+    UPLOADED_VIDEO_REPORT_VIEWED = "uploaded_video_report_viewed"
 
 
 SENSITIVE_AUDIT_KEYS = {

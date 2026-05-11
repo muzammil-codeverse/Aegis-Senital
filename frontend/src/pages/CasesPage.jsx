@@ -88,6 +88,9 @@ export default function CasesPage({ caseState }) {
               <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
                 Open Analytics
               </button>
+              <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
+                Analyze Uploaded Video
+              </button>
             </div>
           </div>
           <div className="metric-strip">

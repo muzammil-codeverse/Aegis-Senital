@@ -361,6 +361,48 @@ class StreamProcessor:
             })
         )
 
+    def process_decoded_packet(self, decoded_packet: DecodedFramePacket) -> dict[str, object]:
+        """
+        Process one decoded frame through the same detection/tracking/intelligence
+        path used by the threaded streaming pipeline.
+
+        This is used by uploaded-video analysis so file processing reuses the
+        production inference stack instead of a disconnected code path.
+        """
+        packets = self._engine.predict_batch(
+            [decoded_packet.frame],
+            [decoded_packet.frame_index],
+            self.camera_id,
+        )
+        if not packets:
+            return {"packet": None, "events": [], "anomalies": [], "incidents": [], "scenarios": []}
+        packet = packets[0]
+        packet.timestamp = decoded_packet.timestamp
+        packet.camera_id = self.camera_id
+        packet.frame_width = decoded_packet.width
+        packet.frame_height = decoded_packet.height
+        packet.image = decoded_packet.frame
+        packet.metadata = {
+            **(packet.metadata or {}),
+            **decoded_packet.metadata,
+            "stream_frame_id": decoded_packet.frame_id,
+            "source_timestamp": decoded_packet.source_timestamp,
+            "source_frame_index": decoded_packet.frame_index,
+            "fps_estimate": decoded_packet.fps_estimate,
+            "source_type": decoded_packet.metadata.get("source_type", self.source_type),
+        }
+        self._frames_processed_total += 1
+        self._last_processed_at = datetime.now(timezone.utc).isoformat()
+        self._last_source_timestamp = decoded_packet.source_timestamp
+        self._processed_frame_times.append(time.monotonic())
+        self._record_stream_metric("stream_frames_decoded_total")
+        self._record_stream_metric("stream_frames_processed_total")
+        try:
+            metrics.frames_processed += 1
+        except Exception:
+            pass
+        return self._process_packet(packet, get_event_bus())
+
     @property
     def is_running(self) -> bool:
         return (
@@ -706,7 +748,7 @@ class StreamProcessor:
 
     # ── per-frame post-detection pipeline ────────────────────────────────────
 
-    def _process_packet(self, packet: FramePacket, bus: object) -> None:
+    def _process_packet(self, packet: FramePacket, bus: object) -> dict[str, object]:
         """
         Run the tracking → trajectory → anomaly → event → incident pipeline for one FramePacket whose
         detections have already been populated by predict_batch().
@@ -864,6 +906,17 @@ class StreamProcessor:
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
         )
+        return {
+            "packet": packet,
+            "trajectories": trajectories,
+            "anomalies": anomalies,
+            "events": events,
+            "segmentation": segmentation_payload,
+            "incidents": intelligence_packet.get("incidents", []),
+            "alerts": intelligence_packet.get("alerts", []),
+            "intelligence": intelligence_packet,
+            "scenarios": scenarios,
+        }
 
     # ── circuit breaker (rate-based secondary check) ──────────────────────────
 

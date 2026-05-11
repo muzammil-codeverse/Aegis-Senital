@@ -1,0 +1,6 @@
+model_registry:
+  backend: "file"
+  file_path: "models/registry.json"
+  allow_file_to_db_migration: true
+  prohibit_dual_writes: true
+  enable_postgres_writes: false

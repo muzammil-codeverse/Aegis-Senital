@@ -10,6 +10,8 @@ from typing import Any
 
 from inference.db import PostgresManager, VectorStore
 from ml.runtime import system_boot_check
+from app.models.incident_models import IncidentEventRecord
+from app.repositories.incident_repository import get_incident_repository
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +198,7 @@ class IdentityDB:
 
     def persist_event(self, event: Any, frame_id: int = 0) -> None:
         track_ref_ids = list(getattr(event, "track_ref_ids", []) or [])
+        camera_ids = list(getattr(event, "camera_ids", []))
         record = {
             "event_id": getattr(event, "event_id", str(uuid.uuid4())),
             "track_id": track_ref_ids[0] if track_ref_ids else None,
@@ -209,13 +212,42 @@ class IdentityDB:
                 "track_ids": list(getattr(event, "track_ids", [])),
                 "track_ref_ids": track_ref_ids,
                 "identity_ids": list(getattr(event, "identity_ids", [])),
-                "camera_ids": list(getattr(event, "camera_ids", [])),
+                "camera_ids": camera_ids,
                 "payload": _sanitize_persisted_payload(
                     event.to_dict() if hasattr(event, "to_dict") else deepcopy(event)
                 ),
             },
         }
         self._postgres.insert_event(record)
+        try:
+            payload = record["metadata"].get("payload") or {}
+            source_camera_id = str(payload.get("camera_id") or (camera_ids[0] if camera_ids else "") or "").strip() or None
+            get_incident_repository().append_event(
+                IncidentEventRecord(
+                    incident_id=str(payload.get("incident_id") or record["event_id"]),
+                    event_id=str(record["event_id"]),
+                    source_type="live_stream",
+                    camera_id=source_camera_id,
+                    case_id=str(payload.get("case_id") or "") or None,
+                    event_type=str(record["event_type"]).lower(),
+                    severity=str(record["severity"]).lower(),
+                    risk_score=float(record["risk_score"]),
+                    timestamp=str(record["timestamp"]),
+                    frame_index=frame_id,
+                    time_offset_seconds=None,
+                    track_ids=[str(item) for item in record["metadata"].get("track_ids", []) if str(item)],
+                    object_refs=[str(item) for item in track_ref_ids if str(item)],
+                    identity_ids=[str(item) for item in record["metadata"].get("identity_ids", []) if str(item)],
+                    summary=str(payload.get("summary") or payload.get("description") or record["event_type"]),
+                    metadata={
+                        "confidence": float(record["confidence"]),
+                        "camera_ids": camera_ids,
+                        "payload": payload,
+                    },
+                )
+            )
+        except Exception:
+            pass
         if hasattr(event, "persisted"):
             event.persisted = True
 

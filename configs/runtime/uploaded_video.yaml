@@ -1,0 +1,53 @@
+uploaded_video:
+  enabled: true
+
+  storage:
+    root_dir: "storage/uploaded_videos"
+    processed_dir: "storage/uploaded_video_results"
+    evidence_dir: "storage/evidence"
+    require_managed_storage_in_production: true
+
+  upload:
+    max_file_size_mb: 750
+    allowed_extensions:
+      - ".mp4"
+      - ".avi"
+      - ".mov"
+      - ".mkv"
+    require_upload_policy: true
+    compute_sha256: true
+
+  processing:
+    default_device: "cuda"
+    target_fps: 15
+    max_frames: null
+    frame_stride: 1
+    queue_size: 120
+    drop_policy: "drop_oldest"
+    reuse_stream_processor: true
+    generate_event_timeline: true
+    generate_snapshots: true
+    generate_replay_clips: true
+
+  pipeline:
+    phone_detection: true
+    weapon_detection: true
+    violence_detection: true
+    anomaly_detection: true
+    segmentation: true
+    identity: true
+    open_vocab: false
+
+  case_integration:
+    allow_create_case_from_video: true
+    auto_case_min_severity: "high"
+    attach_source_video_as_evidence: true
+    attach_snapshots_as_evidence: true
+
+  reporting:
+    generate_summary_report: true
+    include_chain_of_custody: true
+    include_model_caveats: true
+
+  production:
+    fail_if_storage_unavailable: true

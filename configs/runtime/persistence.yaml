@@ -19,7 +19,7 @@ persistence:
 
     alerts_incidents:
       dev_backend: "jsonl"
-      production_backend: "jsonl"
+      production_backend: "postgres"
       required_in_production: false
 
     cases:

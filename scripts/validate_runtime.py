@@ -494,6 +494,8 @@ def validate(profile: str) -> None:
         "configs/runtime/osint_enrichment.yaml",
         "configs/runtime/streaming.yaml",
         "configs/runtime/persistence.yaml",
+        "configs/runtime/model_registry.yaml",
+        "configs/runtime/uploaded_video.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -508,25 +510,50 @@ def validate(profile: str) -> None:
 
     # Model registry
     print("\n[Model Registry]")
-    registry_path = ROOT / "models" / "registry.json"
-    registry_exists = registry_path.exists()
-    _record(check("models/registry.json", registry_exists, required=True))
-    if registry_exists:
-        import json
+    try:
+        from app.repositories.model_registry_repository import (
+            FileModelRegistryRepository,
+            get_model_registry_repository,
+            get_model_registry_settings,
+        )
+
+        settings = get_model_registry_settings()
+        repository = get_model_registry_repository()
+        health = repository.health_check().to_dict()
+        _record(check("model registry repository", health.get("status") == "healthy", health.get("last_error") or "", required=True))
+        if isinstance(repository, FileModelRegistryRepository):
+            registry_path = repository.file_path
+            registry_exists = registry_path.exists()
+            _record(check("models/registry.json", registry_exists, required=True))
+        else:
+            _record(check("model registry backend", repository.storage_backend == "postgres", repository.storage_backend, required=False))
         try:
-            registry = json.loads(registry_path.read_text(encoding="utf-8"))
-            for model_type in ("weapon", "phone"):
-                entry = registry.get(model_type, {})
-                model_path = ROOT / entry.get("path", "MISSING")
+            entries = repository.list_entries()
+            _record(check("model registry entries", len(entries) > 0, f"entries={len(entries)}", required=True))
+            grouped = repository.grouped_entries()
+            for model_type in ("weapon_detector", "phone_detector"):
+                versions = grouped.get(model_type) or {}
+                if not versions:
+                    _record(check(f"{model_type} registered", False, "missing", required=True))
+                    continue
+                latest_key = sorted(
+                    versions.items(),
+                    key=lambda item: (str(item[1].get("created_at", "")), item[0]),
+                )[-1][0]
+                model_path = ROOT / str((versions.get(latest_key) or {}).get("path") or "MISSING")
                 exists = model_path.exists()
                 _record(check(
-                    f"models/{model_type}/current.pt",
+                    f"{model_type} weights",
                     exists,
                     str(model_path) if not exists else "",
                     required=True,
                 ))
+            if str(settings.get("backend") or "file").lower() == "postgres" and not bool(settings.get("enable_postgres_writes", False)):
+                _record(check("model registry write mode", True, "postgres backend read-only until explicitly enabled", required=False))
         except Exception as exc:
-            _record(check("registry.json parseable", False, str(exc), required=True))
+            _record(check("model registry parseable", False, str(exc), required=True))
+    except Exception as exc:
+        _record(check("model registry repository", False, str(exc), required=True))
 
     # JWT Secret
     print("\n[Security]")

@@ -90,6 +90,10 @@ rbac:
     - "osint:read"
     - "osint:write"
     - "osint:summarize"
+    - "uploaded_video:read"
+    - "uploaded_video:write"
+    - "uploaded_video:process"
+    - "uploaded_video:case"
   analyst:
     - "camera:read"
     - "analytics:read"
@@ -119,6 +123,10 @@ rbac:
     - "osint:read"
     - "osint:write"
     - "osint:summarize"
+    - "uploaded_video:read"
+    - "uploaded_video:write"
+    - "uploaded_video:process"
+    - "uploaded_video:case"
   operator:
     - "camera:read"
     - "camera:control"
@@ -142,6 +150,10 @@ rbac:
     - "osint:read"
     - "osint:write"
     - "osint:summarize"
+    - "uploaded_video:read"
+    - "uploaded_video:write"
+    - "uploaded_video:process"
+    - "uploaded_video:case"
   viewer:
     - "camera:read"
     - "analytics:read"
@@ -154,3 +166,4 @@ rbac:
     - "case:read"
     - "llm:read"
     - "osint:read"
+    - "uploaded_video:read"

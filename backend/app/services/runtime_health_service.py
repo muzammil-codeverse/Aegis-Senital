@@ -331,6 +331,31 @@ class RuntimeHealthService:
             "last_error": health.get("last_error"),
         }
 
+    def _check_uploaded_video(self) -> dict:
+        try:
+            from app.services.uploaded_video_service import get_uploaded_video_service
+
+            health = get_uploaded_video_service().health()
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "status": "failed" if self._production_mode() else "degraded",
+                "active_sessions": 0,
+                "completed_sessions": 0,
+                "failed_sessions": 0,
+                "storage": "filesystem",
+                "last_error": str(exc)[:160],
+            }
+        return {
+            "enabled": bool(health.get("enabled", False)),
+            "status": str(health.get("status") or "disabled"),
+            "active_sessions": int(health.get("active_sessions", 0)),
+            "completed_sessions": int(health.get("completed_sessions", 0)),
+            "failed_sessions": int(health.get("failed_sessions", 0)),
+            "storage": str(health.get("storage") or "filesystem"),
+            "last_error": health.get("last_error"),
+        }
+
     @staticmethod
     def _production_mode() -> bool:
         return is_production_environment()
@@ -419,22 +444,35 @@ class RuntimeHealthService:
             )
 
     def _check_model_registry_store(self) -> dict:
-        backend = get_store_backend("model_registry", default_dev="json", default_prod="postgres")
-        registry_path = Path("models/registry.json").resolve()
-        exists = registry_path.exists()
-        if exists:
-            status = "healthy"
-            last_error = None
-        else:
-            status = "degraded"
-            last_error = f"Model registry metadata is missing: {registry_path}"
-        return self._store_payload(
-            store="model_registry",
-            backend=backend,
-            status=status,
-            last_error=last_error,
-            path=str(registry_path),
-        )
+        try:
+            from app.repositories.model_registry_repository import (
+                FileModelRegistryRepository,
+                get_model_registry_repository,
+                get_model_registry_settings,
+            )
+
+            settings = get_model_registry_settings()
+            repository = get_model_registry_repository()
+            health = repository.health_check().to_dict()
+            path = None
+            if isinstance(repository, FileModelRegistryRepository):
+                path = str(repository.file_path)
+            return self._store_payload(
+                store="model_registry",
+                backend=str(settings.get("backend") or repository.storage_backend),
+                status=str(health.get("status") or "degraded"),
+                last_error=health.get("last_error"),
+                path=path,
+                allow_writes=bool(health.get("allow_writes", False)),
+                prohibit_dual_writes=bool(settings.get("prohibit_dual_writes", True)),
+            )
+        except Exception as exc:
+            return self._store_payload(
+                store="model_registry",
+                backend=get_store_backend("model_registry", default_dev="json", default_prod="postgres"),
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
 
     def _check_persistence(self) -> dict:
         enabled = persistence_enabled()
@@ -642,6 +680,7 @@ class RuntimeHealthService:
         osint_enrichment = self._check_osint_enrichment()
         streaming = self._check_streaming()
         analytics = self._check_analytics()
+        uploaded_video = self._check_uploaded_video()
         persistence = self._check_persistence()
         checks = {
             "database": self._check_database(),
@@ -659,6 +698,7 @@ class RuntimeHealthService:
             "osint_enrichment": osint_enrichment,
             "streaming": streaming,
             "analytics": analytics,
+            "uploaded_video": uploaded_video,
             "persistence": persistence,
         }
 
@@ -697,6 +737,7 @@ class RuntimeHealthService:
             "osint_enrichment": osint_enrichment,
             "streaming": streaming,
             "analytics": analytics,
+            "uploaded_video": uploaded_video,
             "persistence": persistence,
         }
 
@@ -770,6 +811,11 @@ class RuntimeHealthService:
         if analytics.get("enabled") and analytics.get("status") in {"failed", "error"}:
             failures.append(
                 f"analytics: {analytics.get('last_error') or analytics.get('status')}"
+            )
+        uploaded_video = self._check_uploaded_video()
+        if uploaded_video.get("enabled") and uploaded_video.get("status") in {"failed", "error"}:
+            failures.append(
+                f"uploaded_video: {uploaded_video.get('last_error') or uploaded_video.get('status')}"
             )
 
         persistence = self._check_persistence()
