@@ -4,11 +4,13 @@ import logging
 import math
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 
+from app.repositories.identity_repository import IdentityRepository, build_identity_repository
 from inference.identity.runtime_config import load_identity_config
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,8 @@ class GlobalIdentityRegistry:
     _instance: "GlobalIdentityRegistry | None" = None
     _class_lock: threading.Lock = threading.Lock()
 
-    def __new__(cls) -> "GlobalIdentityRegistry":
+    def __new__(cls, *args, **kwargs) -> "GlobalIdentityRegistry":
+        del args, kwargs
         with cls._class_lock:
             if cls._instance is None:
                 inst = object.__new__(cls)
@@ -42,11 +45,12 @@ class GlobalIdentityRegistry:
                 cls._instance = inst
         return cls._instance
 
-    def __init__(self) -> None:
+    def __init__(self, repository: IdentityRepository | None = None) -> None:
         if self._initialized:
             return
         cfg = load_identity_config()
         fusion_cfg = cfg.get("fusion", {})
+        persistence_cfg = cfg.get("persistence", {})
         reid_cfg = cfg.get("reid", {})
         self._threshold = float(reid_cfg.get("match_threshold", 0.55))
         self._ttl_seconds = float(fusion_cfg.get("identity_ttl_seconds", 600))
@@ -57,7 +61,9 @@ class GlobalIdentityRegistry:
         self._faiss_index: Any | None = None
         self._faiss_available = False
         self._last_purge = time.monotonic()
+        self._repository = repository or build_identity_repository(persistence_cfg)
         self._try_init_faiss()
+        self._load_persisted_records()
         self._initialized = True
 
     def _try_init_faiss(self) -> None:
@@ -91,6 +97,116 @@ class GlobalIdentityRegistry:
         events.append({"timestamp": _now_iso(), "type": event_type, **payload})
         if len(events) > _MAX_HISTORY:
             del events[:-_MAX_HISTORY]
+
+    def _load_persisted_records(self) -> None:
+        try:
+            items = self._repository.list_global_identities(limit=5_000)
+        except Exception as exc:
+            logger.warning("GlobalIdentityRegistry: failed to load durable records: %s", exc)
+            return
+        now_ts = time.time()
+        for item in items:
+            global_id = str(item.get("global_identity_id") or "")
+            if not global_id:
+                continue
+            first_seen = self._parse_iso_ts(item.get("first_seen")) or now_ts
+            last_seen = self._parse_iso_ts(item.get("last_seen")) or first_seen
+            record = {
+                "global_id": global_id,
+                "embedding": None,
+                "confidence": float(item.get("confidence") or 0.0),
+                "sources": dict(item.get("source_scores") or {}),
+                "cameras_seen": set(item.get("cameras_seen") or []),
+                "camera_observations": dict(item.get("camera_observations") or {}),
+                "first_seen_ts": first_seen,
+                "last_seen_ts": last_seen,
+                "observation_count": int(item.get("observation_count") or 0),
+                "status": str(item.get("status") or "active"),
+                "confidence_history": list(item.get("confidence_history") or []),
+                "audit_events": list((item.get("metadata") or {}).get("audit_events") or []),
+                "last_stream_id": item.get("last_camera_id"),
+                "metadata": dict(item.get("metadata") or {}),
+            }
+            if now_ts - last_seen > self._ttl_seconds and record["status"] == "active":
+                record["status"] = "expired"
+            self._records[global_id] = record
+        if self._records:
+            self._rebuild_index_locked()
+
+    @staticmethod
+    def _parse_iso_ts(value: Any) -> float | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+
+    def _build_persisted_record_locked(self, identity_id: str, record: dict[str, Any]) -> dict[str, Any]:
+        last_seen_ts = float(record.get("last_seen_ts") or time.time())
+        first_seen_ts = float(record.get("first_seen_ts") or last_seen_ts)
+        metadata = dict(record.get("metadata") or {})
+        metadata["audit_events"] = list(record.get("audit_events") or [])
+        return {
+            "global_identity_id": identity_id,
+            "status": str(record.get("status") or "active"),
+            "confidence": round(float(record.get("confidence") or 0.0), 4),
+            "first_seen": _now_iso(first_seen_ts),
+            "last_seen": _now_iso(last_seen_ts),
+            "last_source_id": str(record.get("last_stream_id") or "") or None,
+            "last_camera_id": str(record.get("last_stream_id") or "") or None,
+            "observation_count": int(record.get("observation_count") or 0),
+            "confidence_history": list(record.get("confidence_history") or []),
+            "source_scores": dict(record.get("sources") or {}),
+            "camera_observations": dict(record.get("camera_observations") or {}),
+            "cameras_seen": sorted(record.get("cameras_seen") or []),
+            "ttl_expires_at": _now_iso(last_seen_ts + self._ttl_seconds),
+            "decay_metadata": {
+                "ttl_seconds": self._ttl_seconds,
+                "confidence_decay_lambda": self._conf_decay_lambda,
+            },
+            "operator_review_status": metadata.get("operator_review_status"),
+            "linked_case_ids": list(metadata.get("linked_case_ids") or []),
+            "metadata": metadata,
+            "created_at": _now_iso(first_seen_ts),
+            "updated_at": _now_iso(last_seen_ts),
+        }
+
+    def _persist_record_locked(self, identity_id: str, record: dict[str, Any]) -> None:
+        try:
+            self._repository.upsert_global_identity(self._build_persisted_record_locked(identity_id, record))
+        except Exception as exc:
+            logger.warning("GlobalIdentityRegistry: durable record upsert failed for %s: %s", identity_id, exc)
+
+    def _append_observation_locked(
+        self,
+        identity_id: str,
+        *,
+        stream_id: str,
+        confidence: float,
+        source_scores: dict[str, float] | None,
+        source: str,
+    ) -> None:
+        payload = {
+            "observation_id": f"obs_{uuid.uuid4().hex[:16]}",
+            "global_identity_id": identity_id,
+            "source_track_id": None,
+            "source_camera_id": stream_id,
+            "source_type": source,
+            "observed_at": _now_iso(),
+            "confidence": round(float(confidence), 4),
+            "face_score": float((source_scores or {}).get("face", 0.0) or 0.0),
+            "reid_score": float((source_scores or {}).get("reid", 0.0) or 0.0),
+            "track_score": float((source_scores or {}).get("track", 0.0) or 0.0),
+            "source_scores": dict(source_scores or {}),
+            "metadata": {},
+            "created_at": _now_iso(),
+        }
+        try:
+            self._repository.append_observation(payload)
+        except Exception as exc:
+            logger.warning("GlobalIdentityRegistry: durable observation append failed for %s: %s", identity_id, exc)
 
     def register_identity(
         self,
@@ -150,6 +266,14 @@ class GlobalIdentityRegistry:
                         metadata={"source_scores": source_scores},
                     )
             self._append_history(record, confidence, now)
+            self._persist_record_locked(identity_id, record)
+            self._append_observation_locked(
+                identity_id,
+                stream_id=stream_id,
+                confidence=confidence,
+                source_scores=source_scores,
+                source=source,
+            )
             self._rebuild_index_locked()
 
     def record_merge(self, primary_identity_id: str, secondary_identity_id: str, reason: str) -> None:
@@ -160,6 +284,8 @@ class GlobalIdentityRegistry:
                 return
             self._append_audit(primary, "merge", merged_from=secondary_identity_id, reason=reason)
             self._append_audit(secondary, "merged_into", merged_to=primary_identity_id, reason=reason)
+            self._persist_record_locked(primary_identity_id, primary)
+            self._persist_record_locked(secondary_identity_id, secondary)
 
     def record_split(self, identity_id: str, reason: str, related_identity_id: str | None = None) -> None:
         with self._lock:
@@ -167,6 +293,7 @@ class GlobalIdentityRegistry:
             if record is None:
                 return
             self._append_audit(record, "split", reason=reason, related_identity_id=related_identity_id)
+            self._persist_record_locked(identity_id, record)
 
     def record_conflict(self, identity_id: str, reason: str, metadata: dict[str, Any] | None = None) -> None:
         with self._lock:
@@ -174,6 +301,7 @@ class GlobalIdentityRegistry:
             if record is None:
                 return
             self._append_audit(record, "conflict", reason=reason, metadata=metadata or {})
+            self._persist_record_locked(identity_id, record)
             try:
                 from inference.monitoring.metrics import get_metrics
 
@@ -219,6 +347,7 @@ class GlobalIdentityRegistry:
             if now_ts - float(record.get("last_seen_ts", now_ts)) > self._ttl_seconds:
                 record["status"] = "expired"
                 self._append_audit(record, "expired")
+                self._persist_record_locked(identity_id, record)
                 expired += 1
         if expired:
             self._rebuild_index_locked()
@@ -382,6 +511,17 @@ class GlobalIdentityRegistry:
                 for camera_id in record.get("cameras_seen", set()):
                     counts[camera_id] = counts.get(camera_id, 0) + 1
             return counts
+
+    def persistence_health(self) -> dict[str, Any]:
+        try:
+            return self._repository.health_check().to_dict()
+        except Exception as exc:
+            return {
+                "store": "identity_registry",
+                "backend": "unknown",
+                "status": "failed",
+                "last_error": str(exc),
+            }
 
     def force_purge(self) -> int:
         with self._lock:

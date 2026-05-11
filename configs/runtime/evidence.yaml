@@ -52,6 +52,12 @@ evidence:
 
   retention:
     enabled: true
+    default_mode: "dry_run"
+    require_reviewed_mode: true
     default_days: 180
     archived_case_days: 365
+    quarantine_dir: "storage/evidence_quarantine"
+    review_required: true
+    delete_disabled_by_default: true
+    delete_confirmation_token: "DELETE_EXPIRED_EVIDENCE"
     legal_hold_blocks_deletion: true

@@ -22,8 +22,9 @@ import yaml
 
 ROOT = Path(__file__).parent.parent
 POLICY_PATH = ROOT / "configs" / "runtime" / "dependency_policy.yaml"
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+for path in (ROOT, ROOT / "backend"):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 
 def check(name: str, ok: bool, detail: str = "", required: bool = True) -> dict:
@@ -412,6 +413,57 @@ def validate_streaming_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_persistence_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[Persistence]")
+    config_path = ROOT / "configs" / "runtime" / "persistence.yaml"
+    if not config_path.exists():
+        results.append(check("persistence config", False, str(config_path), required=True))
+        return results
+    try:
+        from app.core.persistence import backup_settings, load_persistence_config, persistence_enabled, restore_settings
+        from app.services.runtime_health_service import RuntimeHealthService
+
+        persistence_cfg = load_persistence_config()
+        persistence_report = RuntimeHealthService(config={"runtime": {}, "services": {}})._check_persistence()
+    except Exception as exc:
+        results.append(check("persistence config parseable", False, str(exc), required=True))
+        return results
+
+    results.append(check("persistence enabled", bool(persistence_enabled(persistence_cfg)), "enabled" if persistence_enabled(persistence_cfg) else "disabled", required=True))
+    results.append(check("backup enabled", bool(backup_settings(persistence_cfg).get("enabled", True)), "enabled" if bool(backup_settings(persistence_cfg).get("enabled", True)) else "disabled", required=True))
+    results.append(check("restore confirmation required", bool(restore_settings(persistence_cfg).get("require_confirmation", True)), "required" if bool(restore_settings(persistence_cfg).get("require_confirmation", True)) else "disabled", required=True))
+
+    for store_name in ("cases", "evidence_metadata", "evidence_files", "identity_registry", "audit_logs", "osint", "retention_actions"):
+        store = dict((persistence_report.get("stores") or {}).get(store_name) or {})
+        status = str(store.get("status") or "unknown")
+        backend = str(store.get("backend") or "unknown")
+        required = profile == "production"
+        ok = status not in {"failed", "error"} if profile == "development" else status == "healthy"
+        detail = f"{backend} / {status}"
+        if store.get("last_error"):
+            detail = f"{detail}: {store['last_error']}"
+        results.append(check(f"{store_name} store", ok, detail, required=required))
+
+    required_tables = dict(persistence_report.get("required_tables") or {})
+    if profile == "production":
+        tables_ok = bool(required_tables) and all(required_tables.values())
+        missing = [name for name, present in required_tables.items() if not present]
+        detail = "all required tables present" if tables_ok else f"missing: {', '.join(missing)}"
+        results.append(check("postgres required tables", tables_ok, detail, required=True))
+    else:
+        detail = "not enforced in development" if not required_tables else "validated"
+        results.append(check("postgres required tables", True, detail, required=False))
+
+    if profile == "production":
+        failures = persistence_report.get("failures") or []
+        results.append(check("production persistence readiness", not failures, "; ".join(failures) if failures else "ready", required=True))
+    else:
+        warnings = persistence_report.get("warnings") or []
+        results.append(check("development persistence readiness", True, "; ".join(warnings) if warnings else "ready", required=False))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -441,6 +493,7 @@ def validate(profile: str) -> None:
         "configs/runtime/llm.yaml",
         "configs/runtime/osint_enrichment.yaml",
         "configs/runtime/streaming.yaml",
+        "configs/runtime/persistence.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -578,6 +631,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(streaming_results)
+
+    persistence_results = validate_persistence_configuration(profile)
+    for r in persistence_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(persistence_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)

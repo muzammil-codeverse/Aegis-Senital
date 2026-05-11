@@ -127,6 +127,15 @@ class IdentityService:
         }
         liveness_health = self._liveness.get_health()
         health["liveness_status"] = liveness_health["status"]
+        try:
+            health["persistence"] = get_global_registry().persistence_health()
+        except Exception as exc:
+            health["persistence"] = {
+                "store": "identity_registry",
+                "backend": "unknown",
+                "status": "failed",
+                "last_error": str(exc),
+            }
         return health
 
     def list_global_identities(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:

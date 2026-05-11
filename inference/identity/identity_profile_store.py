@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -34,6 +35,8 @@ from backend.app.models.identity_models import (
     IdentityProfile,
     IdentityStatus,
 )
+from backend.app.repositories.identity_repository import build_identity_repository
+from inference.identity.runtime_config import load_identity_config
 
 
 class IdentityProfileStore:
@@ -53,6 +56,8 @@ class IdentityProfileStore:
         self._enrollments: Dict[str, List[FaceEnrollment]] = {}  # identity_id -> list
         self._enrollment_profiles: Dict[str, IdentityEnrollmentProfile] = {}
         self._recent_matches: deque = deque(maxlen=self.MAX_RECENT_MATCHES)
+        persistence_cfg = load_identity_config().get("persistence", {})
+        self._persistence_repo = build_identity_repository(persistence_cfg)
 
         self._load()
 
@@ -281,6 +286,25 @@ class IdentityProfileStore:
                 self._enrollments[identity_id] = []
             self._enrollments[identity_id].append(enrollment)
             self._append_jsonl(self._enrollments_path(), enrollment.to_dict())
+            try:
+                self._persistence_repo.append_enrollment(
+                    {
+                        "enrollment_id": enrollment.enrollment_id,
+                        "identity_id": enrollment.identity_id,
+                        "image_ref": enrollment.image_path,
+                        "embedding_vector_ref": enrollment.embedding_vector_ref,
+                        "quality_score": enrollment.quality_score,
+                        "status": enrollment.status,
+                        "rejection_reasons": list(enrollment.rejection_reasons),
+                        "quality_metrics": dict(enrollment.quality_metrics),
+                        "source_breakdown": dict(enrollment.source_breakdown),
+                        "batch_enrollment_id": enrollment.batch_enrollment_id,
+                        "metadata": dict(enrollment.metadata),
+                        "created_at": datetime.fromtimestamp(enrollment.created_at, tz=timezone.utc).isoformat(),
+                    }
+                )
+            except Exception as exc:
+                logger.warning("IdentityProfileStore failed to persist enrollment metadata durably: %s", exc)
             return enrollment
 
     def list_face_enrollments(self, identity_id: str) -> List[FaceEnrollment]:

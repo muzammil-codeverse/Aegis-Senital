@@ -4,6 +4,20 @@ import os
 import time
 from pathlib import Path
 
+from app.core.persistence import (
+    get_store_backend,
+    is_production_environment,
+    latest_backup_manifest,
+    managed_storage_summary,
+    persistence_enabled,
+    postgres_dsn,
+    prohibit_jsonl_fallback,
+    require_managed_artifact_storage,
+    require_postgres,
+    store_required_in_production,
+)
+from app.db.schema_bootstrap import connect_postgres, verify_required_tables
+
 logger = logging.getLogger(__name__)
 
 
@@ -317,6 +331,310 @@ class RuntimeHealthService:
             "last_error": health.get("last_error"),
         }
 
+    @staticmethod
+    def _production_mode() -> bool:
+        return is_production_environment()
+
+    @staticmethod
+    def _store_payload(*, store: str, backend: str, status: str, last_error: str | None = None, **extra) -> dict:
+        payload = {
+            "store": store,
+            "backend": backend,
+            "status": status,
+            "last_error": last_error,
+        }
+        payload.update(extra)
+        return payload
+
+    def _check_event_persistence(self) -> dict:
+        configured_backend = get_store_backend("events", default_dev="jsonl", default_prod="postgres")
+        try:
+            from inference.identity_db import get_db
+
+            db = get_db()
+            if getattr(db, "db_healthy", False):
+                return self._store_payload(store="events", backend="postgres", status="healthy")
+            if self._production_mode():
+                return self._store_payload(
+                    store="events",
+                    backend="postgres",
+                    status="failed",
+                    last_error="Event persistence PostgreSQL backend is unavailable",
+                    configured_backend=configured_backend,
+                )
+            return self._store_payload(
+                store="events",
+                backend="memory",
+                status="healthy",
+                last_error="development fallback uses in-memory event persistence",
+                configured_backend=configured_backend,
+            )
+        except Exception as exc:
+            return self._store_payload(
+                store="events",
+                backend=configured_backend,
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
+
+    def _check_evidence_file_store(self) -> dict:
+        try:
+            from app.services.evidence_integrity import get_evidence_runtime_settings, get_evidence_storage_root
+
+            settings = get_evidence_runtime_settings()
+            storage_cfg = dict(settings.get("storage") or {})
+            backend = get_store_backend("evidence_files", default_dev="filesystem", default_prod="managed_filesystem_or_s3")
+            local_root = get_evidence_storage_root({"evidence": settings})
+            writable = os.access(str(local_root), os.W_OK)
+            managed_backend = backend.lower()
+            managed_ready = (
+                "managed" in managed_backend
+                or "s3" in managed_backend
+                or "artifact" in managed_backend
+                or managed_backend in {"filesystem_or_s3", "s3_or_filesystem"}
+            )
+            if self._production_mode() and require_managed_artifact_storage() and not managed_ready:
+                status = "failed"
+                last_error = f"Artifact storage backend '{backend}' is not approved for production"
+            elif not writable and (not self._production_mode() or backend in {"filesystem", "local", "managed_filesystem_or_s3"}):
+                status = "failed" if self._production_mode() else "degraded"
+                last_error = f"Evidence storage path is not writable: {local_root}"
+            else:
+                status = "healthy"
+                last_error = None
+            return self._store_payload(
+                store="evidence_files",
+                backend=backend,
+                status=status,
+                last_error=last_error,
+                path=str(local_root),
+                configured_backend=str(storage_cfg.get("production_backend") or storage_cfg.get("dev_backend") or backend),
+            )
+        except Exception as exc:
+            return self._store_payload(
+                store="evidence_files",
+                backend=get_store_backend("evidence_files", default_dev="filesystem", default_prod="managed_filesystem_or_s3"),
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
+
+    def _check_model_registry_store(self) -> dict:
+        backend = get_store_backend("model_registry", default_dev="json", default_prod="postgres")
+        registry_path = Path("models/registry.json").resolve()
+        exists = registry_path.exists()
+        if exists:
+            status = "healthy"
+            last_error = None
+        else:
+            status = "degraded"
+            last_error = f"Model registry metadata is missing: {registry_path}"
+        return self._store_payload(
+            store="model_registry",
+            backend=backend,
+            status=status,
+            last_error=last_error,
+            path=str(registry_path),
+        )
+
+    def _check_persistence(self) -> dict:
+        enabled = persistence_enabled()
+        if not enabled:
+            return {
+                "enabled": False,
+                "status": "disabled",
+                "stores": {},
+                "failures": [],
+                "warnings": [],
+                "required_tables": {},
+                "last_backup_at": None,
+                "retention_mode": "disabled",
+            }
+
+        stores: dict[str, dict] = {}
+        failures: list[str] = []
+        warnings: list[str] = []
+
+        case_health = self._check_case_management()
+        case_store = self._store_payload(
+            store="cases",
+            backend=str(case_health.get("storage") or "unknown"),
+            status=str(case_health.get("status") or "degraded"),
+            last_error=case_health.get("last_error"),
+        )
+        stores["cases"] = case_store
+        stores["evidence_metadata"] = self._store_payload(
+            store="evidence_metadata",
+            backend=case_store["backend"],
+            status=case_store["status"],
+            last_error=case_store.get("last_error"),
+        )
+        stores["evidence_files"] = self._check_evidence_file_store()
+        stores["events"] = self._check_event_persistence()
+
+        try:
+            from app.services.identity_service import get_identity_service
+
+            identity_persistence = dict((get_identity_service().get_health().get("persistence") or {}))
+        except Exception as exc:
+            identity_persistence = self._store_payload(
+                store="identity_registry",
+                backend="unknown",
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
+        stores["identity_registry"] = {
+            "store": "identity_registry",
+            "backend": str(identity_persistence.get("backend") or "unknown"),
+            "status": str(identity_persistence.get("status") or "degraded"),
+            "last_error": identity_persistence.get("last_error"),
+        }
+
+        try:
+            from app.services.audit_log_service import get_audit_log_service
+
+            audit_health = dict(get_audit_log_service().health())
+        except Exception as exc:
+            audit_health = self._store_payload(
+                store="audit_logs",
+                backend="unknown",
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
+        stores["audit_logs"] = {
+            "store": "audit_logs",
+            "backend": str(audit_health.get("backend") or audit_health.get("storage") or "unknown"),
+            "status": str(audit_health.get("status") or "degraded"),
+            "last_error": audit_health.get("last_error"),
+        }
+
+        osint_health = self._check_osint_enrichment()
+        stores["osint"] = self._store_payload(
+            store="osint",
+            backend=str(osint_health.get("storage") or "unknown"),
+            status=str(osint_health.get("status") or "degraded"),
+            last_error=osint_health.get("last_error"),
+        )
+
+        try:
+            from inference.open_vocab.result_store import OpenVocabResultStore
+
+            open_vocab_health = dict(OpenVocabResultStore().health_check())
+        except Exception as exc:
+            open_vocab_health = self._store_payload(
+                store="open_vocab_results",
+                backend="unknown",
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
+        stores["open_vocab_results"] = {
+            "store": "open_vocab_results",
+            "backend": str(open_vocab_health.get("backend") or "unknown"),
+            "status": str(open_vocab_health.get("status") or "degraded"),
+            "last_error": open_vocab_health.get("last_error"),
+        }
+
+        try:
+            from app.services.replay_clip_service import get_replay_clip_service
+
+            replay_health = dict(get_replay_clip_service().health_check())
+        except Exception as exc:
+            replay_health = self._store_payload(
+                store="stream_replay_metadata",
+                backend="unknown",
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+            )
+        stores["stream_replay_metadata"] = {
+            "store": "stream_replay_metadata",
+            "backend": str(replay_health.get("backend") or "unknown"),
+            "status": str(replay_health.get("status") or "degraded"),
+            "last_error": replay_health.get("last_error"),
+        }
+
+        try:
+            from app.services.evidence_retention_service import get_evidence_retention_service
+
+            retention_health = dict(get_evidence_retention_service().health_check())
+        except Exception as exc:
+            retention_health = self._store_payload(
+                store="retention_actions",
+                backend="unknown",
+                status="failed" if self._production_mode() else "degraded",
+                last_error=str(exc)[:160],
+                retention_mode="unknown",
+            )
+        stores["retention_actions"] = {
+            "store": "retention_actions",
+            "backend": str(retention_health.get("backend") or "unknown"),
+            "status": str(retention_health.get("status") or "degraded"),
+            "last_error": retention_health.get("last_error"),
+        }
+
+        analytics_health = self._check_analytics()
+        stores["analytics"] = self._store_payload(
+            store="analytics",
+            backend=str(analytics_health.get("storage") or "unknown"),
+            status=str(analytics_health.get("status") or "degraded"),
+            last_error=analytics_health.get("last_error"),
+        )
+        stores["model_registry"] = self._check_model_registry_store()
+
+        required_tables: dict[str, bool] = {}
+        if self._production_mode() and require_postgres():
+            dsn = postgres_dsn()
+            if not dsn:
+                failures.append("POSTGRES_DSN missing while production persistence requires PostgreSQL")
+            else:
+                try:
+                    with connect_postgres(dsn) as connection:
+                        required_tables = verify_required_tables(connection)
+                    missing_tables = sorted(name for name, present in required_tables.items() if not present)
+                    if missing_tables:
+                        failures.append(f"required tables missing: {', '.join(missing_tables)}")
+                except Exception as exc:
+                    failures.append(f"postgres readiness check failed: {str(exc)[:160]}")
+
+        for store_name, payload in stores.items():
+            store_status = str(payload.get("status") or "degraded")
+            backend = str(payload.get("backend") or "unknown").lower()
+            if self._production_mode() and store_required_in_production(store_name):
+                if store_status in {"failed", "error"}:
+                    failures.append(f"{store_name} store is {store_status}")
+                if prohibit_jsonl_fallback() and backend == "jsonl":
+                    failures.append(f"{store_name} is using prohibited JSONL fallback")
+            elif store_status in {"failed", "error", "degraded"}:
+                warnings.append(f"{store_name} store is {store_status}")
+
+        if self._production_mode():
+            evidence_files = stores.get("evidence_files") or {}
+            if require_managed_artifact_storage() and str(evidence_files.get("status")) != "healthy":
+                failures.append(evidence_files.get("last_error") or "artifact storage is unavailable")
+
+        last_backup = latest_backup_manifest() or {}
+        if failures:
+            status = "failed"
+        elif warnings:
+            status = "degraded"
+        else:
+            status = "healthy"
+
+        return {
+            "enabled": True,
+            "status": status,
+            "stores": stores,
+            "failures": failures,
+            "warnings": warnings,
+            "required_tables": required_tables,
+            "last_backup_at": last_backup.get("created_at"),
+            "retention_mode": retention_health.get("retention_mode") if "retention_health" in locals() else "unknown",
+            "production_requirements": {
+                "require_postgres": require_postgres(),
+                "require_managed_artifact_storage": require_managed_artifact_storage(),
+                "prohibit_jsonl_fallback_for_required_stores": prohibit_jsonl_fallback(),
+                "managed_storage": managed_storage_summary(),
+            },
+        }
+
     def get_health(self, include_sensitive: bool = False) -> dict:
         """Return aggregated health status for all subsystems."""
         case_management = self._check_case_management()
@@ -324,6 +642,7 @@ class RuntimeHealthService:
         osint_enrichment = self._check_osint_enrichment()
         streaming = self._check_streaming()
         analytics = self._check_analytics()
+        persistence = self._check_persistence()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -340,6 +659,7 @@ class RuntimeHealthService:
             "osint_enrichment": osint_enrichment,
             "streaming": streaming,
             "analytics": analytics,
+            "persistence": persistence,
         }
 
         if not include_sensitive:
@@ -347,6 +667,18 @@ class RuntimeHealthService:
                 if checks[k].get("detail") and "path" in str(checks[k]["detail"]).lower():
                     checks[k] = dict(checks[k])
                     checks[k]["detail"] = "[filtered]"
+            if "persistence" in checks:
+                filtered_persistence = dict(checks["persistence"])
+                filtered_stores = {}
+                for store_name, payload in dict(filtered_persistence.get("stores") or {}).items():
+                    filtered_payload = dict(payload)
+                    if filtered_payload.get("path"):
+                        filtered_payload["path"] = "[filtered]"
+                    if filtered_payload.get("last_error") and "path" in str(filtered_payload["last_error"]).lower():
+                        filtered_payload["last_error"] = "[filtered]"
+                    filtered_stores[store_name] = filtered_payload
+                filtered_persistence["stores"] = filtered_stores
+                checks["persistence"] = filtered_persistence
 
         statuses = [c["status"] for c in checks.values()]
         if "error" in statuses or "failed" in statuses:
@@ -365,6 +697,7 @@ class RuntimeHealthService:
             "osint_enrichment": osint_enrichment,
             "streaming": streaming,
             "analytics": analytics,
+            "persistence": persistence,
         }
 
     def is_alive(self) -> bool:
@@ -439,10 +772,15 @@ class RuntimeHealthService:
                 f"analytics: {analytics.get('last_error') or analytics.get('status')}"
             )
 
+        persistence = self._check_persistence()
+        if persistence.get("enabled", False) and persistence.get("status") == "failed":
+            failures.extend(f"persistence: {item}" for item in persistence.get("failures") or [])
+
         return {
             "ready": len(failures) == 0,
             "failures": failures,
             "generated_at": time.time(),
+            "persistence": persistence,
         }
 
 

@@ -10,6 +10,14 @@ from typing import Any
 
 import yaml
 
+from app.core.persistence import (
+    RepositoryHealth,
+    get_store_backend,
+    is_production_environment,
+    prohibit_jsonl_fallback,
+    store_required_in_production,
+)
+from app.db.schema_bootstrap import bootstrap_schema
 from app.models.osint_models import CaseDocumentSummary, CaseEnrichmentAuditLog, CaseExternalSource
 
 try:
@@ -23,7 +31,6 @@ except Exception:  # pragma: no cover
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 OSINT_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "osint_enrichment.yaml"
-PRODUCTION_ENVS = {"prod", "production"}
 _OSINT_REPOSITORY: "OsintRepository | None" = None
 _OSINT_REPOSITORY_LOCK = threading.Lock()
 
@@ -33,7 +40,7 @@ def _environment_name() -> str:
 
 
 def _is_production() -> bool:
-    return _environment_name() in PRODUCTION_ENVS
+    return is_production_environment()
 
 
 def load_osint_config() -> dict[str, Any]:
@@ -113,20 +120,28 @@ class OsintRepository(ABC):
     def list_audit_logs(self, case_id: str) -> list[CaseEnrichmentAuditLog]:
         raise NotImplementedError
 
-    def health(self) -> dict[str, Any]:
+    def health_check(self) -> RepositoryHealth:
         if not self.enabled:
             status = "disabled"
         elif self.is_available():
             status = "healthy"
         else:
             status = "failed" if _is_production() else "degraded"
-        return {
-            "enabled": self.enabled,
-            "mode": str(self._config.get("mode") or "analyst_provided_only"),
-            "storage": self.storage_backend,
-            "status": status,
-            "last_error": self._last_error,
-        }
+        return RepositoryHealth(
+            store="osint",
+            backend=self.storage_backend,
+            status=status,
+            last_error=self._last_error,
+            extra={
+                "enabled": self.enabled,
+                "mode": str(self._config.get("mode") or "analyst_provided_only"),
+            },
+        )
+
+    def health(self) -> dict[str, Any]:
+        payload = self.health_check().to_dict()
+        payload["storage"] = payload.pop("backend")
+        return payload
 
     def _set_error(self, message: str | None) -> None:
         self._last_error = message
@@ -165,6 +180,17 @@ class JsonlOsintRepository(OsintRepository):
 
     def is_available(self) -> bool:
         return self._last_error is None and os.access(str(self._storage_dir), os.W_OK)
+
+    def health_check(self) -> RepositoryHealth:
+        health = super().health_check()
+        if (
+            _is_production()
+            and store_required_in_production("osint")
+            and prohibit_jsonl_fallback()
+        ):
+            health.status = "failed"
+            health.last_error = health.last_error or "JSONL fallback is prohibited for OSINT in production"
+        return health
 
     def create_source(self, source: CaseExternalSource) -> CaseExternalSource:
         self._require_available()
@@ -264,58 +290,6 @@ class JsonlOsintRepository(OsintRepository):
 
 
 class PostgresOsintRepository(OsintRepository):
-    _DDL = """
-    CREATE TABLE IF NOT EXISTS osint_sources (
-        source_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        source_type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        url TEXT NULL,
-        storage_uri TEXT NULL,
-        original_filename TEXT NULL,
-        safe_filename TEXT NULL,
-        content_type TEXT NULL,
-        size_bytes BIGINT NULL,
-        hash_sha256 TEXT NULL,
-        hash_verified BOOLEAN NULL,
-        integrity_status TEXT NOT NULL DEFAULT 'not_applicable',
-        last_verified_at TIMESTAMPTZ NULL,
-        description TEXT NOT NULL,
-        source_reliability TEXT NOT NULL,
-        analyst_provided BOOLEAN NOT NULL,
-        created_by TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-        summary TEXT NULL,
-        requires_review BOOLEAN NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS osint_summaries (
-        summary_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        source_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        summary TEXT NOT NULL,
-        key_points JSONB NOT NULL DEFAULT '[]'::jsonb,
-        source_references JSONB NOT NULL DEFAULT '[]'::jsonb,
-        operator_review_caveat TEXT NOT NULL,
-        limitations JSONB NOT NULL DEFAULT '[]'::jsonb,
-        provider TEXT NOT NULL,
-        model TEXT NOT NULL,
-        created_by TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    CREATE TABLE IF NOT EXISTS osint_audit (
-        enrichment_audit_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        source_id TEXT NULL,
-        action TEXT NOT NULL,
-        actor TEXT NOT NULL,
-        timestamp TIMESTAMPTZ NOT NULL,
-        detail TEXT NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    """
-
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config=config)
         self._dsn = os.getenv("POSTGRES_DSN") or os.getenv("AEGIS_POSTGRES_DSN") or os.getenv("DB_URL")
@@ -425,7 +399,7 @@ class PostgresOsintRepository(OsintRepository):
         self._require_available()
         query = """
             INSERT INTO osint_audit (
-                enrichment_audit_id, case_id, source_id, action, actor, timestamp, detail, metadata
+                enrichment_audit_id, case_id, source_id, action, actor, created_at, detail, metadata
             ) VALUES (
                 %(enrichment_audit_id)s, %(case_id)s, %(source_id)s, %(action)s, %(actor)s, %(timestamp)s, %(detail)s, %(metadata)s
             )
@@ -434,7 +408,15 @@ class PostgresOsintRepository(OsintRepository):
         return log
 
     def list_audit_logs(self, case_id: str) -> list[CaseEnrichmentAuditLog]:
-        rows = self._fetchall("SELECT * FROM osint_audit WHERE case_id = %(case_id)s ORDER BY timestamp ASC", {"case_id": case_id})
+        rows = self._fetchall(
+            """
+            SELECT enrichment_audit_id, case_id, source_id, action, actor, created_at AS timestamp, detail, metadata
+            FROM osint_audit
+            WHERE case_id = %(case_id)s
+            ORDER BY created_at ASC
+            """,
+            {"case_id": case_id},
+        )
         return [CaseEnrichmentAuditLog.model_validate(dict(row)) for row in rows]
 
     def _initialize(self) -> None:
@@ -446,21 +428,7 @@ class PostgresOsintRepository(OsintRepository):
             return
         try:
             with self._connect() as conn:
-                with conn.cursor() as cursor:
-                    for statement in [part.strip() for part in self._DDL.split(";") if part.strip()]:
-                        cursor.execute(statement)
-                    for statement in (
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS original_filename TEXT NULL",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS safe_filename TEXT NULL",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS content_type TEXT NULL",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS size_bytes BIGINT NULL",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS hash_sha256 TEXT NULL",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS hash_verified BOOLEAN NULL",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS integrity_status TEXT NOT NULL DEFAULT 'not_applicable'",
-                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ NULL",
-                    ):
-                        cursor.execute(statement)
-                conn.commit()
+                bootstrap_schema(conn, ("osint_sources", "osint_summaries", "osint_audit"))
             self._available = True
             self._set_error(None)
         except Exception as exc:
@@ -541,7 +509,14 @@ def build_osint_repository(config: dict[str, Any] | None = None) -> OsintReposit
     payload = config or load_osint_config()
     osint_cfg = dict(payload.get("osint_enrichment") or {})
     if _is_production() and bool(osint_cfg.get("enabled", True)):
-        return PostgresOsintRepository(config=payload)
+        backend = get_store_backend(
+            "osint",
+            default_dev="jsonl",
+            default_prod="postgres",
+        ).lower()
+        if backend == "postgres":
+            return PostgresOsintRepository(config=payload)
+        return JsonlOsintRepository(config=payload)
     return JsonlOsintRepository(config=payload)
 
 

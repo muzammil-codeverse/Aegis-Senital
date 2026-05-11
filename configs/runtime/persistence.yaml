@@ -1,0 +1,99 @@
+persistence:
+  enabled: true
+
+  development:
+    allow_jsonl: true
+    allow_local_filesystem: true
+    root_dir: "storage"
+
+  production:
+    require_postgres: true
+    require_managed_artifact_storage: true
+    prohibit_jsonl_fallback_for_required_stores: true
+
+  stores:
+    events:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+    alerts_incidents:
+      dev_backend: "jsonl"
+      production_backend: "jsonl"
+      required_in_production: false
+
+    cases:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+    evidence_metadata:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+    evidence_files:
+      dev_backend: "filesystem"
+      production_backend: "managed_filesystem_or_s3"
+      required_in_production: true
+
+    identity_registry:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+    identity_enrollments:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: false
+
+    audit_logs:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+    osint:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+    analytics:
+      dev_backend: "derived"
+      production_backend: "postgres"
+      required_in_production: false
+
+    watchlists:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: false
+
+    open_vocab_results:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: false
+
+    stream_replay_metadata:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: false
+
+    model_registry:
+      dev_backend: "json"
+      production_backend: "postgres"
+      required_in_production: false
+
+    retention_actions:
+      dev_backend: "jsonl"
+      production_backend: "postgres"
+      required_in_production: true
+
+  backup:
+    enabled: true
+    output_dir: "storage/backups"
+    include_jsonl: true
+    include_configs: true
+    include_metadata_only_for_files: true
+
+  restore:
+    enabled: true
+    require_confirmation: true

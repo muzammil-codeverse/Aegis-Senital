@@ -43,6 +43,12 @@ identity:
     encrypt_embeddings: false
     max_identity_history_days: 30
 
+  persistence:
+    enabled: true
+    dev_backend: "jsonl"
+    production_backend: "postgres"
+    store_dir: "storage/identities"
+
   raw_asset_access:
     enabled: false
     admin_only: true

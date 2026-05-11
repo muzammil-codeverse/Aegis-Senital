@@ -17,11 +17,16 @@ from app.services.evidence_retention_service import get_evidence_retention_servi
 def main() -> int:
     parser = argparse.ArgumentParser(description="List evidence retention candidates without deleting files.")
     parser.add_argument("--case-id", default=None)
+    parser.add_argument("--all", action="store_true", help="Inspect all cases instead of a single case")
     args = parser.parse_args()
+    if args.case_id and args.all:
+        parser.error("--case-id and --all are mutually exclusive")
 
-    candidates = get_evidence_retention_service().dry_run(case_id=args.case_id)
+    candidates = get_evidence_retention_service().dry_run(case_id=None if args.all else args.case_id)
     payload = {
-        "case_id": args.case_id,
+        "mode": "dry_run",
+        "case_id": None if args.all else args.case_id,
+        "all_cases": bool(args.all),
         "candidate_count": len(candidates),
         "candidates": candidates,
         "deleted": False,

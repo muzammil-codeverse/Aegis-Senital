@@ -1,7 +1,17 @@
 import { formatNumber } from '../../utils/formatters'
 
+function formatIsoDateTime(value) {
+  if (!value) return 'N/A'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString([], { hour12: false })
+}
+
 export default function SystemPerformancePanel({ systemPerformance }) {
   const modelStates = Object.entries(systemPerformance?.model_states || {})
+  const persistence = systemPerformance?.persistence || {}
+  const persistenceStores = persistence?.stores || {}
+  const readinessFailures = systemPerformance?.readiness_failures || []
 
   return (
     <section className="panel analytics-panel analytics-span-4">
@@ -26,6 +36,22 @@ export default function SystemPerformancePanel({ systemPerformance }) {
         <article className="analytics-inline-card analytics-inline-card-wide">
           <strong>Model states</strong>
           <span>{modelStates.length ? modelStates.map(([name, state]) => `${name}: ${state}`).join(' | ') : 'No model state snapshot available'}</span>
+        </article>
+        <article className="analytics-inline-card analytics-inline-card-wide">
+          <strong>Persistence</strong>
+          <span>{persistence?.status ? `${persistence.status} | retention ${persistence.retention_mode || 'unknown'} | backup ${formatIsoDateTime(systemPerformance?.last_backup_at)}` : 'No persistence snapshot available'}</span>
+        </article>
+        <article className="analytics-inline-card analytics-inline-card-wide">
+          <strong>Critical stores</strong>
+          <span>
+            {Object.keys(persistenceStores).length
+              ? ['cases', 'evidence_files', 'identity_registry', 'audit_logs'].filter(key => persistenceStores[key]).map(key => `${key}: ${persistenceStores[key].backend}/${persistenceStores[key].status}`).join(' | ')
+              : 'No store readiness snapshot available'}
+          </span>
+        </article>
+        <article className="analytics-inline-card analytics-inline-card-wide">
+          <strong>Readiness</strong>
+          <span>{readinessFailures.length ? readinessFailures.join(' | ') : 'No production readiness warnings reported'}</span>
         </article>
       </div>
     </section>

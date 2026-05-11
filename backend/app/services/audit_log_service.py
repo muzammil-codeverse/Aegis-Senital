@@ -1,81 +1,34 @@
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
 import uuid
-from collections import deque
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
+from app.core.persistence import is_production_environment, store_required_in_production
 from app.models.security_models import AuditAction, AuditLogEntry, UserAccount, sanitize_metadata
-from app.security.audit_integrity import compute_entry_hash, verify_audit_chain
-from app.security.config import get_audit_config, project_path
+from app.repositories.audit_repository import AuditLogRepository, build_audit_log_repository
+from app.security.config import get_audit_config
 
 logger = logging.getLogger(__name__)
 
 
 class AuditLogService:
-    def __init__(self, config: dict | None = None) -> None:
+    def __init__(
+        self,
+        config: dict | None = None,
+        *,
+        repository: AuditLogRepository | None = None,
+    ) -> None:
         self._config = config or get_audit_config()
-        storage_dir = self._config.get("storage_dir") or "storage/audit"
-        self._storage_dir = project_path(str(storage_dir))
-        self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._enabled = bool(self._config.get("enabled", True))
-        self._rotate_daily = bool(self._config.get("rotate_daily", True))
         self._hash_chain_enabled = bool(self._config.get("hash_chain_enabled", True))
-        self._lock = threading.RLock()
-        self._recent: deque[AuditLogEntry] = deque(
-            maxlen=int(self._config.get("max_recent_entries", 2000))
-        )
-        self._last_hash_by_path: dict[str, str | None] = {}
-        self._load_recent()
+        self._repository = repository or build_audit_log_repository(self._config)
 
-    def _path_for_timestamp(self, timestamp: float | None = None) -> Path:
-        ts = timestamp or time.time()
-        day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-        if not self._rotate_daily:
-            return self._storage_dir / "audit.jsonl"
-        return self._storage_dir / f"audit_{day}.jsonl"
-
-    def _load_recent(self) -> None:
-        paths = sorted(self._storage_dir.glob("audit*.jsonl"))[-3:]
-        rows: list[AuditLogEntry] = []
-        for path in paths:
-            try:
-                with path.open("r", encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        rows.append(AuditLogEntry.from_dict(json.loads(line)))
-            except OSError:
-                continue
-        for entry in rows[-self._recent.maxlen:]:
-            self._recent.append(entry)
-        for path in paths:
-            self._last_hash_by_path[str(path)] = self._latest_hash_for_path(path)
-
-    @staticmethod
-    def _latest_hash_for_path(path: Path) -> str | None:
-        latest_hash = None
-        try:
-            with path.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        value = json.loads(line).get("entry_hash")
-                    except json.JSONDecodeError:
-                        continue
-                    if value:
-                        latest_hash = str(value)
-        except OSError:
-            return None
-        return latest_hash
+    @property
+    def repository(self) -> AuditLogRepository:
+        return self._repository
 
     @staticmethod
     def _request_ip(request: Any) -> str | None:
@@ -126,20 +79,10 @@ class AuditLogService:
             return entry
 
         try:
-            with self._lock:
-                path = self._path_for_timestamp(entry.timestamp)
-                path_key = str(path)
-                if self._hash_chain_enabled:
-                    previous_hash = self._last_hash_by_path.get(path_key)
-                    entry.previous_hash = previous_hash
-                    entry.entry_hash = compute_entry_hash(entry.to_dict(), previous_hash)
-                    self._last_hash_by_path[path_key] = entry.entry_hash
-                payload = json.dumps(entry.to_dict(), sort_keys=True)
-                with path.open("a", encoding="utf-8") as fh:
-                    fh.write(payload + "\n")
-                self._recent.append(entry)
+            self._repository.append(entry, hash_chain_enabled=self._hash_chain_enabled)
             try:
                 from inference.metrics import metrics
+
                 metrics.increment("audit_events_written")
             except Exception:
                 pass
@@ -147,9 +90,12 @@ class AuditLogService:
             logger.error("Audit log write failed: %s", exc)
             try:
                 from inference.metrics import metrics
+
                 metrics.increment("audit_write_failures")
             except Exception:
                 pass
+            if is_production_environment() and store_required_in_production("audit_logs"):
+                raise RuntimeError("Audit log persistence is required in production") from exc
         return entry
 
     def list_logs(
@@ -161,74 +107,42 @@ class AuditLogService:
         end_time: float | None = None,
         limit: int = 200,
     ) -> list[dict]:
-        entries: list[AuditLogEntry] = []
-        paths = sorted(self._storage_dir.glob("audit*.jsonl"), reverse=True)
-        max_limit = max(1, min(int(limit), 2000))
-        for path in paths:
-            try:
-                with path.open("r", encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        entry = AuditLogEntry.from_dict(json.loads(line))
-                        if user_id and entry.user_id != user_id and entry.username != user_id:
-                            continue
-                        if action and entry.action != action:
-                            continue
-                        if resource_type and entry.resource_type != resource_type:
-                            continue
-                        if start_time is not None and entry.timestamp < start_time:
-                            continue
-                        if end_time is not None and entry.timestamp > end_time:
-                            continue
-                        entries.append(entry)
-            except OSError:
-                continue
-        entries.sort(key=lambda item: item.timestamp, reverse=True)
-        return [entry.to_dict() for entry in entries[:max_limit]]
+        entries = self._repository.list_entries(
+            user_id=user_id,
+            action=action,
+            resource_type=resource_type,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+        )
+        return [entry.to_dict() for entry in entries]
 
     def get_recent(self, limit: int = 100) -> list[dict]:
-        with self._lock:
-            entries = list(self._recent)[-max(1, int(limit)):]
-        entries.sort(key=lambda item: item.timestamp, reverse=True)
-        return [entry.to_dict() for entry in entries]
+        return [entry.to_dict() for entry in self._repository.get_recent_entries(limit=limit)]
 
     def verify_integrity(self) -> dict:
         try:
             from inference.metrics import metrics
+
             metrics.increment("audit_integrity_checks")
         except Exception:
             pass
 
-        checked_files = 0
-        broken_files: list[dict] = []
-        latest_hash = None
-        try:
-            paths = sorted(self._storage_dir.glob("audit*.jsonl"))
-            for path in paths:
-                result = verify_audit_chain(str(path))
-                checked_files += 1
-                if result.get("latest_hash"):
-                    latest_hash = result["latest_hash"]
-                if result.get("status") == "broken":
-                    broken_files.append(result)
-        except Exception as exc:
-            broken_files.append({"file": None, "status": "error", "detail": str(exc)})
-
-        if broken_files:
+        result = self._repository.verify_integrity()
+        if result.get("broken_files"):
             try:
                 from inference.metrics import metrics
+
                 metrics.increment("audit_integrity_failures")
             except Exception:
                 pass
+        return result
 
-        return {
-            "status": "ok" if not broken_files else "broken",
-            "checked_files": checked_files,
-            "broken_files": broken_files,
-            "latest_hash": latest_hash,
-        }
+    def health(self) -> dict[str, Any]:
+        payload = self._repository.health_check().to_dict()
+        payload["storage"] = payload.pop("backend")
+        payload["hash_chain_enabled"] = self._hash_chain_enabled
+        return payload
 
 
 _audit_log_service: AuditLogService | None = None
@@ -242,3 +156,15 @@ def get_audit_log_service() -> AuditLogService:
             if _audit_log_service is None:
                 _audit_log_service = AuditLogService()
     return _audit_log_service
+
+
+def set_audit_log_service(service: AuditLogService) -> None:
+    global _audit_log_service
+    with _audit_log_lock:
+        _audit_log_service = service
+
+
+def reset_audit_log_service() -> None:
+    global _audit_log_service
+    with _audit_log_lock:
+        _audit_log_service = None

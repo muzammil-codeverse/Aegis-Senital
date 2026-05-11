@@ -51,6 +51,34 @@ function StatusCheckRow({ name, check }) {
   )
 }
 
+function formatIsoDateTime(value) {
+  if (!value) return 'N/A'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleString([], { hour12: false })
+}
+
+function PersistenceStoreRow({ name, store }) {
+  if (!store) return null
+  const statusColors = {
+    healthy: '#34d399',
+    ok: '#34d399',
+    degraded: '#fbbf24',
+    failed: '#f87171',
+    error: '#f87171',
+    disabled: '#6b7280',
+  }
+  const color = statusColors[store.status] || '#6b7280'
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 6, fontSize: '0.72rem' }}>
+      <span style={{ color: '#d1d5db' }}>{name.replace(/_/g, ' ')}</span>
+      <span style={{ color, textAlign: 'right' }}>
+        {store.backend || 'unknown'} / {store.status || 'unknown'}
+      </span>
+    </div>
+  )
+}
+
 export default function SystemHealthPanel({ health, metrics = {}, error, websocketStatus, systemHealth }) {
   const status = health?.status || 'unknown'
 
@@ -58,6 +86,10 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
   const subsystemStatus = systemHealth?.status
   const checks = systemHealth?.checks || {}
   const healthEndpointUnavailable = systemHealth?.error != null && Object.keys(checks).length === 0
+  const persistence = checks.persistence || systemHealth?.persistence || {}
+  const persistenceStores = persistence?.stores || {}
+  const persistenceWarnings = persistence?.warnings || []
+  const persistenceFailures = persistence?.failures || []
 
   // Subsystem order for display
   const CHECK_ORDER = [
@@ -110,6 +142,32 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
             <p style={{ margin: '6px 0 0', fontSize: '0.6rem', color: '#374151' }}>
               Updated: {formatDateTime(systemHealth.generated_at * 1000)}
             </p>
+          )}
+        </div>
+      ) : null}
+
+      {persistence?.enabled !== false && Object.keys(persistenceStores).length > 0 ? (
+        <div style={{ padding: '6px 12px 4px' }}>
+          <p style={{ margin: '0 0 6px', fontSize: '0.62rem', color: '#4b5563', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+            Persistence
+          </p>
+          <div style={{ marginBottom: 8, fontSize: '0.72rem', color: '#9ca3af' }}>
+            Status: <span style={{ color: '#d1d5db' }}>{persistence.status || 'unknown'}</span>
+            {'  '}| Retention: <span style={{ color: '#d1d5db' }}>{persistence.retention_mode || 'unknown'}</span>
+            {'  '}| Last backup: <span style={{ color: '#d1d5db' }}>{formatIsoDateTime(persistence.last_backup_at)}</span>
+          </div>
+          {['cases', 'evidence_metadata', 'evidence_files', 'identity_registry', 'audit_logs', 'osint'].map(key => (
+            <PersistenceStoreRow key={key} name={key} store={persistenceStores[key]} />
+          ))}
+          {persistenceFailures.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: '0.68rem', color: '#fca5a5' }}>
+              {persistenceFailures.join(' | ')}
+            </div>
+          )}
+          {persistenceWarnings.length > 0 && (
+            <div style={{ marginTop: 6, fontSize: '0.68rem', color: '#fdba74' }}>
+              {persistenceWarnings.join(' | ')}
+            </div>
           )}
         </div>
       ) : null}

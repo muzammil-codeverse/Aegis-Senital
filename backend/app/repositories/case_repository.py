@@ -11,6 +11,14 @@ from typing import Any
 
 import yaml
 
+from app.core.persistence import (
+    RepositoryHealth,
+    get_store_backend,
+    is_production_environment,
+    prohibit_jsonl_fallback,
+    store_required_in_production,
+)
+from app.db.schema_bootstrap import bootstrap_schema
 from app.models.case_models import (
     CaseAuditLog,
     CaseEvidence,
@@ -33,7 +41,6 @@ _CASE_REPOSITORY_LOCK = threading.Lock()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CASE_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "case_management.yaml"
-PRODUCTION_ENVS = {"prod", "production"}
 
 
 def _now_iso() -> str:
@@ -45,7 +52,7 @@ def _environment_name() -> str:
 
 
 def _is_production() -> bool:
-    return _environment_name() in PRODUCTION_ENVS
+    return is_production_environment()
 
 
 def load_case_management_config() -> dict[str, Any]:
@@ -201,7 +208,7 @@ class CaseRepository(ABC):
     def list_reports(self, case_id: str) -> list[CaseExport]:
         raise NotImplementedError
 
-    def health(self) -> dict[str, Any]:
+    def health_check(self) -> RepositoryHealth:
         case_count = len(self.list_cases({})) if self.is_available() else 0
         open_case_count = len(self.list_cases({"status": ["open", "investigating"]})) if self.is_available() else 0
         if not self.enabled:
@@ -210,14 +217,22 @@ class CaseRepository(ABC):
             status = "healthy"
         else:
             status = "failed" if _is_production() else "degraded"
-        return {
-            "enabled": self.enabled,
-            "storage": self.storage_backend,
-            "status": status,
-            "case_count": case_count,
-            "open_case_count": open_case_count,
-            "last_error": self._last_error,
-        }
+        return RepositoryHealth(
+            store="cases",
+            backend=self.storage_backend,
+            status=status,
+            last_error=self._last_error,
+            extra={
+                "enabled": self.enabled,
+                "case_count": case_count,
+                "open_case_count": open_case_count,
+            },
+        )
+
+    def health(self) -> dict[str, Any]:
+        payload = self.health_check().to_dict()
+        payload["storage"] = payload.pop("backend")
+        return payload
 
     def _set_error(self, message: str | None) -> None:
         self._last_error = message
@@ -260,6 +275,17 @@ class JsonlCaseRepository(CaseRepository):
 
     def is_available(self) -> bool:
         return self._last_error is None and os.access(str(self._storage_dir), os.W_OK)
+
+    def health_check(self) -> RepositoryHealth:
+        health = super().health_check()
+        if (
+            _is_production()
+            and store_required_in_production("cases")
+            and prohibit_jsonl_fallback()
+        ):
+            health.status = "failed"
+            health.last_error = health.last_error or "JSONL fallback is prohibited for cases in production"
+        return health
 
     def create_case(self, case: CaseRecord) -> CaseRecord:
         self._require_available()
@@ -399,88 +425,6 @@ class JsonlCaseRepository(CaseRepository):
 
 
 class PostgresCaseRepository(CaseRepository):
-    _DDL = """
-    CREATE TABLE IF NOT EXISTS cases (
-        case_id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        status TEXT NOT NULL,
-        priority TEXT NOT NULL,
-        severity TEXT NOT NULL,
-        source_event_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        camera_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        track_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        assigned_to TEXT NULL,
-        created_by TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL,
-        closed_at TIMESTAMPTZ NULL,
-        tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-        requires_review BOOLEAN NOT NULL DEFAULT TRUE,
-        review_status TEXT NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    CREATE TABLE IF NOT EXISTS case_evidence (
-        evidence_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
-        evidence_type TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        source_event_id TEXT NULL,
-        camera_id TEXT NULL,
-        track_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        storage_uri TEXT NULL,
-        snapshot_uri TEXT NULL,
-        original_filename TEXT NULL,
-        safe_filename TEXT NULL,
-        content_type TEXT NULL,
-        size_bytes BIGINT NULL,
-        created_by TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL,
-        timestamp TIMESTAMPTZ NOT NULL,
-        hash_sha256 TEXT NULL,
-        hash_verified BOOLEAN NULL,
-        integrity_status TEXT NOT NULL,
-        chain_status TEXT NOT NULL DEFAULT 'active',
-        last_verified_at TIMESTAMPTZ NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    CREATE TABLE IF NOT EXISTS case_notes (
-        note_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
-        note TEXT NOT NULL,
-        created_by TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    CREATE TABLE IF NOT EXISTS case_audit (
-        audit_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
-        action TEXT NOT NULL,
-        actor TEXT NOT NULL,
-        timestamp TIMESTAMPTZ NOT NULL,
-        detail TEXT NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    CREATE TABLE IF NOT EXISTS case_reports (
-        export_id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL REFERENCES cases(case_id) ON DELETE CASCADE,
-        format TEXT NOT NULL,
-        report_type TEXT NOT NULL DEFAULT 'case_export',
-        content TEXT NOT NULL,
-        generated_at TIMESTAMPTZ NOT NULL,
-        generated_by TEXT NOT NULL,
-        artifact_uri TEXT NULL,
-        content_type TEXT NULL,
-        size_bytes BIGINT NULL,
-        hash_sha256 TEXT NULL,
-        hash_verified BOOLEAN NULL,
-        integrity_status TEXT NOT NULL DEFAULT 'pending',
-        last_verified_at TIMESTAMPTZ NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb
-    );
-    """
-
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config=config)
         storage_cfg = dict((self._config.get("storage") or {}))
@@ -656,7 +600,7 @@ class PostgresCaseRepository(CaseRepository):
     def add_audit_log(self, log: CaseAuditLog) -> CaseAuditLog:
         self._require_available()
         query = """
-            INSERT INTO case_audit (audit_id, case_id, action, actor, timestamp, detail, metadata)
+            INSERT INTO case_audit_logs (audit_id, case_id, action, actor, created_at, detail, metadata)
             VALUES (%(audit_id)s, %(case_id)s, %(action)s, %(actor)s, %(timestamp)s, %(detail)s, %(metadata)s)
         """
         self._execute(query, self._audit_params(log))
@@ -665,7 +609,12 @@ class PostgresCaseRepository(CaseRepository):
     def list_audit_logs(self, case_id: str) -> list[CaseAuditLog]:
         self._require_available()
         rows = self._fetchall(
-            "SELECT * FROM case_audit WHERE case_id = %(case_id)s ORDER BY timestamp ASC",
+            """
+            SELECT audit_id, case_id, action, actor, created_at AS timestamp, detail, metadata
+            FROM case_audit_logs
+            WHERE case_id = %(case_id)s
+            ORDER BY created_at ASC
+            """,
             {"case_id": case_id},
         )
         return [CaseAuditLog.model_validate(dict(row)) for row in rows]
@@ -706,26 +655,7 @@ class PostgresCaseRepository(CaseRepository):
             return
         try:
             with self._connect() as conn:
-                with conn.cursor() as cursor:
-                    for statement in [part.strip() for part in self._DDL.split(";") if part.strip()]:
-                        cursor.execute(statement)
-                    for statement in (
-                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS original_filename TEXT NULL",
-                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS safe_filename TEXT NULL",
-                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS content_type TEXT NULL",
-                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS size_bytes BIGINT NULL",
-                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS chain_status TEXT NOT NULL DEFAULT 'active'",
-                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ NULL",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFAULT 'case_export'",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS content_type TEXT NULL",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS size_bytes BIGINT NULL",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS hash_sha256 TEXT NULL",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS hash_verified BOOLEAN NULL",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS integrity_status TEXT NOT NULL DEFAULT 'pending'",
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ NULL",
-                    ):
-                        cursor.execute(statement)
-                conn.commit()
+                bootstrap_schema(conn, ("cases", "case_evidence", "case_notes", "case_audit_logs", "case_reports"))
             self._available = True
             self._set_error(None)
         except Exception as exc:
@@ -843,7 +773,11 @@ def build_case_repository(config: dict[str, Any] | None = None) -> CaseRepositor
     case_cfg = dict(payload.get("case_management") or {})
     storage_cfg = dict(case_cfg.get("storage") or {})
     if _is_production():
-        backend = str(storage_cfg.get("production_backend") or "postgres").lower()
+        backend = get_store_backend(
+            "cases",
+            default_dev=str(storage_cfg.get("dev_backend") or "jsonl"),
+            default_prod=str(storage_cfg.get("production_backend") or "postgres"),
+        ).lower()
         if backend == "postgres":
             return PostgresCaseRepository(config=payload)
         return JsonlCaseRepository(config=payload)

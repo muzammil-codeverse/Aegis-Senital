@@ -523,6 +523,8 @@ class AnalyticsService:
             system = payload.get("system") or {}
             event_bus = payload.get("event_bus") or {}
             streaming = (payload.get("streaming") or {}).get("streaming") or {}
+            persistence = {}
+            readiness_failures: list[str] = []
             gpu_status = "healthy"
             gpu_name = None
             try:
@@ -534,8 +536,22 @@ class AnalyticsService:
                     gpu_status = "degraded"
             except Exception:
                 gpu_status = "unknown"
+            try:
+                from app.services.runtime_health_service import get_runtime_health_service
+
+                runtime_health = get_runtime_health_service()
+                persistence = dict(runtime_health.get_health(include_sensitive=False).get("persistence") or {})
+                readiness_failures = list(runtime_health.is_ready().get("failures") or [])
+            except Exception:
+                persistence = {}
+                readiness_failures = []
+            status = "healthy" if gpu_status == "healthy" else gpu_status
+            if persistence.get("status") == "failed":
+                status = "failed"
+            elif persistence.get("status") == "degraded" and status == "healthy":
+                status = "degraded"
             return SystemPerformanceSummary(
-                status="healthy" if gpu_status == "healthy" else gpu_status,
+                status=status,
                 gpu_status=gpu_status,
                 gpu_name=gpu_name,
                 avg_inference_latency_ms=metrics.get("avg_inference_time_ms"),
@@ -550,6 +566,12 @@ class AnalyticsService:
                     "p95_ms": None,
                     "p99_ms": None,
                 },
+                persistence=persistence,
+                retention={
+                    "mode": persistence.get("retention_mode"),
+                },
+                last_backup_at=persistence.get("last_backup_at"),
+                readiness_failures=readiness_failures,
             )
 
         return self._with_cache("system_performance", normalized, filters, _compute)

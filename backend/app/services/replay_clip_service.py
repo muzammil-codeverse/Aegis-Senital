@@ -9,6 +9,10 @@ from pathlib import Path
 
 import cv2
 
+from app.repositories.stream_replay_repository import (
+    StreamReplayRepository,
+    build_stream_replay_repository,
+)
 from app.models.streaming_models import ReplayClipRequest, ReplayClipResponse
 from app.services.case_service import get_case_service
 from app.services.evidence_integrity import compute_sha256
@@ -42,13 +46,14 @@ def _safe_camera_component(camera_id: str) -> str:
 
 
 class ReplayClipService:
-    def __init__(self) -> None:
+    def __init__(self, repository: StreamReplayRepository | None = None) -> None:
         self._config = load_streaming_runtime_config().get("streaming", {})
         self._replay_cfg = self._config.get("replay", {})
         self._case_cfg = self._config.get("case_integration", {})
         self._enabled = bool(self._config.get("enabled", True)) and bool(self._replay_cfg.get("enabled", False))
         self._output_dir = Path(str(self._replay_cfg.get("output_dir") or "storage/replay"))
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._repository = repository or build_stream_replay_repository(str(self._output_dir))
         self._default_before = int(self._replay_cfg.get("evidence_clip_seconds_before", 10))
         self._default_after = int(self._replay_cfg.get("evidence_clip_seconds_after", 20))
         self._hash_enabled = True
@@ -131,6 +136,22 @@ class ReplayClipService:
             }
         )
         metadata_path.write_text(json.dumps(export_meta, indent=2), encoding="utf-8")
+        self._repository.save_metadata(
+            {
+                "clip_id": clip_id,
+                "camera_id": camera_id,
+                "source_uri": source_uri,
+                "file_path": str(clip_path),
+                "metadata_path": str(metadata_path),
+                "created_at": export_meta["created_at"],
+                "clip_start_at": export_meta["clip_start_at"],
+                "clip_end_at": export_meta["clip_end_at"],
+                "size_bytes": export_meta.get("size_bytes"),
+                "hash_sha256": digest,
+                "integrity_status": export_meta.get("integrity_status"),
+                "metadata": export_meta,
+            }
+        )
         self._increment_metric("stream_replay_clips_created_total")
 
         attached_case_id = None
@@ -174,6 +195,9 @@ class ReplayClipService:
         if base not in metadata_path.parents:
             raise ValueError("clip metadata path escapes replay directory")
         return metadata_path
+
+    def health_check(self) -> dict[str, Any]:
+        return self._repository.health_check().to_dict()
 
     def _resolve_source(self, camera_id: str) -> tuple[str | None, str | None, dict]:
         stats = get_stream_session_manager().get_stream_stats(camera_id)

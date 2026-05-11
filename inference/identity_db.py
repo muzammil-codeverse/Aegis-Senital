@@ -24,6 +24,21 @@ _VALID_STATUSES = {
     SCENARIO_RESOLVED,
     SCENARIO_FALSE_ALARM,
 }
+_SENSITIVE_PERSISTENCE_KEYS = {
+    "appearance_embedding",
+    "embedding",
+    "face_crop",
+    "face_embedding",
+    "face_image",
+    "image_blob",
+    "raw_face",
+    "raw_frame",
+}
+_SENSITIVE_PERSISTENCE_MARKERS = (
+    "embedding",
+    "face_image",
+    "raw_face",
+)
 
 
 def _now_iso() -> str:
@@ -32,6 +47,20 @@ def _now_iso() -> str:
 
 def _has_embedding(embedding: list[float] | None) -> bool:
     return bool(embedding and len(embedding) > 0)
+
+
+def _sanitize_persisted_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        cleaned: dict[str, Any] = {}
+        for key, item in value.items():
+            lowered = str(key).lower()
+            if lowered in _SENSITIVE_PERSISTENCE_KEYS or any(marker in lowered for marker in _SENSITIVE_PERSISTENCE_MARKERS):
+                continue
+            cleaned[str(key)] = _sanitize_persisted_payload(item)
+        return cleaned
+    if isinstance(value, list):
+        return [_sanitize_persisted_payload(item) for item in value]
+    return deepcopy(value)
 
 
 class IdentityDB:
@@ -181,7 +210,9 @@ class IdentityDB:
                 "track_ref_ids": track_ref_ids,
                 "identity_ids": list(getattr(event, "identity_ids", [])),
                 "camera_ids": list(getattr(event, "camera_ids", [])),
-                "payload": event.to_dict() if hasattr(event, "to_dict") else deepcopy(event),
+                "payload": _sanitize_persisted_payload(
+                    event.to_dict() if hasattr(event, "to_dict") else deepcopy(event)
+                ),
             },
         }
         self._postgres.insert_event(record)
@@ -216,7 +247,9 @@ class IdentityDB:
                 "confidence_score": getattr(scenario, "confidence_score", 0.0),
                 "camera_ids": list(getattr(scenario, "camera_ids", [])),
                 "identity_ids": list(getattr(scenario, "identity_ids", [])),
-                "payload": scenario.to_dict() if hasattr(scenario, "to_dict") else deepcopy(scenario),
+                "payload": _sanitize_persisted_payload(
+                    scenario.to_dict() if hasattr(scenario, "to_dict") else deepcopy(scenario)
+                ),
             },
         }
         self._postgres.insert_scenario(record)
@@ -263,9 +296,9 @@ class IdentityDB:
                 "velocity": list(getattr(track, "velocity", [])),
                 "stability_score": getattr(track, "stability_score", 0.0),
                 "identity_confidence": getattr(track, "identity_confidence", 0.0),
-                "face_embedding": list(getattr(track, "face_embedding", [])),
-                "appearance_embedding": list(getattr(track, "appearance_embedding", [])),
-                "track_payload": track.to_dict() if hasattr(track, "to_dict") else {},
+                "has_face_embedding": bool(getattr(track, "face_embedding", [])),
+                "has_appearance_embedding": bool(getattr(track, "appearance_embedding", [])),
+                "track_payload": _sanitize_persisted_payload(track.to_dict() if hasattr(track, "to_dict") else {}),
             },
         }
 

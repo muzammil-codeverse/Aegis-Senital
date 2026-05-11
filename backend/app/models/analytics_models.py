@@ -147,6 +147,10 @@ class SystemPerformanceSummary(AnalyticsBaseModel):
     event_bus_health: dict[str, Any] = Field(default_factory=dict)
     runtime_checks: dict[str, Any] = Field(default_factory=dict)
     latency_percentiles: dict[str, float | None] = Field(default_factory=dict)
+    persistence: dict[str, Any] = Field(default_factory=dict)
+    retention: dict[str, Any] = Field(default_factory=dict)
+    last_backup_at: str | None = None
+    readiness_failures: list[str] = Field(default_factory=list)
 
 
 class IdentityAnalyticsSummary(AnalyticsBaseModel):

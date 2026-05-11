@@ -37,7 +37,7 @@ EvidenceIntegrityStatus = Literal[
     "failed",
     "pending",
 ]
-EvidenceChainStatus = Literal["active", "archived", "legal_hold", "deleted"]
+EvidenceChainStatus = Literal["active", "archived", "legal_hold", "quarantined", "deleted"]
 
 CASE_STATUSES = ("open", "investigating", "resolved", "dismissed", "archived")
 CASE_PRIORITIES = ("low", "medium", "high", "critical")
@@ -68,7 +68,7 @@ EVIDENCE_INTEGRITY_STATUSES = (
     "failed",
     "pending",
 )
-EVIDENCE_CHAIN_STATUSES = ("active", "archived", "legal_hold", "deleted")
+EVIDENCE_CHAIN_STATUSES = ("active", "archived", "legal_hold", "quarantined", "deleted")
 
 
 def _now_iso() -> str:
