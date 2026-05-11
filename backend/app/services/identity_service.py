@@ -4,6 +4,7 @@ import logging
 import os
 from typing import Any
 
+from app.services.identity_calibration_readiness import snapshot_identity_calibration
 from inference.identity.global_identity_registry import get_global_registry
 from inference.identity.liveness_adapter import LivenessAdapter
 from inference.identity.runtime_config import load_identity_config
@@ -127,6 +128,8 @@ class IdentityService:
         }
         liveness_health = self._liveness.get_health()
         health["liveness_status"] = liveness_health["status"]
+        health["liveness_provider"] = str(liveness_health.get("provider") or self._liveness.provider or "none")
+        health["calibration"] = snapshot_identity_calibration(self._config)
         try:
             health["persistence"] = get_global_registry().persistence_health()
         except Exception as exc:
@@ -136,6 +139,11 @@ class IdentityService:
                 "status": "failed",
                 "last_error": str(exc),
             }
+        persist = health.get("persistence") or {}
+        persist_status = str(persist.get("status") or "").lower()
+        health["durable_registry"] = persist_status in {"healthy", "ok", "degraded"} and persist_status != "failed"
+        if health["liveness_enabled"] and liveness_health.get("status") == "failed":
+            health["status"] = "failed"
         return health
 
     def list_global_identities(self, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:

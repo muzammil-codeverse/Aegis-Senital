@@ -2,6 +2,20 @@ identity:
   enabled: true
   fail_open: true
 
+  calibration:
+    enabled: true
+    output_dir: "storage/identity_calibration"
+    face:
+      target_far_levels: [0.1, 0.01, 0.001]
+      min_quality_score: 0.65
+      default_threshold: null
+      require_calibration_before_production: true
+    reid:
+      target_rank1_min: 0.75
+      target_map_min: 0.60
+      default_threshold: null
+      require_benchmark_before_production: true
+
   face:
     enabled: true
     provider: "insightface"
@@ -34,8 +48,16 @@ identity:
 
   liveness:
     enabled: false
-    provider: "pending"
+    provider: "none"
+    fail_if_enabled_without_provider: true
     fail_if_enabled_missing: true
+    operator_warning_when_disabled: true
+
+  review:
+    require_operator_review_for_matches: true
+    auto_confirm_identity: false
+    allow_reject_candidate: true
+    allow_merge_after_review: true
 
   privacy:
     store_raw_faces: false
@@ -53,3 +75,6 @@ identity:
     enabled: false
     admin_only: true
     audit_all_access: true
+
+  production_readiness:
+    calibration_missing_severity: "fail"

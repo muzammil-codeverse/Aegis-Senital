@@ -156,6 +156,42 @@ export async function getGlobalIdentityRegistry(params = {}) {
   }
 }
 
+export async function getIdentityCandidates(params = {}) {
+  try {
+    const res = await apiClient.get('/api/identity/candidates', { params });
+    return normalizeListResponse(res.data);
+  } catch (e) {
+    return { items: [], count: 0, status: 'error', detail: e.message };
+  }
+}
+
+export async function acceptIdentityCandidate(candidateId, payload = {}) {
+  try {
+    const res = await apiClient.post(`/api/identity/candidates/${candidateId}/accept`, payload);
+    return normalizeItemResponse(res.data);
+  } catch (e) {
+    return { item: null, status: 'error', detail: e.message };
+  }
+}
+
+export async function rejectIdentityCandidate(candidateId, payload = {}) {
+  try {
+    const res = await apiClient.post(`/api/identity/candidates/${candidateId}/reject`, payload);
+    return normalizeItemResponse(res.data);
+  } catch (e) {
+    return { item: null, status: 'error', detail: e.message };
+  }
+}
+
+export async function escalateIdentityCandidate(candidateId, payload = {}) {
+  try {
+    const res = await apiClient.post(`/api/identity/candidates/${candidateId}/escalate`, payload);
+    return normalizeItemResponse(res.data);
+  } catch (e) {
+    return { item: null, status: 'error', detail: e.message };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Watchlist endpoints
 // ---------------------------------------------------------------------------

@@ -39,10 +39,37 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "confidence_decay_seconds": 120,
         "require_face_for_high_confidence": False,
     },
+    "calibration": {
+        "enabled": True,
+        "output_dir": "storage/identity_calibration",
+        "face": {
+            "target_far_levels": [0.1, 0.01, 0.001],
+            "min_quality_score": 0.65,
+            "default_threshold": None,
+            "require_calibration_before_production": True,
+        },
+        "reid": {
+            "target_rank1_min": 0.75,
+            "target_map_min": 0.60,
+            "default_threshold": None,
+            "require_benchmark_before_production": True,
+        },
+    },
     "liveness": {
         "enabled": False,
-        "provider": "pending",
+        "provider": "none",
+        "fail_if_enabled_without_provider": True,
         "fail_if_enabled_missing": True,
+        "operator_warning_when_disabled": True,
+    },
+    "review": {
+        "require_operator_review_for_matches": True,
+        "auto_confirm_identity": False,
+        "allow_reject_candidate": True,
+        "allow_merge_after_review": True,
+    },
+    "production_readiness": {
+        "calibration_missing_severity": "fail",
     },
     "privacy": {
         "store_raw_faces": False,

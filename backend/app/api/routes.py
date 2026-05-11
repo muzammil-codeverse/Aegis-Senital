@@ -3,19 +3,21 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, WebSocket, Request, Depends, Response
+from fastapi import APIRouter, Body, UploadFile, File, Form, HTTPException, Query, WebSocket, Request, Depends, Response
 from pydantic import BaseModel
 from app.api.object_authorization import (
     can_access_alert,
     can_access_camera,
     can_access_event_payload,
     can_access_identity,
+    can_access_identity_candidate,
     can_access_incident,
     can_access_watchlist,
     ensure_alert_access,
     ensure_camera_access,
     ensure_event_payload_access,
     ensure_identity_access,
+    ensure_identity_candidate_access,
     ensure_incident_access,
     ensure_watchlist_access,
 )
@@ -1839,6 +1841,137 @@ def get_identity_health_api(request: Request):
         return _filter_identity_response({"item": _identity_service().get_health(), "status": "ok"}, request)
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identity/candidates")
+def list_identity_candidates_api(
+    request: Request,
+    review_status: Optional[str] = Query(default=None),
+    current_user: UserAccount = Depends(require_api_permission("identity:read")),
+):
+    from app.services.identity_candidate_service import explainability_payload, get_identity_candidate_service
+
+    try:
+        rows = get_identity_candidate_service().list_candidates(review_status=review_status)
+        items = []
+        for row in rows:
+            if not can_access_identity_candidate(current_user, row):
+                continue
+            items.append({**row, "explainability": explainability_payload(row)})
+        return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
+    except Exception as exc:
+        return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identity/candidates/{candidate_id}")
+def get_identity_candidate_api(
+    candidate_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("identity:read")),
+):
+    from app.services.identity_candidate_service import explainability_payload, get_identity_candidate_service
+
+    row = get_identity_candidate_service().get_candidate(candidate_id)
+    if row is None:
+        return {"item": None, "status": "not_found", "detail": "Candidate not found"}
+    if not can_access_identity_candidate(current_user, row):
+        _audit(
+            request,
+            AuditAction.IDENTITY_CANDIDATE_ACCESS_DENIED,
+            resource_type="identity_candidate",
+            resource_id=candidate_id,
+            success=False,
+            detail="identity candidate access denied",
+        )
+        raise HTTPException(status_code=403, detail="Access denied")
+    return _filter_identity_response(
+        {"item": {**row, "explainability": explainability_payload(row)}, "status": "ok"},
+        request,
+    )
+
+
+@router.post("/api/identity/candidates/{candidate_id}/accept")
+def accept_identity_candidate_api(
+    candidate_id: str,
+    request: Request,
+    payload: dict | None = Body(default=None),
+    current_user: UserAccount = Depends(require_api_permission("identity:write")),
+):
+    from app.services.identity_candidate_service import get_identity_candidate_service
+
+    svc = get_identity_candidate_service()
+    row = svc.get_candidate(candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    ensure_identity_candidate_access(request, current_user, row)
+    notes = (payload or {}).get("review_notes")
+    updated = svc.accept_candidate(candidate_id, reviewed_by=current_user.user_id, review_notes=notes)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    _audit(
+        request,
+        AuditAction.IDENTITY_CANDIDATE_REVIEWED,
+        resource_type="identity_candidate",
+        resource_id=candidate_id,
+        metadata={"review_status": "accepted", "operator_only": True},
+    )
+    return _filter_identity_response({"item": updated, "status": "ok"}, request)
+
+
+@router.post("/api/identity/candidates/{candidate_id}/reject")
+def reject_identity_candidate_api(
+    candidate_id: str,
+    request: Request,
+    payload: dict | None = Body(default=None),
+    current_user: UserAccount = Depends(require_api_permission("identity:write")),
+):
+    from app.services.identity_candidate_service import get_identity_candidate_service
+
+    svc = get_identity_candidate_service()
+    row = svc.get_candidate(candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    ensure_identity_candidate_access(request, current_user, row)
+    notes = (payload or {}).get("review_notes")
+    updated = svc.reject_candidate(candidate_id, reviewed_by=current_user.user_id, review_notes=notes)
+    if updated is None:
+        raise HTTPException(status_code=400, detail="Reject not allowed")
+    _audit(
+        request,
+        AuditAction.IDENTITY_CANDIDATE_REJECTED,
+        resource_type="identity_candidate",
+        resource_id=candidate_id,
+        metadata={"review_status": "rejected"},
+    )
+    return _filter_identity_response({"item": updated, "status": "ok"}, request)
+
+
+@router.post("/api/identity/candidates/{candidate_id}/escalate")
+def escalate_identity_candidate_api(
+    candidate_id: str,
+    request: Request,
+    payload: dict | None = Body(default=None),
+    current_user: UserAccount = Depends(require_api_permission("identity:write")),
+):
+    from app.services.identity_candidate_service import get_identity_candidate_service
+
+    svc = get_identity_candidate_service()
+    row = svc.get_candidate(candidate_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    ensure_identity_candidate_access(request, current_user, row)
+    notes = (payload or {}).get("review_notes")
+    updated = svc.escalate_candidate(candidate_id, reviewed_by=current_user.user_id, review_notes=notes)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    _audit(
+        request,
+        AuditAction.IDENTITY_CANDIDATE_ESCALATED,
+        resource_type="identity_candidate",
+        resource_id=candidate_id,
+        metadata={"review_status": "escalated"},
+    )
+    return _filter_identity_response({"item": updated, "status": "ok"}, request)
 
 
 @router.get("/api/identity/registry")

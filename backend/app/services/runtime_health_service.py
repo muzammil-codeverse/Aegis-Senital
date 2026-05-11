@@ -184,8 +184,17 @@ class RuntimeHealthService:
             "disabled": "disabled",
             "failed": "error",
         }
+        agg = status_map.get(health.get("status", "degraded"), "degraded")
+        if health.get("liveness_enabled") and health.get("liveness_status") == "failed":
+            agg = "error"
+        cal = health.get("calibration") or {}
+        inner_status = "healthy"
+        if agg == "error":
+            inner_status = "failed"
+        elif agg == "degraded":
+            inner_status = "degraded"
         return {
-            "status": status_map.get(health.get("status", "degraded"), "degraded"),
+            "status": agg,
             "detail": detail,
             "enabled": bool(health.get("enabled", True)),
             "face_provider": health.get("face_provider"),
@@ -193,6 +202,24 @@ class RuntimeHealthService:
             "reid_provider": health.get("reid_provider"),
             "reid_loaded": bool(health.get("reid_loaded", False)),
             "liveness_enabled": bool(health.get("liveness_enabled", False)),
+            "liveness_provider": str(health.get("liveness_provider") or "none"),
+            "calibration": {
+                "face_calibrated": bool(cal.get("face_calibrated")),
+                "reid_benchmarked": bool(cal.get("reid_benchmarked")),
+            },
+            "durable_registry": bool(health.get("durable_registry", False)),
+            "identity": {
+                "face_loaded": bool(health.get("face_loaded", False)),
+                "reid_loaded": bool(health.get("reid_loaded", False)),
+                "liveness_enabled": bool(health.get("liveness_enabled", False)),
+                "liveness_provider": str(health.get("liveness_provider") or "none"),
+                "calibration": {
+                    "face_calibrated": bool(cal.get("face_calibrated")),
+                    "reid_benchmarked": bool(cal.get("reid_benchmarked")),
+                },
+                "durable_registry": bool(health.get("durable_registry", False)),
+                "status": inner_status,
+            },
         }
 
     def _check_case_management(self) -> dict:
@@ -761,6 +788,7 @@ class RuntimeHealthService:
         require_identity = True
 
         failures = []
+        identity_check = self._check_identity()
         if require_postgres:
             db = self._check_database()
             if db["status"] != "ok":
@@ -791,9 +819,40 @@ class RuntimeHealthService:
             if segmentation["status"] != "healthy":
                 failures.append(f"segmentation: {segmentation.get('detail') or segmentation['status']}")
         if require_identity:
-            identity = self._check_identity()
-            if identity["status"] == "error":
-                failures.append(f"identity: {identity.get('detail') or identity['status']}")
+            if identity_check["status"] in {"error", "failed"}:
+                failures.append(f"identity: {identity_check.get('detail') or identity_check['status']}")
+        try:
+            from inference.identity.runtime_config import load_identity_config
+            from inference.identity.liveness_adapter import LivenessAdapter
+
+            icfg = load_identity_config()
+            live = icfg.get("liveness") or {}
+            if self._production_mode() and bool(icfg.get("enabled", True)) and bool(live.get("enabled")):
+                lh = LivenessAdapter(config=icfg).get_health()
+                if lh.get("status") == "failed":
+                    failures.append("identity: liveness enabled but provider unavailable (liveness unavailable)")
+            cal_cfg = icfg.get("calibration") or {}
+            if self._production_mode() and bool(icfg.get("enabled", True)) and bool(cal_cfg.get("enabled", False)):
+                snap = identity_check.get("calibration") or {}
+                face_cfg = cal_cfg.get("face") or {}
+                if bool(face_cfg.get("require_calibration_before_production", False)) and bool(
+                    (icfg.get("face") or {}).get("enabled", False)
+                ):
+                    if not snap.get("face_calibrated"):
+                        sev = str((icfg.get("production_readiness") or {}).get("calibration_missing_severity") or "fail")
+                        if sev == "fail":
+                            failures.append("identity: face calibration required before production")
+                reid_cfg = cal_cfg.get("reid") or {}
+                if bool(reid_cfg.get("require_benchmark_before_production", False)) and bool(
+                    (icfg.get("reid") or {}).get("enabled", False)
+                ):
+                    if not snap.get("reid_benchmarked"):
+                        sev = str((icfg.get("production_readiness") or {}).get("calibration_missing_severity") or "fail")
+                        if sev == "fail":
+                            failures.append("identity: ReID benchmark required before production")
+        except Exception as exc:
+            if self._production_mode():
+                failures.append(f"identity readiness policy check failed: {str(exc)[:120]}")
         case_management = self._check_case_management()
         if case_management.get("enabled") and case_management.get("status") == "failed":
             failures.append(

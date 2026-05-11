@@ -62,6 +62,10 @@ class AuditAction(Enum):
     UPLOADED_VIDEO_CANCELLED = "uploaded_video_cancelled"
     UPLOADED_VIDEO_REPORT_VIEWED = "uploaded_video_report_viewed"
     UPLOADED_VIDEO_CLIP_DOWNLOADED = "uploaded_video_clip_downloaded"
+    IDENTITY_CANDIDATE_REVIEWED = "identity_candidate_reviewed"
+    IDENTITY_CANDIDATE_REJECTED = "identity_candidate_rejected"
+    IDENTITY_CANDIDATE_ESCALATED = "identity_candidate_escalated"
+    IDENTITY_CANDIDATE_ACCESS_DENIED = "identity_candidate_access_denied"
 
 
 SENSITIVE_AUDIT_KEYS = {

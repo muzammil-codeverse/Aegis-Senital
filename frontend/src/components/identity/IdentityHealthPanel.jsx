@@ -84,7 +84,14 @@ export default function IdentityHealthPanel({
           <div style={{ fontSize: '12px', color: '#8b949e', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
             <span>Face: {health?.face_provider || 'n/a'} {health?.face_loaded ? 'loaded' : 'unavailable'}</span>
             <span>ReID: {health?.reid_provider || 'n/a'} {health?.reid_loaded ? 'loaded' : 'unavailable'}</span>
-            <span>Liveness: {health?.liveness_enabled ? 'configured' : 'disabled'}</span>
+            <span>
+              Liveness:{' '}
+              {health?.liveness_enabled
+                ? `enabled (${health?.liveness_provider || 'unknown'})`
+                : 'liveness disabled'}
+            </span>
+            <span>Face calibrated: {health?.calibration?.face_calibrated ? 'yes' : 'no'}</span>
+            <span>ReID benchmarked: {health?.calibration?.reid_benchmarked ? 'yes' : 'no'}</span>
             <span>Profiles: {formatCount(identities?.length)}</span>
           </div>
           {health?.last_error && (

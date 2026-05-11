@@ -202,7 +202,7 @@ def validate_identity_feature_dependencies(policy: dict, profile: str) -> list[d
 
     face_enabled = bool(_get_nested(identity, "face.enabled", False))
     if face_enabled:
-        print("\n[Feature Dependencies â€” identity.face]")
+        print("\n[Feature Dependencies — identity.face]")
         required = profile == "production" or not fail_open
         for module_cfg in feature_cfg.get("identity_face", {}).get("modules", []):
             ok = _try_import(module_cfg["module"])
@@ -218,7 +218,7 @@ def validate_identity_feature_dependencies(policy: dict, profile: str) -> list[d
 
     reid_enabled = bool(_get_nested(identity, "reid.enabled", False))
     if reid_enabled:
-        print("\n[Feature Dependencies â€” identity.reid]")
+        print("\n[Feature Dependencies — identity.reid]")
         required = profile == "production" or not fail_open
         for module_cfg in feature_cfg.get("identity_reid", {}).get("modules", []):
             ok = _try_import(module_cfg["module"])
@@ -227,14 +227,21 @@ def validate_identity_feature_dependencies(policy: dict, profile: str) -> list[d
 
     liveness_enabled = bool(_get_nested(identity, "liveness.enabled", False))
     if liveness_enabled:
-        print("\n[Feature Dependencies â€” identity.liveness]")
-        provider = str(_get_nested(identity, "liveness.provider", "pending"))
-        results.append(check(
-            feature_cfg.get("identity_liveness", {}).get("label", "Identity liveness provider"),
-            False,
-            f"provider '{provider}' is pending integration",
-            required=profile == "production",
-        ))
+        print("\n[Feature Dependencies — identity.liveness]")
+        provider = str(_get_nested(identity, "liveness.provider", "none")).lower()
+        fail_flag = bool(_get_nested(identity, "liveness.fail_if_enabled_without_provider", True))
+        from inference.identity.liveness_adapter import liveness_provider_integrated
+
+        provider_ok = liveness_provider_integrated(provider)
+        detail = f"provider '{provider}'" + (" is integrated" if provider_ok else " is not integrated (liveness unavailable)")
+        results.append(
+            check(
+                feature_cfg.get("identity_liveness", {}).get("label", "Identity liveness provider"),
+                provider_ok,
+                detail,
+                required=profile == "production" and fail_flag,
+            )
+        )
     return results
 
 

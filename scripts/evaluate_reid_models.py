@@ -4,10 +4,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
+for _p in (ROOT, ROOT / "backend"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from backend.app.evaluation.metrics.reid_metrics import compute_reid_metrics
 
@@ -62,6 +68,38 @@ def load_query_gallery_layout(dataset_root: str | Path) -> tuple[list[dict[str, 
     if query_file.exists() and gallery_file.exists():
         return load_embedding_records(query_file), load_embedding_records(gallery_file)
     raise ValueError("Expected query.jsonl and gallery.jsonl under dataset root for lightweight evaluation.")
+
+
+def _identity_id_from_image_stem(stem: str) -> str:
+    if "_cam" in stem:
+        return stem.split("_cam", 1)[0]
+    parts = stem.split("_")
+    if len(parts) >= 2 and parts[0] == "person":
+        return f"{parts[0]}_{parts[1]}"
+    return stem
+
+
+def load_image_reid_layout(dataset_root: str | Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    root = Path(dataset_root)
+    qdir = root / "query"
+    gdir = root / "gallery"
+    if not qdir.is_dir() or not gdir.is_dir():
+        raise FileNotFoundError("reid image dataset requires query/ and gallery/ subdirectories")
+    exts = {".jpg", ".jpeg", ".png", ".webp"}
+
+    def _scan(folder: Path) -> list[dict[str, Any]]:
+        rows = []
+        for path in sorted(folder.iterdir()):
+            if not path.is_file() or path.suffix.lower() not in exts:
+                continue
+            rows.append({"identity_id": _identity_id_from_image_stem(path.stem), "image_path": str(path.resolve())})
+        return rows
+
+    query = _scan(qdir)
+    gallery = _scan(gdir)
+    if not query or not gallery:
+        raise ValueError("query/ or gallery/ folder is empty")
+    return query, gallery
 
 
 @dataclass
@@ -137,32 +175,95 @@ def write_reid_outputs(metrics: dict[str, Any], output_dir: str | Path) -> Path:
             writer = csv.DictWriter(fh, fieldnames=list(cmc_curve[0].keys()))
             writer.writeheader()
             writer.writerows(cmc_curve)
+    lines = [
+        "# ReID benchmark report",
+        "",
+        "Rank-1 / Rank-5 / mAP are computed from real embeddings only.",
+        "This does **not** confirm identity.",
+        "",
+        f"- Rank-1: {metrics.get('rank_1')}",
+        f"- Rank-5: {metrics.get('rank_5')}",
+        f"- mAP: {metrics.get('map')}",
+        f"- Overlap / leakage warning: {metrics.get('overlap_or_leakage_detected')}",
+        f"- Warnings: {metrics.get('warnings')}",
+        "",
+        "Requires operator review for any live identity decision.",
+    ]
+    (out_dir / "report.md").write_text("\n".join(lines), encoding="utf-8")
     return out_dir
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-root", default=None, help="Directory containing query.jsonl and gallery.jsonl.")
+    parser.add_argument(
+        "--dataset-root",
+        default=None,
+        help="Directory with query/ + gallery/ images, or query.jsonl + gallery.jsonl embeddings.",
+    )
     parser.add_argument("--query-file", default=None, help="Optional query embedding file.")
     parser.add_argument("--gallery-file", default=None, help="Optional gallery embedding file.")
+    parser.add_argument("--device", default="cpu", help="Torch device for OSNet extraction (e.g. cpu or cuda:0).")
     parser.add_argument(
         "--output-dir",
-        default=str(Path("storage") / "evaluation_runs" / f"reid_eval_{_now_stamp()}"),
-        help="Output directory for evaluation artifacts.",
+        default=None,
+        help="Output directory (default: storage/identity_calibration/reid_<timestamp>).",
     )
     args = parser.parse_args()
+
+    query_records: list[dict[str, Any]]
+    gallery_records: list[dict[str, Any]]
 
     if args.query_file and args.gallery_file:
         query_records = load_embedding_records(args.query_file)
         gallery_records = load_embedding_records(args.gallery_file)
     elif args.dataset_root:
-        query_records, gallery_records = load_query_gallery_layout(args.dataset_root)
+        root = Path(args.dataset_root)
+        if not root.exists():
+            print("dataset missing: --dataset-root path does not exist", file=sys.stderr)
+            print(
+                "Expected layout:\n"
+                "  datasets/reid_benchmark/\n"
+                "    query/person_001_cam1.jpg\n"
+                "    gallery/person_001_cam2.jpg\n"
+                "or embedding files query.jsonl + gallery.jsonl in the same folder.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        qjson = root / "query.jsonl"
+        gjson = root / "gallery.jsonl"
+        if qjson.exists() and gjson.exists():
+            try:
+                query_records, gallery_records = load_query_gallery_layout(root)
+            except ValueError as exc:
+                print(f"dataset missing: {exc}", file=sys.stderr)
+                sys.exit(2)
+        elif (root / "query").is_dir() and (root / "gallery").is_dir():
+            try:
+                query_records, gallery_records = load_image_reid_layout(root)
+            except (FileNotFoundError, ValueError) as exc:
+                print(f"dataset missing: {exc}", file=sys.stderr)
+                sys.exit(2)
+            try:
+                adapter = OSNetReIDAdapter(device=str(args.device))
+                query_records = adapter.extract(query_records)
+                gallery_records = adapter.extract(gallery_records)
+            except Exception as exc:
+                print(f"ReID runtime unavailable: {exc}", file=sys.stderr)
+                sys.exit(4)
+        else:
+            print(
+                "dataset missing: expected query.jsonl + gallery.jsonl or query/ + gallery/ image folders",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     else:
-        raise SystemExit("Provide either --dataset-root or both --query-file and --gallery-file.")
+        print("dataset missing: provide --dataset-root or both --query-file and --gallery-file", file=sys.stderr)
+        sys.exit(2)
 
     metrics = evaluate_reid(query_records, gallery_records)
-    out_dir = write_reid_outputs(metrics, args.output_dir)
-    print(json.dumps({"status": "ok", "output_dir": str(out_dir), "rank_1": metrics.get("rank_1")}, indent=2))
+    out_dir = Path(args.output_dir) if args.output_dir else Path("storage") / "identity_calibration" / f"reid_{_now_stamp()}"
+    out_path = write_reid_outputs(metrics, out_dir)
+    print(json.dumps({"status": "ok", "output_dir": str(out_path), "rank_1": metrics.get("rank_1")}, indent=2))
 
 
 if __name__ == "__main__":

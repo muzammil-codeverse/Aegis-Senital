@@ -346,6 +346,54 @@ def can_access_identity(user, identity_id: str) -> bool:
     return _identity_scope_decision(user, identity_id).allowed
 
 
+def can_access_identity_candidate(user, candidate: dict[str, Any] | None) -> bool:
+    """Require object scope on each linkage present (identity, case, camera)."""
+    if candidate is None:
+        return False
+    if user is None:
+        return False
+    if auth_required() is False:
+        return True
+    bypass = _bypass_decision(user, "identity_candidate", str(candidate.get("identity_candidate_id") or ""))
+    if bypass:
+        return True
+    checks: list[bool] = []
+    gid = str(candidate.get("global_identity_id") or "").strip()
+    if gid:
+        checks.append(can_access_identity(user, gid))
+    case_id = str(candidate.get("case_id") or "").strip()
+    if case_id:
+        checks.append(can_access_case(user, case_id))
+    camera_id = str(candidate.get("camera_id") or "").strip()
+    if camera_id:
+        checks.append(can_access_camera(user, camera_id))
+    if not checks:
+        return False
+    return all(checks)
+
+
+def ensure_identity_candidate_access(request: Request, user: UserAccount | None, candidate: dict[str, Any] | None) -> None:
+    cid = str((candidate or {}).get("identity_candidate_id") or "unknown")
+    if can_access_identity_candidate(user, candidate):
+        return
+    if not auth_required():
+        return
+    try:
+        get_audit_log_service().record(
+            AuditAction.IDENTITY_CANDIDATE_ACCESS_DENIED,
+            user=user,
+            resource_type="identity_candidate",
+            resource_id=cid,
+            success=False,
+            detail="identity candidate access denied",
+            request=request,
+            metadata={"reason": "identity_candidate_scope_missing"},
+        )
+    except Exception:
+        pass
+    _raise_denied("identity_candidate")
+
+
 def can_access_watchlist(user, watchlist_id: str) -> bool:
     return _watchlist_scope_decision(user, watchlist_id).allowed
 

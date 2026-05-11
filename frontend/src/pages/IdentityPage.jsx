@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import GlobalIdentityDrawer from '../components/identity/GlobalIdentityDrawer.jsx';
+import IdentityCandidateReviewPanel from '../components/identity/IdentityCandidateReviewPanel.jsx';
 import IdentityHealthPanel from '../components/identity/IdentityHealthPanel.jsx';
 import IdentityDetailPanel from '../components/identity/IdentityDetailPanel.jsx';
 import IdentityTable from '../components/identity/IdentityTable.jsx';
@@ -76,6 +77,7 @@ export default function IdentityPage() {
             identities={identityHook.identities}
             onOpenRegistry={() => setRegistryOpen(true)}
           />
+          <IdentityCandidateReviewPanel />
           <div style={{ display: 'flex', gap: '16px', flex: 1, minHeight: 0 }}>
             <div style={{ flex: '0 0 380px', overflowY: 'auto' }}>
               <IdentityTable {...identityHook} watchlistHook={watchlistHook} />
