@@ -13,6 +13,7 @@ def test_uploaded_video_frontend_contract_files_exist():
         ROOT / "frontend/src/components/uploaded-video/UploadedVideoProcessingPanel.jsx",
         ROOT / "frontend/src/components/uploaded-video/UploadedVideoTimeline.jsx",
         ROOT / "frontend/src/components/uploaded-video/UploadedVideoEventsTable.jsx",
+        ROOT / "frontend/src/components/uploaded-video/UploadedVideoClipControls.jsx",
         ROOT / "frontend/src/components/uploaded-video/UploadedVideoReportPanel.jsx",
         ROOT / "frontend/src/components/uploaded-video/CreateCaseFromVideoButton.jsx",
         ROOT / "frontend/src/pages/UploadedVideoAnalysisPage.jsx",
@@ -27,3 +28,4 @@ def test_uploaded_video_frontend_contract_references_route_and_api():
 
     assert "uploaded-video-analysis" in app_text
     assert "/api/uploaded-videos" in api_text
+    assert "/clips/" in api_text and "download" in api_text

@@ -195,6 +195,9 @@ class DashboardSummary(AnalyticsBaseModel):
     active_streams: int = 0
     degraded_streams: int = 0
     avg_model_latency_ms: float = 0.0
+    uploaded_video_replay_clips_generated_total: int = 0
+    uploaded_video_events_with_clips: int = 0
+    uploaded_video_events_without_clips: int = 0
 
 
 class DashboardRisk(AnalyticsBaseModel):

@@ -354,6 +354,11 @@ class RuntimeHealthService:
             "failed_sessions": int(health.get("failed_sessions", 0)),
             "storage": str(health.get("storage") or "filesystem"),
             "last_error": health.get("last_error"),
+            "uploaded_video": {
+                "replay_enabled": bool(health.get("replay_enabled", False)),
+                "ffmpeg_available": bool(health.get("ffmpeg_available", False)),
+                "clip_generation_status": str(health.get("clip_generation_status") or "unknown"),
+            },
         }
 
     @staticmethod

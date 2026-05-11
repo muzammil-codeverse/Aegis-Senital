@@ -62,8 +62,11 @@ export default function UploadedVideoAnalysisPage() {
           ))}
         </div>
       </section>
-      <UploadedVideoTimeline items={uploadedVideo.timeline} />
-      <UploadedVideoEventsTable events={uploadedVideo.events} />
+      <UploadedVideoTimeline items={uploadedVideo.timeline} sessionId={uploadedVideo.currentSession?.session_id} />
+      <UploadedVideoEventsTable
+        events={uploadedVideo.events}
+        sessionId={uploadedVideo.currentSession?.session_id}
+      />
       <UploadedVideoReportPanel report={uploadedVideo.report} />
       <CreateCaseFromVideoButton
         session={uploadedVideo.currentSession}

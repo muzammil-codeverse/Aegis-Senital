@@ -1,4 +1,4 @@
-export default function UploadedVideoTimeline({ items = [] }) {
+export default function UploadedVideoTimeline({ items = [], sessionId = '' }) {
   return (
     <section className="panel">
       <div className="panel-header">
@@ -20,6 +20,13 @@ export default function UploadedVideoTimeline({ items = [] }) {
             <div className="button-row">
               <span className={`count-pill severity-${item.severity || 'medium'}`}>{item.severity || 'medium'}</span>
               <span className="muted">Frame {item.frame_index ?? 'N/A'}</span>
+              {item.replay_clip?.hash_sha256 ? (
+                <span className="count-pill status-open" title="Replay clip available">
+                  Clip
+                </span>
+              ) : sessionId ? (
+                <span className="muted">No clip</span>
+              ) : null}
             </div>
           </article>
         ))}

@@ -274,6 +274,8 @@ def permission_for_request(method: str, path: str) -> str | None:
             return "uploaded_video:case"
         if path.endswith("/report"):
             return "uploaded_video:read"
+        if "/clips/" in path and path.endswith("/download"):
+            return "uploaded_video:read"
         return "uploaded_video:read" if method == "GET" else "uploaded_video:write"
 
     if path.startswith("/api/open-vocab/model/"):

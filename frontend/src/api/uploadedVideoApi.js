@@ -1,4 +1,4 @@
-import { normalizeError, request } from './client'
+import { apiClient, normalizeError, request } from './client'
 
 export async function listUploadedVideoSessions() {
   const payload = await request({ url: '/api/uploaded-videos', method: 'get' })
@@ -63,6 +63,12 @@ export async function createCaseFromUploadedVideo(sessionId, body = {}) {
 export async function getUploadedVideoReport(sessionId) {
   const payload = await request({ url: `/api/uploaded-videos/${encodeURIComponent(sessionId)}/report`, method: 'get' })
   return payload?.item || null
+}
+
+export async function fetchUploadedVideoClipBlob(sessionId, eventId) {
+  const url = `/api/uploaded-videos/${encodeURIComponent(sessionId)}/clips/${encodeURIComponent(eventId)}/download`
+  const response = await apiClient.get(url, { responseType: 'blob' })
+  return response.data
 }
 
 export function uploadedVideoError(error) {

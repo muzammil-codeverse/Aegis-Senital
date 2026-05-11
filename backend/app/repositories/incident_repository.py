@@ -89,6 +89,11 @@ class IncidentRepository(ABC):
     def list_camera_events(self, camera_id: str, limit: int = 500) -> list[IncidentEventRecord]:
         return self.list_events({"camera_id": camera_id, "limit": limit})
 
+    def merge_event_metadata(self, event_id: str, patch: dict[str, Any]) -> bool:
+        """Shallow-merge JSON metadata for an existing durable event (best-effort)."""
+        del event_id, patch
+        return False
+
     def health_check(self) -> RepositoryHealth:
         status = "healthy" if self.is_available() else ("failed" if is_production_environment() else "degraded")
         return RepositoryHealth(
@@ -155,6 +160,40 @@ class JsonlIncidentRepository(IncidentRepository):
                     break
         items.sort(key=lambda item: _parse_iso(item.timestamp), reverse=True)
         return items[: max(1, filters.limit)]
+
+    def merge_event_metadata(self, event_id: str, patch: dict[str, Any]) -> bool:
+        if not patch:
+            return False
+        updated = False
+        with self._lock:
+            for path in sorted(self._storage_dir.glob("incident_events_*.jsonl")):
+                raw = path.read_text(encoding="utf-8").splitlines()
+                out_lines: list[str] = []
+                changed = False
+                for raw_line in raw:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        out_lines.append(raw_line)
+                        continue
+                    if rec.get("event_id") != event_id:
+                        out_lines.append(json.dumps(rec, sort_keys=True))
+                        continue
+                    md = dict(rec.get("metadata") or {})
+                    for key, val in patch.items():
+                        md[str(key)] = val
+                    rec["metadata"] = md
+                    out_lines.append(json.dumps(rec, sort_keys=True))
+                    changed = True
+                    updated = True
+                if changed:
+                    path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+        if updated:
+            self._set_error(None)
+        return updated
 
     def health_check(self) -> RepositoryHealth:
         health = super().health_check()
@@ -245,6 +284,27 @@ class PostgresIncidentRepository(IncidentRepository):
             params,
         )
         return [self._materialize(row) for row in rows]
+
+    def merge_event_metadata(self, event_id: str, patch: dict[str, Any]) -> bool:
+        if not patch or psycopg2 is None:
+            return False
+        query = """
+            UPDATE incident_events
+            SET metadata = COALESCE(metadata, '{}'::jsonb) || %(patch)s::jsonb
+            WHERE event_id = %(event_id)s
+        """
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, {"event_id": event_id, "patch": Json(patch)})
+                    count = cursor.rowcount
+                conn.commit()
+            self._available = True
+            self._set_error(None)
+            return bool(count)
+        except Exception as exc:
+            self._set_error(str(exc))
+            return False
 
     def _materialize(self, row: dict[str, Any]) -> IncidentEventRecord:
         return IncidentEventRecord.model_validate(dict(row))

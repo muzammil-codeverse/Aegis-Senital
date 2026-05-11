@@ -49,5 +49,13 @@ uploaded_video:
     include_chain_of_custody: true
     include_model_caveats: true
 
+  replay:
+    enabled: true
+    clip_seconds_before: 10
+    clip_seconds_after: 20
+    output_dir: "storage/uploaded_video_results"
+    attach_clips_as_evidence: true
+    compute_sha256: true
+
   production:
     fail_if_storage_unavailable: true

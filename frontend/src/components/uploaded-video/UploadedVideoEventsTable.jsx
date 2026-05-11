@@ -1,4 +1,6 @@
-export default function UploadedVideoEventsTable({ events = [] }) {
+import UploadedVideoClipControls from './UploadedVideoClipControls'
+
+export default function UploadedVideoEventsTable({ events = [], sessionId = '' }) {
   return (
     <section className="panel">
       <div className="panel-header">
@@ -18,6 +20,7 @@ export default function UploadedVideoEventsTable({ events = [] }) {
                 <th>Severity</th>
                 <th>Offset</th>
                 <th>Frame</th>
+                <th>Clip</th>
                 <th>Summary</th>
               </tr>
             </thead>
@@ -28,6 +31,16 @@ export default function UploadedVideoEventsTable({ events = [] }) {
                   <td><span className={`count-pill severity-${event.severity || 'medium'}`}>{event.severity || 'medium'}</span></td>
                   <td>{Number(event.time_offset_seconds || 0).toFixed(1)}s</td>
                   <td>{event.frame_index ?? 'N/A'}</td>
+                  <td>
+                    {event.replay_clip?.hash_sha256 ? (
+                      <span className="count-pill status-open">Available</span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                    {sessionId ? (
+                      <UploadedVideoClipControls sessionId={sessionId} eventId={event.event_id} replayClip={event.replay_clip} />
+                    ) : null}
+                  </td>
                   <td>{event.summary || 'Operator review required.'}</td>
                 </tr>
               ))}

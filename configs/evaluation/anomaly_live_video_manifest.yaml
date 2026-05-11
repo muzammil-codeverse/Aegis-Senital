@@ -1,0 +1,9 @@
+# Optional manifest for scripts/evaluate_anomaly_live_video.py (--manifest).
+# Paths are relative to the repository root. Labels are optional metadata only.
+videos:
+  - path: "datasets/test_videos/test_001.mp4"
+    label: "normal"
+    source: "synthetic"
+  - path: "datasets/test_videos/test_003.mp4"
+    label: "running"
+    source: "synthetic"

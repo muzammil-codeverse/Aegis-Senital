@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
+import subprocess
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import cv2
 
@@ -20,6 +24,159 @@ from app.services.rtsp_ingest_service import load_streaming_runtime_config
 from app.services.stream_session_manager import get_stream_session_manager
 
 logger = logging.getLogger(__name__)
+
+
+class UploadedVideoReplayClipError(RuntimeError):
+    """FFmpeg or filesystem failure while exporting an uploaded-video replay clip."""
+
+
+def is_ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
+def _safe_uploaded_video_event_filename(event_id: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(event_id or "").strip())
+    return cleaned or "event"
+
+
+def generate_uploaded_video_event_clip_ffmpeg(
+    *,
+    source_video_path: Path,
+    output_mp4_path: Path,
+    session_id: str,
+    event_id: str,
+    event_offset_seconds: float,
+    clip_seconds_before: float,
+    clip_seconds_after: float,
+    video_duration_seconds: float,
+    hash_output: bool = True,
+) -> dict[str, Any]:
+    """
+    Extract a window around event_offset_seconds using ffmpeg (not the live buffer path).
+
+    Clamps [start, end] to [0, video_duration_seconds]. Requires SHA-256 when hash_output is True.
+    """
+    if not is_ffmpeg_available():
+        raise UploadedVideoReplayClipError("ffmpeg is not installed or not on PATH")
+    if not source_video_path.is_file():
+        raise UploadedVideoReplayClipError(f"source video missing: {source_video_path}")
+
+    clip_id = f"uvclip_{uuid.uuid4().hex[:16]}"
+    start = max(0.0, float(event_offset_seconds) - float(clip_seconds_before))
+    end = min(float(video_duration_seconds), float(event_offset_seconds) + float(clip_seconds_after))
+    if end <= start:
+        end = min(float(video_duration_seconds), start + 0.25)
+    duration = max(0.05, end - start)
+
+    output_mp4_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_out = output_mp4_path.with_suffix(f".{uuid.uuid4().hex}.tmp.mp4")
+
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        str(source_video_path),
+        "-t",
+        f"{duration:.3f}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-an",
+        str(tmp_out),
+    ]
+    t0 = time.monotonic()
+    elapsed_ms = 0
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+    except FileNotFoundError as exc:
+        tmp_out.unlink(missing_ok=True)
+        _increment_uploaded_video_replay_metric("uploaded_video_replay_clip_failures_total")
+        raise UploadedVideoReplayClipError("ffmpeg executable not found") from exc
+    except subprocess.CalledProcessError as exc:
+        tmp_out.unlink(missing_ok=True)
+        _increment_uploaded_video_replay_metric("uploaded_video_replay_clip_failures_total")
+        err = (exc.stderr or exc.stdout or "").strip()
+        raise UploadedVideoReplayClipError(f"ffmpeg failed: {err or exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        tmp_out.unlink(missing_ok=True)
+        _increment_uploaded_video_replay_metric("uploaded_video_replay_clip_failures_total")
+        raise UploadedVideoReplayClipError("ffmpeg timed out") from exc
+    finally:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        _record_uploaded_video_replay_latency_ms(elapsed_ms)
+
+    if not tmp_out.is_file() or tmp_out.stat().st_size <= 0:
+        _increment_uploaded_video_replay_metric("uploaded_video_replay_clip_failures_total")
+        raise UploadedVideoReplayClipError("ffmpeg produced no output file")
+
+    tmp_out.replace(output_mp4_path)
+
+    digest: str | None = None
+    if hash_output:
+        digest = compute_sha256(str(output_mp4_path))
+    if not digest:
+        output_mp4_path.unlink(missing_ok=True)
+        _increment_uploaded_video_replay_metric("uploaded_video_replay_clip_failures_total")
+        raise UploadedVideoReplayClipError("replay clip hash is required but was not computed")
+
+    size_bytes = output_mp4_path.stat().st_size
+    created_at = _now_iso()
+    _increment_uploaded_video_replay_metric("uploaded_video_replay_clips_created_total")
+
+    return {
+        "clip_id": clip_id,
+        "session_id": session_id,
+        "event_id": event_id,
+        "start_time_seconds": round(start, 4),
+        "end_time_seconds": round(start + duration, 4),
+        "duration_seconds": round(duration, 4),
+        "storage_uri": None,
+        "hash_sha256": digest,
+        "size_bytes": size_bytes,
+        "content_type": "video/mp4",
+        "integrity_status": "verified",
+        "created_at": created_at,
+    }
+
+
+def _increment_uploaded_video_replay_metric(name: str, count: int = 1) -> None:
+    try:
+        from inference.monitoring.metrics import get_metrics
+
+        get_metrics().increment(name, count)
+    except Exception:
+        pass
+    try:
+        from inference.metrics import metrics
+
+        metrics.increment(name, count)
+    except Exception:
+        pass
+
+
+def _record_uploaded_video_replay_latency_ms(elapsed_ms: int) -> None:
+    try:
+        from inference.monitoring.metrics import get_metrics
+
+        get_metrics().record_segmentation_value("uploaded_video_replay_clip_latency_ms", float(elapsed_ms))
+    except Exception:
+        pass
+    try:
+        from inference.metrics import metrics
+
+        metrics.set_value("uploaded_video_replay_clip_latency_ms", float(elapsed_ms))
+    except Exception:
+        pass
 
 
 def _now_iso() -> str:

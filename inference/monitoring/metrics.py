@@ -203,6 +203,11 @@ class SystemMetrics:
         self.uploaded_video_events_generated_total: int = 0
         self.uploaded_video_processing_latency_ms: float = 0.0
         self.uploaded_video_active_sessions: int = 0
+        self.uploaded_video_replay_clips_created_total: int = 0
+        self.uploaded_video_replay_clip_failures_total: int = 0
+        self.uploaded_video_replay_clip_latency_ms: float = 0.0
+        self.anomaly_live_eval_runs_total: int = 0
+        self.anomaly_live_eval_failures_total: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -483,6 +488,11 @@ class SystemMetrics:
                 "uploaded_video_events_generated_total": self.uploaded_video_events_generated_total,
                 "uploaded_video_processing_latency_ms": self.uploaded_video_processing_latency_ms,
                 "uploaded_video_active_sessions": self.uploaded_video_active_sessions,
+                "uploaded_video_replay_clips_created_total": self.uploaded_video_replay_clips_created_total,
+                "uploaded_video_replay_clip_failures_total": self.uploaded_video_replay_clip_failures_total,
+                "uploaded_video_replay_clip_latency_ms": self.uploaded_video_replay_clip_latency_ms,
+                "anomaly_live_eval_runs_total": self.anomaly_live_eval_runs_total,
+                "anomaly_live_eval_failures_total": self.anomaly_live_eval_failures_total,
             }
 
 

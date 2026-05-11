@@ -61,6 +61,7 @@ class AuditAction(Enum):
     UPLOADED_VIDEO_CASE_CREATED = "uploaded_video_case_created"
     UPLOADED_VIDEO_CANCELLED = "uploaded_video_cancelled"
     UPLOADED_VIDEO_REPORT_VIEWED = "uploaded_video_report_viewed"
+    UPLOADED_VIDEO_CLIP_DOWNLOADED = "uploaded_video_clip_downloaded"
 
 
 SENSITIVE_AUDIT_KEYS = {

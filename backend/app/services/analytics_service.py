@@ -81,6 +81,31 @@ def _bucket_duration(bucket: str) -> timedelta:
     return timedelta(seconds=BUCKET_SECONDS.get(bucket, BUCKET_SECONDS["1h"]))
 
 
+def _uploaded_video_replay_counts() -> dict[str, int]:
+    """Best-effort counts from persisted uploaded-video sessions (bounded scan)."""
+    clips = 0
+    with_clip = 0
+    without = 0
+    try:
+        from app.services.uploaded_video_service import get_uploaded_video_service
+
+        service = get_uploaded_video_service()
+        for session in service.list_sessions()[:100]:
+            for event in service.get_events(session.session_id):
+                if event.replay_clip and getattr(event.replay_clip, "hash_sha256", None):
+                    clips += 1
+                    with_clip += 1
+                else:
+                    without += 1
+    except Exception:
+        return {"uploaded_video_replay_clips_generated_total": 0, "uploaded_video_events_with_clips": 0, "uploaded_video_events_without_clips": 0}
+    return {
+        "uploaded_video_replay_clips_generated_total": clips,
+        "uploaded_video_events_with_clips": with_clip,
+        "uploaded_video_events_without_clips": without,
+    }
+
+
 def _bucket_windows(start: datetime, end: datetime, bucket: str) -> list[tuple[datetime, datetime]]:
     delta = _bucket_duration(bucket)
     windows: list[tuple[datetime, datetime]] = []
@@ -152,6 +177,7 @@ class AnalyticsService:
             cases = self.repository.get_cases(normalized, filters)
             camera_risk = self._compute_camera_risk(events, cases, self.repository.get_stream_health(normalized, filters), self.repository.get_identity_matches(normalized, filters))
             model_performance = self.get_model_performance(normalized, filters)
+            replay_counts = _uploaded_video_replay_counts()
             summary = DashboardSummary(
                 total_events=len(events),
                 critical_events=sum(1 for item in events if str(item.get("severity") or "").lower() == "critical"),
@@ -167,6 +193,9 @@ class AnalyticsService:
                     _safe_average([float(item.avg_latency_ms) for item in model_performance if item.avg_latency_ms is not None]),
                     2,
                 ) if model_performance else 0.0,
+                uploaded_video_replay_clips_generated_total=int(replay_counts.get("uploaded_video_replay_clips_generated_total", 0)),
+                uploaded_video_events_with_clips=int(replay_counts.get("uploaded_video_events_with_clips", 0)),
+                uploaded_video_events_without_clips=int(replay_counts.get("uploaded_video_events_without_clips", 0)),
             )
             top_risk = camera_risk[0] if camera_risk else None
             return DashboardOverview(

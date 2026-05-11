@@ -76,6 +76,14 @@ def uploaded_video_config(tmp_path: Path) -> dict:
                 "include_chain_of_custody": True,
                 "include_model_caveats": True,
             },
+            "replay": {
+                "enabled": False,
+                "clip_seconds_before": 1,
+                "clip_seconds_after": 1,
+                "output_dir": str(tmp_path / "uploaded_video_results"),
+                "attach_clips_as_evidence": True,
+                "compute_sha256": True,
+            },
         }
     }
 

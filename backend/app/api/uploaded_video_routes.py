@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 
 from app.api.object_authorization import (
     can_access_uploaded_video_session,
@@ -189,6 +190,53 @@ def create_case_from_uploaded_video_api(
         metadata={"case_id": case.case_id},
     )
     return {"item": case.model_dump(mode="json"), "status": "ok"}
+
+
+@router.get("/api/uploaded-videos/{session_id}/clips/{event_id}/download")
+def download_uploaded_video_clip_api(
+    session_id: str,
+    event_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_permission("uploaded_video:read")),
+):
+    ensure_uploaded_video_session_access(request, current_user, session_id)
+    service = get_uploaded_video_service()
+    try:
+        clip_path = service.resolve_event_clip_path(session_id, event_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Uploaded-video session or clip directory not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not clip_path.is_file():
+        raise HTTPException(status_code=404, detail="Replay clip not found for this event")
+    events = service.get_events(session_id, current_user)
+    target = next((item for item in events if item.event_id == event_id), None)
+    if target is None or target.replay_clip is None:
+        raise HTTPException(status_code=404, detail="Replay clip metadata not available for this event")
+    digest = target.replay_clip.hash_sha256
+    from app.services.evidence_integrity import compute_sha256
+
+    if digest and compute_sha256(str(clip_path)) != digest:
+        raise HTTPException(status_code=409, detail="Replay clip failed integrity verification")
+    _audit(
+        request,
+        AuditAction.UPLOADED_VIDEO_CLIP_DOWNLOADED,
+        user=current_user,
+        session_id=session_id,
+        detail="Downloaded uploaded-video replay clip.",
+        metadata={"event_id": event_id, "clip_id": target.replay_clip.clip_id},
+    )
+    filename = f"{event_id}.mp4"
+    return FileResponse(
+        path=str(clip_path),
+        media_type="video/mp4",
+        filename=filename,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/api/uploaded-videos/{session_id}/report")

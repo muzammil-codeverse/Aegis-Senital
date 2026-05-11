@@ -23,6 +23,7 @@ from app.models.uploaded_video_models import (
     UploadedVideoProcessingOptions,
     UploadedVideoProcessingStatus,
     UploadedVideoProgress,
+    UploadedVideoReplayClipMetadata,
     UploadedVideoReport,
     UploadedVideoSession,
     UploadedVideoTimelineItem,
@@ -40,6 +41,12 @@ from inference.model_pool import ModelPool
 from inference.monitoring.metrics import get_metrics
 from inference.stream.stream_processor import StreamProcessor
 from ml.runtime import ModelRouter
+from app.services.replay_clip_service import (
+    UploadedVideoReplayClipError,
+    _safe_uploaded_video_event_filename,
+    generate_uploaded_video_event_clip_ffmpeg,
+    is_ffmpeg_available,
+)
 from app.services.rtsp_ingest_service import DecodedFramePacket
 
 
@@ -110,6 +117,7 @@ class UploadedVideoService:
         self._processing_cfg = dict(self._config.get("processing") or {})
         self._case_cfg = dict(self._config.get("case_integration") or {})
         self._report_cfg = dict(self._config.get("reporting") or {})
+        self._replay_cfg = dict(self._config.get("replay") or {})
         self._root_dir = self._resolve_dir(str(self._storage_cfg.get("root_dir") or "storage/uploaded_videos"))
         self._processed_dir = self._resolve_dir(str(self._storage_cfg.get("processed_dir") or "storage/uploaded_video_results"))
         self._evidence_dir = self._resolve_dir(str(self._storage_cfg.get("evidence_dir") or "storage/evidence"))
@@ -384,12 +392,55 @@ class UploadedVideoService:
                 ),
                 actor=_safe_user_id(user),
             )
+        attach_clips = bool(payload.attach_replay_clips) and bool(self._replay_cfg.get("attach_clips_as_evidence", True))
+        if attach_clips:
+            for event in events:
+                clip = event.replay_clip
+                if clip is None:
+                    continue
+                self._case_service.add_evidence(
+                    case.case_id,
+                    CaseEvidenceCreateRequest(
+                        evidence_type="clip",
+                        title=f"Uploaded-video event clip ({event.event_type})",
+                        description=(
+                            "Possible incident — operator review required. "
+                            "Uploaded-video event clip; not proof of identity or criminality."
+                        ),
+                        source_event_id=event.event_id,
+                        storage_uri=clip.storage_uri,
+                        original_filename=f"{_safe_uploaded_video_event_filename(event.event_id)}.mp4",
+                        safe_filename=f"{_safe_uploaded_video_event_filename(event.event_id)}.mp4",
+                        content_type=clip.content_type,
+                        size_bytes=int(clip.size_bytes or 0) or None,
+                        hash_sha256=clip.hash_sha256,
+                        hash_verified=True,
+                        integrity_status="verified",
+                        metadata={
+                            "source_type": "uploaded_video",
+                            "session_id": session_id,
+                            "clip_id": clip.clip_id,
+                            "event_id": event.event_id,
+                            "export_type": "uploaded_video_replay",
+                            "time_offset_seconds": event.time_offset_seconds,
+                        },
+                    ),
+                    actor=_safe_user_id(user),
+                )
         session.linked_case_id = case.case_id
         self._write_session(session)
         return case
 
     def health(self) -> dict[str, Any]:
         summary = self._progress_service.summary()
+        replay_enabled = bool(self._replay_cfg.get("enabled", False))
+        ffmpeg_ok = is_ffmpeg_available()
+        if not replay_enabled:
+            clip_status = "disabled"
+        elif not ffmpeg_ok:
+            clip_status = "degraded"
+        else:
+            clip_status = "healthy"
         return {
             "enabled": self.enabled,
             "status": "healthy" if self.enabled else "disabled",
@@ -398,7 +449,93 @@ class UploadedVideoService:
             "failed_sessions": summary["failed_sessions"],
             "storage": "filesystem",
             "last_error": None,
+            "replay_enabled": replay_enabled,
+            "ffmpeg_available": ffmpeg_ok,
+            "clip_generation_status": clip_status,
         }
+
+    def resolve_event_clip_path(self, session_id: str, event_id: str) -> Path:
+        """Resolve a replay clip path under managed uploaded-video results (no arbitrary paths)."""
+        if not session_id or not event_id:
+            raise ValueError("session_id and event_id are required")
+        session_root = (self._processed_dir / session_id).resolve()
+        if not session_root.is_dir():
+            raise FileNotFoundError(session_id)
+        safe = _safe_uploaded_video_event_filename(event_id)
+        clip_path = (session_root / "clips" / f"{safe}.mp4").resolve()
+        clips_root = (session_root / "clips").resolve()
+        if clip_path.parent.resolve() != clips_root:
+            raise ValueError("clip path escapes session clips directory")
+        return clip_path
+
+    def _sync_timeline_replay_clips(
+        self,
+        timeline: list[UploadedVideoTimelineItem],
+        events: list[UploadedVideoEvent],
+    ) -> None:
+        by_id = {e.event_id: e for e in events}
+        for item in timeline:
+            ev = by_id.get(item.event_id or "")
+            if ev and ev.replay_clip is not None:
+                item.replay_clip = ev.replay_clip
+
+    def _maybe_generate_uploaded_video_replay_clips(
+        self,
+        session: UploadedVideoSession,
+        events: list[UploadedVideoEvent],
+        timeline: list[UploadedVideoTimelineItem],
+        source_video_path: Path,
+        video_duration_seconds: float,
+    ) -> None:
+        if not bool(self._replay_cfg.get("enabled", False)):
+            return
+        if not events:
+            return
+        before = float(self._replay_cfg.get("clip_seconds_before", 10))
+        after = float(self._replay_cfg.get("clip_seconds_after", 20))
+        compute_hash = bool(self._replay_cfg.get("compute_sha256", True))
+        clips_dir = self._session_dir(session.session_id) / "clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+
+        if not is_ffmpeg_available():
+            _metric_increment("uploaded_video_replay_clip_failures_total", len(events))
+            return
+
+        duration_cap = max(float(video_duration_seconds or 0.0), 0.1)
+        for event in events:
+            offset = float(event.time_offset_seconds or 0.0)
+            safe = _safe_uploaded_video_event_filename(event.event_id)
+            out_path = clips_dir / f"{safe}.mp4"
+            try:
+                raw = generate_uploaded_video_event_clip_ffmpeg(
+                    source_video_path=source_video_path,
+                    output_mp4_path=out_path,
+                    session_id=session.session_id,
+                    event_id=event.event_id,
+                    event_offset_seconds=offset,
+                    clip_seconds_before=before,
+                    clip_seconds_after=after,
+                    video_duration_seconds=max(duration_cap, offset + 0.05),
+                    hash_output=compute_hash,
+                )
+                raw["storage_uri"] = self._storage_uri(out_path)
+                event.replay_clip = UploadedVideoReplayClipMetadata.model_validate(raw)
+                self._incident_repository.merge_event_metadata(
+                    event.event_id,
+                    {
+                        "uploaded_video_replay_clip": {
+                            "clip_id": event.replay_clip.clip_id,
+                            "hash_sha256": event.replay_clip.hash_sha256,
+                            "storage_uri": event.replay_clip.storage_uri,
+                            "event_id": event.event_id,
+                            "session_id": session.session_id,
+                        },
+                    },
+                )
+            except UploadedVideoReplayClipError:
+                continue
+
+        self._sync_timeline_replay_clips(timeline, events)
 
     def _process_session_job(self, session_id: str, cancel_event: threading.Event) -> None:
         session = self._require_session(session_id)
@@ -422,10 +559,11 @@ class UploadedVideoService:
         generated_events: list[UploadedVideoEvent] = []
         generated_timeline: list[UploadedVideoTimelineItem] = []
         processed_frames = 0
+        source_video_path = self._resolve_storage_uri(session.storage_uri)
         try:
             model_pool = self._load_shared_model_pool(session)
             processor = StreamProcessor(f"uploaded:{session_id}", session.storage_uri, model_pool)
-            capture = cv2.VideoCapture(str(self._resolve_storage_uri(session.storage_uri)))
+            capture = cv2.VideoCapture(str(source_video_path))
             total_frames = max(0, int(session.frame_count or capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
             fps = float(session.fps or capture.get(cv2.CAP_PROP_FPS) or 0.0) or 1.0
             stride = self._effective_stride(fps)
@@ -527,6 +665,16 @@ class UploadedVideoService:
                     detail="Uploaded-video processing completed.",
                     metadata={"event_count": len(generated_events)},
                 )
+                video_duration_cap = float(session.duration_seconds or 0.0)
+                if video_duration_cap <= 0.0:
+                    video_duration_cap = float(self._video_metadata(source_video_path).get("duration_seconds") or 0.0)
+                self._maybe_generate_uploaded_video_replay_clips(
+                    session,
+                    generated_events,
+                    generated_timeline,
+                    source_video_path,
+                    video_duration_cap,
+                )
             report = self._build_report(session, generated_events, generated_timeline, processed_frames, time.monotonic() - start_ts)
             self._write_json(self._events_path(session_id), [event.model_dump(mode="json") for event in generated_events])
             self._write_json(self._timeline_path(session_id), [item.model_dump(mode="json") for item in generated_timeline])
@@ -597,6 +745,27 @@ class UploadedVideoService:
         counts_by_type: dict[str, int] = {}
         for event in events:
             counts_by_type[event.event_type] = counts_by_type.get(event.event_type, 0) + 1
+        replay_clips_payload: list[dict[str, Any]] = []
+        coc_clips: list[dict[str, Any]] = []
+        for event in events:
+            if event.replay_clip is None:
+                continue
+            clip_dump = event.replay_clip.model_dump(mode="json")
+            replay_clips_payload.append(clip_dump)
+            coc_clips.append(
+                {
+                    "event_id": event.event_id,
+                    "clip_id": event.replay_clip.clip_id,
+                    "hash_sha256": event.replay_clip.hash_sha256,
+                    "storage_uri": event.replay_clip.storage_uri,
+                }
+            )
+        replay_summary = {
+            "clips_generated": len(replay_clips_payload),
+            "events_total": len(events),
+            "events_with_clips": sum(1 for event in events if event.replay_clip is not None),
+            "events_without_clips": sum(1 for event in events if event.replay_clip is None),
+        }
         return UploadedVideoReport(
             session_id=session.session_id,
             generated_by=session.created_by,
@@ -625,11 +794,16 @@ class UploadedVideoService:
                 "source_video": session.storage_uri,
                 "report_artifact": self._storage_uri(self._report_path(session.session_id)),
                 "generated_at": _now_iso(),
+                "replay_clip_hashes": [item["hash_sha256"] for item in coc_clips if item.get("hash_sha256")],
+                "replay_clip_manifest": coc_clips,
             },
+            replay_clips=replay_clips_payload,
+            replay_summary=replay_summary,
             model_caveats=[
                 "Uploaded-video analytics are advisory and require operator review.",
                 "Identity-related outputs must not be treated as confirmed identification without human validation.",
                 "Absence of detections is not proof of absence.",
+                "Replay clips are contextual aids only; absence of a clip does not imply absence of activity.",
             ],
             metadata={"source_type": "uploaded_video"},
         )

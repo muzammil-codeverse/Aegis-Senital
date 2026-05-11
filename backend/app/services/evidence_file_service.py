@@ -391,6 +391,18 @@ class EvidenceFileService:
             roots.add(replay_dir)
         except Exception:
             pass
+        try:
+            from inference.config_runtime import load_runtime_config
+
+            uv_cfg = dict(load_runtime_config("uploaded_video").get("uploaded_video") or {})
+            storage = dict(uv_cfg.get("storage") or {})
+            processed = (PROJECT_ROOT / str(storage.get("processed_dir") or "storage/uploaded_video_results")).resolve()
+            uploads = (PROJECT_ROOT / str(storage.get("root_dir") or "storage/uploaded_videos")).resolve()
+            roots.add(processed)
+            roots.add(uploads)
+        except Exception:
+            roots.add((PROJECT_ROOT / "storage/uploaded_video_results").resolve())
+            roots.add((PROJECT_ROOT / "storage/uploaded_videos").resolve())
         return list(roots)
 
     def _download_headers(self, filename: str) -> dict[str, str]:
