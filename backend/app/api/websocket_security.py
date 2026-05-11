@@ -13,23 +13,30 @@ from app.services.auth_service import get_auth_service
 
 
 def extract_ws_token(websocket) -> str | None:
+    token, _source, _detail = _extract_ws_auth(websocket)
+    return token
+
+
+def _extract_ws_auth(websocket) -> tuple[str | None, str | None, str | None]:
     auth_cfg = get_auth_config()
-    if bool(auth_cfg.get("allow_query_token_for_websocket", True)):
-        token = websocket.query_params.get("token")
-        if token:
-            return token
+    token = websocket.query_params.get("token")
+    if token:
+        if bool(auth_cfg.get("allow_query_token_for_websocket", False)):
+            return token, "query", None
+        return None, "query", "Query-token WebSocket authentication is disabled"
     cookie_name = str(auth_cfg.get("cookie_name") or "aegis_access_token")
     cookie_token = websocket.cookies.get(cookie_name)
     if cookie_token:
-        return cookie_token
-    protocol = websocket.headers.get("sec-websocket-protocol") or ""
-    for part in protocol.split(","):
-        value = part.strip()
-        if value.lower().startswith("bearer."):
-            return value.split(".", 1)[1].strip() or None
-        if value.lower().startswith("token."):
-            return value.split(".", 1)[1].strip() or None
-    return None
+        return cookie_token, "cookie", None
+    if bool(auth_cfg.get("allow_subprotocol_token_for_websocket", True)):
+        protocol = websocket.headers.get("sec-websocket-protocol") or ""
+        for part in protocol.split(","):
+            value = part.strip()
+            if value.lower().startswith("bearer."):
+                return value.split(".", 1)[1].strip() or None, "subprotocol", None
+            if value.lower().startswith("token."):
+                return value.split(".", 1)[1].strip() or None, "subprotocol", None
+    return None, None, None
 
 
 async def reject_ws(
@@ -53,20 +60,23 @@ async def authenticate_websocket(
         websocket.state.current_user = user
         return user
 
-    token = extract_ws_token(websocket)
+    token, token_source, extraction_error = _extract_ws_auth(websocket)
+    if extraction_error:
+        await _deny(websocket, None, extraction_error, permissions, token_source=token_source)
+        return None
     if not token:
-        await _deny(websocket, None, "Authentication required", permissions)
+        await _deny(websocket, None, "Authentication required", permissions, token_source=token_source)
         return None
 
     user = get_auth_service().get_current_user_from_token(token)
     if user is None:
-        await _deny(websocket, None, "Invalid or expired token", permissions)
+        await _deny(websocket, None, "Invalid or expired token", permissions, token_source=token_source)
         return None
     if user.status != UserStatus.ACTIVE.value:
-        await _deny(websocket, user, "User account is not active", permissions)
+        await _deny(websocket, user, "User account is not active", permissions, token_source=token_source)
         return None
     if permissions and not any(has_permission(user.role, permission, get_rbac_config()) for permission in permissions):
-        await _deny(websocket, user, "Insufficient permission", permissions)
+        await _deny(websocket, user, "Insufficient permission", permissions, token_source=token_source)
         return None
 
     websocket.state.current_user = user
@@ -77,7 +87,7 @@ async def authenticate_websocket(
         resource_type="websocket",
         resource_id=websocket.url.path,
         request=websocket,
-        metadata={"permissions": permissions},
+        metadata={"permissions": permissions, "token_source": token_source},
     )
     return user
 
@@ -90,7 +100,14 @@ def _normalize_permissions(required_permission: str | Iterable[str] | None) -> l
     return [str(item) for item in required_permission]
 
 
-async def _deny(websocket: WebSocket, user: UserAccount | None, detail: str, permissions: list[str]) -> None:
+async def _deny(
+    websocket: WebSocket,
+    user: UserAccount | None,
+    detail: str,
+    permissions: list[str],
+    *,
+    token_source: str | None = None,
+) -> None:
     _metric("websocket_auth_failed")
     get_audit_log_service().record(
         AuditAction.WEBSOCKET_DENIED,
@@ -100,7 +117,7 @@ async def _deny(websocket: WebSocket, user: UserAccount | None, detail: str, per
         success=False,
         detail=detail,
         request=websocket,
-        metadata={"permissions": permissions},
+        metadata={"permissions": permissions, "token_source": token_source},
     )
     await reject_ws(websocket, code=1008, reason=detail)
 

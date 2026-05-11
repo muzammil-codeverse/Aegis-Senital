@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildWebSocketUrl } from '../config'
+import { authUsesCookieMode, buildWebSocketProtocols, buildWebSocketUrl } from '../config'
 import { useAuth } from './useAuth'
 
 const MAX_BUFFER = 200
@@ -18,7 +18,7 @@ export function useWebSocketAlerts() {
   const reconnectTimerRef = useRef(null)
 
   useEffect(() => {
-    if (authRequired && !token) {
+    if (authRequired && !token && !authUsesCookieMode()) {
       setStatus('auth_error')
       return undefined
     }
@@ -26,8 +26,9 @@ export function useWebSocketAlerts() {
 
     function connect() {
       const url = buildWebSocketUrl('/ws/alerts', token)
+      const protocols = buildWebSocketProtocols(token)
       setStatus(reconnectRef.current > 0 ? 'reconnecting' : 'connecting')
-      const socket = new WebSocket(url)
+      const socket = protocols ? new WebSocket(url, protocols) : new WebSocket(url)
       socketRef.current = socket
 
       socket.onopen = () => {

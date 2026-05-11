@@ -75,7 +75,7 @@ def _llm_config():
     }
 
 
-def _user(role: str) -> UserAccount:
+def _user(role: str, metadata: dict | None = None) -> UserAccount:
     return UserAccount(
         user_id=f"user-{role}",
         username=role,
@@ -85,6 +85,7 @@ def _user(role: str) -> UserAccount:
         password_hash="hash",
         created_at=1.0,
         updated_at=1.0,
+        metadata=metadata or {},
     )
 
 
@@ -97,10 +98,11 @@ def _install_auth(monkeypatch):
     }
     service = auth_module.get_auth_service()
     monkeypatch.setattr(service, "get_current_user_from_token", lambda token: users.get(token))
+    return users
 
 
 def test_llm_endpoints_use_local_stub_and_persist_reports(tmp_path, monkeypatch):
-    _install_auth(monkeypatch)
+    users = _install_auth(monkeypatch)
     monkeypatch.setattr(case_service_module, "_CASE_SERVICE_SUBSCRIBED", True)
     case_service = CaseService(repository=JsonlCaseRepository(config=_case_config(tmp_path)), config=_case_config(tmp_path))
     llm_service = LlmService(config=_llm_config(), case_service=case_service)
@@ -108,6 +110,7 @@ def test_llm_endpoints_use_local_stub_and_persist_reports(tmp_path, monkeypatch)
     monkeypatch.setattr(llm_routes_module, "get_llm_service", lambda: llm_service)
 
     case = case_service.create_case({"title": "Possible anomaly incident", "severity": "high", "priority": "high"}, actor="operator")
+    users["operator"].metadata = {"case_scopes": [case.case_id]}
     case_service.add_evidence(case.case_id, {"evidence_type": "event", "title": "Linked event", "description": "Observed event evidence."}, actor="operator")
 
     client = TestClient(app, raise_server_exceptions=False)
@@ -146,7 +149,7 @@ def test_llm_endpoints_use_local_stub_and_persist_reports(tmp_path, monkeypatch)
 
 
 def test_llm_permissions_and_missing_key_verification_message(tmp_path, monkeypatch):
-    _install_auth(monkeypatch)
+    users = _install_auth(monkeypatch)
     monkeypatch.setattr(case_service_module, "_CASE_SERVICE_SUBSCRIBED", True)
     case_service = CaseService(repository=JsonlCaseRepository(config=_case_config(tmp_path)), config=_case_config(tmp_path))
     llm_service = LlmService(config=_llm_config(), case_service=case_service)
@@ -154,6 +157,7 @@ def test_llm_permissions_and_missing_key_verification_message(tmp_path, monkeypa
     monkeypatch.setattr(llm_routes_module, "get_llm_service", lambda: llm_service)
 
     case = case_service.create_case({"title": "Possible restricted-zone incident"}, actor="operator")
+    users["operator"].metadata = {"case_scopes": [case.case_id]}
     client = TestClient(app, raise_server_exceptions=False)
 
     denied = client.post(

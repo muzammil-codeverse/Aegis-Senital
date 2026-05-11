@@ -1,0 +1,56 @@
+upload_security:
+  default_storage_dir: storage/uploads
+  malware_scan:
+    enabled: false
+    provider: placeholder
+  classes:
+    video:
+      max_file_size_mb: 256
+      allowed_extensions:
+        - .mp4
+        - .avi
+        - .mov
+        - .mkv
+      allowed_mime_types:
+        - video/mp4
+        - video/x-msvideo
+        - video/quicktime
+        - video/x-matroska
+        - application/octet-stream
+    image:
+      max_file_size_mb: 16
+      allowed_extensions:
+        - .jpg
+        - .jpeg
+        - .png
+      allowed_mime_types:
+        - image/jpeg
+        - image/png
+        - application/octet-stream
+    document:
+      max_file_size_mb: 32
+      allowed_extensions:
+        - .pdf
+        - .txt
+        - .md
+        - .json
+        - .csv
+      allowed_mime_types:
+        - application/pdf
+        - text/plain
+        - text/markdown
+        - application/json
+        - text/csv
+        - application/octet-stream
+  rejected_extensions:
+    - .exe
+    - .bat
+    - .ps1
+    - .sh
+    - .js
+    - .py
+    - .dll
+    - .scr
+    - .zip
+    - .rar
+    - .7z

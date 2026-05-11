@@ -1,13 +1,25 @@
 import axios from 'axios'
-import { API_BASE_URL, REQUEST_TIMEOUT_MS } from '../config'
+import {
+  API_BASE_URL,
+  REQUEST_TIMEOUT_MS,
+  CSRF_COOKIE_NAME,
+  CSRF_HEADER_NAME,
+  allowClientTokenStorage,
+  readCookie,
+} from '../config'
 
 export const AUTH_TOKEN_KEY = 'aegis.accessToken'
 
 export function getStoredToken() {
+  if (!allowClientTokenStorage()) return null
   return window.localStorage.getItem(AUTH_TOKEN_KEY) || window.sessionStorage.getItem(AUTH_TOKEN_KEY)
 }
 
 export function setStoredToken(token, { session = false } = {}) {
+  if (!allowClientTokenStorage()) {
+    clearStoredToken()
+    return null
+  }
   if (!token) return clearStoredToken()
   const target = session ? window.sessionStorage : window.localStorage
   const other = session ? window.localStorage : window.sessionStorage
@@ -58,6 +70,14 @@ apiClient.interceptors.request.use(config => {
   if (token) {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${token}`
+  }
+  const method = String(config.method || 'get').toUpperCase()
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrfToken = readCookie(CSRF_COOKIE_NAME)
+    if (csrfToken) {
+      config.headers = config.headers || {}
+      config.headers[CSRF_HEADER_NAME] = csrfToken
+    }
   }
   return config
 })

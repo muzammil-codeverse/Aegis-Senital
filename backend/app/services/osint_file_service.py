@@ -7,6 +7,7 @@ from typing import Any
 
 from app.models.osint_models import CaseDocumentUpload
 from app.repositories.osint_repository import load_osint_config
+from app.security.upload_policy import get_upload_security_policy
 
 
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".txt", ".md", ".json", ".csv", ".png", ".jpg", ".jpeg"}
@@ -56,8 +57,14 @@ class OsintFileService:
         actor: str,
         metadata: dict[str, Any] | None = None,
     ) -> CaseDocumentUpload:
-        ext = self.validate_upload(filename, len(content))
-        safe_name = f"{case_id}_{source_id}_{uuid.uuid4().hex[:12]}{ext}"
+        self.validate_upload(filename, len(content))
+        validation = get_upload_security_policy().validate(
+            filename=filename,
+            content=content,
+            content_type=content_type,
+            allowed_classes={"image", "document"},
+        )
+        safe_name = validation.build_storage_name(case_id, source_id)
         target = (self._storage_dir / safe_name).resolve()
         if self._storage_dir not in target.parents and target != self._storage_dir:
             self._increment_metric("osint_upload_rejections_total")
@@ -67,14 +74,14 @@ class OsintFileService:
         return CaseDocumentUpload(
             source_id=source_id,
             case_id=case_id,
-            filename=Path(filename or safe_name).name,
+            filename=validation.normalized_filename,
             storage_uri=str((self._relative_storage_dir / safe_name).as_posix()),
-            content_type=content_type,
-            extension=ext,
-            size_bytes=len(content),
-            sha256=hashlib.sha256(content).hexdigest(),
+            content_type=validation.content_type,
+            extension=validation.extension,
+            size_bytes=validation.size_bytes,
+            sha256=validation.sha256,
             created_by=actor,
-            metadata=dict(metadata or {}),
+            metadata={**dict(metadata or {}), "malware_scan": validation.malware_scan},
         )
 
     @staticmethod

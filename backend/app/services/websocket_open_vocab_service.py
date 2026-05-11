@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.object_authorization import can_access_camera, can_access_event_payload, can_access_incident
 from core.event_bus import EventType, EventRecord, get_event_bus
 from app.models.security_models import AuditAction
 from app.services.audit_log_service import get_audit_log_service
@@ -183,6 +184,13 @@ class WebSocketOpenVocabService:
         _add_to_metric("open_vocab_ws_event_payload_bytes", payload_bytes)
 
         for client in clients:
+            if client.user is not None:
+                if not (
+                    can_access_event_payload(client.user, ws_payload)
+                    or can_access_camera(client.user, str(ws_payload.get("camera_id") or ""))
+                    or can_access_incident(client.user, str(ws_payload.get("incident_id") or ""))
+                ):
+                    continue
             client.loop.call_soon_threadsafe(self._offer, client, ws_payload)
 
     def _is_rate_limited(self, camera_id: str) -> bool:

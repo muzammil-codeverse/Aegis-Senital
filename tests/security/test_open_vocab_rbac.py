@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from main import app
 
 
-def _user(role: str) -> UserAccount:
+def _user(role: str, metadata: dict | None = None) -> UserAccount:
     return UserAccount(
         user_id=f"user-{role}",
         username=role,
@@ -17,6 +17,7 @@ def _user(role: str) -> UserAccount:
         password_hash="hash",
         created_at=1.0,
         updated_at=1.0,
+        metadata=metadata or {},
     )
 
 
@@ -24,7 +25,7 @@ def _install_auth(monkeypatch):
     users = {
         "admin": _user("admin"),
         "supervisor": _user("supervisor"),
-        "analyst": _user("analyst"),
+        "analyst": _user("analyst", metadata={"camera_scopes": ["cam-test"]}),
         "operator": _user("operator"),
         "viewer": _user("viewer"),
     }

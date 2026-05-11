@@ -5,6 +5,12 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from app.api.object_authorization import (
+    can_access_case,
+    ensure_camera_access,
+    ensure_case_access,
+    ensure_event_payload_access,
+)
 from app.api.security_dependencies import require_permission as require_api_permission
 from app.models.case_models import (
     CaseCreateRequest,
@@ -37,6 +43,10 @@ def _get_case_service():
     return get_case_service()
 
 
+def _resolve_event_payload(event_id: str) -> dict[str, Any] | None:
+    return _get_case_service().resolve_event_by_id(event_id)
+
+
 def _audit_write(request: Request, current_user: UserAccount | None, action: str, case_id: str, metadata: dict[str, Any] | None = None) -> None:
     try:
         get_audit_log_service().record(
@@ -59,6 +69,18 @@ def create_case_api(
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
     service = _get_case_service()
+    for camera_id in body.camera_ids:
+        ensure_camera_access(request, current_user, camera_id)
+    for event_id in body.source_event_ids:
+        payload = _resolve_event_payload(event_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Event '{event_id}' was not found")
+        ensure_event_payload_access(
+            request,
+            current_user,
+            resource_id=event_id,
+            payload=(payload.get("payload") if isinstance(payload, dict) else None) or payload,
+        )
     try:
         case = service.create_case(body, actor=current_user.username)
     except RuntimeError as exc:
@@ -84,22 +106,26 @@ def list_cases_api(
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
     service = _get_case_service()
-    items = service.list_cases(
-        {
-            "status": status,
-            "priority": priority,
-            "severity": severity,
-            "camera": camera,
-            "tag": tag,
-            "assigned_to": assigned_to,
-            "source_event_id": source_event_id,
-            "requires_review": requires_review,
-            "q": q,
-            "date_from": date_from,
-            "date_to": date_to,
-            "limit": limit,
-        }
-    )
+    items = [
+        item
+        for item in service.list_cases(
+            {
+                "status": status,
+                "priority": priority,
+                "severity": severity,
+                "camera": camera,
+                "tag": tag,
+                "assigned_to": assigned_to,
+                "source_event_id": source_event_id,
+                "requires_review": requires_review,
+                "q": q,
+                "date_from": date_from,
+                "date_to": date_to,
+                "limit": limit,
+            }
+        )
+        if can_access_case(current_user, item.case_id)
+    ]
     payload = [item.model_dump(mode="json") for item in items]
     return {"items": payload, "count": len(payload), "status": "ok" if payload else "empty"}
 
@@ -107,8 +133,10 @@ def list_cases_api(
 @router.get("/api/cases/{case_id}")
 def get_case_api(
     case_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     case = service.get_case(case_id)
     if case is None:
@@ -151,6 +179,7 @@ def update_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.update_case(case_id, body, actor=current_user.username)
@@ -170,6 +199,7 @@ def delete_or_archive_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.delete_or_archive_case(case_id, actor=current_user.username)
@@ -186,6 +216,15 @@ def create_case_from_event_api(
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
     service = _get_case_service()
+    payload = service.resolve_event_by_id(event_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Event '{event_id}' was not found")
+    ensure_event_payload_access(
+        request,
+        current_user,
+        resource_id=event_id,
+        payload=(payload.get("payload") if isinstance(payload, dict) else None) or payload,
+    )
     try:
         case = service.create_case_from_event_id(event_id, actor=current_user.username)
     except KeyError:
@@ -205,6 +244,19 @@ def add_case_evidence_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
+    if body.camera_id:
+        ensure_camera_access(request, current_user, body.camera_id)
+    if body.source_event_id:
+        payload = _resolve_event_payload(body.source_event_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Event '{body.source_event_id}' was not found")
+        ensure_event_payload_access(
+            request,
+            current_user,
+            resource_id=body.source_event_id,
+            payload=(payload.get("payload") if isinstance(payload, dict) else None) or payload,
+        )
     service = _get_case_service()
     try:
         evidence = service.add_evidence(case_id, body, actor=current_user.username)
@@ -221,8 +273,10 @@ def add_case_evidence_api(
 @router.get("/api/cases/{case_id}/evidence")
 def list_case_evidence_api(
     case_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         items = service.list_evidence(case_id)
@@ -239,6 +293,7 @@ def add_case_note_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         note = service.add_note(case_id, body, actor=current_user.username)
@@ -253,8 +308,10 @@ def add_case_note_api(
 @router.get("/api/cases/{case_id}/notes")
 def list_case_notes_api(
     case_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         items = service.list_notes(case_id)
@@ -271,6 +328,7 @@ def assign_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:assign")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.assign_case(case_id, body.assigned_to, actor=current_user.username, reason=body.reason)
@@ -287,6 +345,7 @@ def close_case_api(
     body: CaseTransitionRequest = Body(default_factory=CaseTransitionRequest),
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.close_case(case_id, actor=current_user.username, reason=body.reason)
@@ -305,6 +364,7 @@ def reopen_case_api(
     body: CaseTransitionRequest = Body(default_factory=CaseTransitionRequest),
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.reopen_case(case_id, actor=current_user.username, reason=body.reason)
@@ -323,6 +383,7 @@ def dismiss_case_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.dismiss_case(case_id, actor=current_user.username, reason=body.reason)
@@ -341,6 +402,7 @@ def archive_case_api(
     body: CaseTransitionRequest = Body(default_factory=CaseTransitionRequest),
     current_user: UserAccount = Depends(require_api_permission("case:close")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         case = service.archive_case(case_id, actor=current_user.username, reason=body.reason)
@@ -355,8 +417,10 @@ def archive_case_api(
 @router.get("/api/cases/{case_id}/timeline")
 def get_case_timeline_api(
     case_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("case:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         items = service.get_timeline(case_id)
@@ -373,6 +437,7 @@ def export_case_api(
     format: str = Query(default="json"),
     current_user: UserAccount = Depends(require_api_permission("case:export")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_case_service()
     try:
         export = service.export_case(case_id, format=format, actor=current_user.username)

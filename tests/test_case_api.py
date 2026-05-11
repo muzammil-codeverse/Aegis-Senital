@@ -21,7 +21,7 @@ def _config(tmp_path):
     }
 
 
-def _user(role: str) -> UserAccount:
+def _user(role: str, metadata: dict | None = None) -> UserAccount:
     return UserAccount(
         user_id=f"user-{role}",
         username=role,
@@ -31,6 +31,7 @@ def _user(role: str) -> UserAccount:
         password_hash="hash",
         created_at=1.0,
         updated_at=1.0,
+        metadata=metadata or {},
     )
 
 
@@ -43,10 +44,11 @@ def _install_auth(monkeypatch):
     }
     service = auth_module.get_auth_service()
     monkeypatch.setattr(service, "get_current_user_from_token", lambda token: users.get(token))
+    return users
 
 
 def test_case_api_create_list_get_update_and_close(tmp_path, monkeypatch):
-    _install_auth(monkeypatch)
+    users = _install_auth(monkeypatch)
     monkeypatch.setattr(case_service_module, "_CASE_SERVICE_SUBSCRIBED", True)
     service = CaseService(repository=JsonlCaseRepository(config=_config(tmp_path)), config=_config(tmp_path))
     monkeypatch.setattr(case_routes_module, "get_case_service", lambda: service)
@@ -59,6 +61,8 @@ def test_case_api_create_list_get_update_and_close(tmp_path, monkeypatch):
     )
     assert create.status_code == 200
     case_id = create.json()["item"]["case_id"]
+    for role in ("viewer", "operator", "supervisor"):
+        users[role].metadata = {"case_scopes": [case_id]}
 
     listing = client.get("/api/cases", headers={"Authorization": "Bearer viewer"})
     assert listing.status_code == 200

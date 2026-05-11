@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.object_authorization import can_access_alert, can_access_event_payload
 from core.event_bus import EventType, EventRecord, get_event_bus
 from app.models.security_models import AuditAction
 from app.services.audit_log_service import get_audit_log_service
@@ -85,6 +86,17 @@ class WebSocketAlertService:
         with self._lock:
             clients = list(self._clients)
         for client in clients:
+            if client.user is not None:
+                alert_payload = payload.get("payload") if isinstance(payload, dict) else None
+                candidate = alert_payload if isinstance(alert_payload, dict) else payload
+                alert_id = ""
+                if isinstance(candidate, dict):
+                    alert_id = str(candidate.get("alert_id") or "")
+                if not (
+                    (alert_id and can_access_alert(client.user, alert_id))
+                    or can_access_event_payload(client.user, candidate if isinstance(candidate, dict) else None)
+                ):
+                    continue
             client.loop.call_soon_threadsafe(self._offer, client, payload)
 
     def _offer(self, client: _Client, payload: dict) -> None:

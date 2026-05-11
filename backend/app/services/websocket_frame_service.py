@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.object_authorization import can_access_camera
 from app.models.security_models import AuditAction
 from app.services.audit_log_service import get_audit_log_service
 
@@ -122,6 +123,8 @@ class WebSocketFrameService:
             clients = list(self._clients.values())
 
         for client in clients:
+            if client.user is not None and not can_access_camera(client.user, camera_id):
+                continue
             client.enqueue(message)
 
         # Update metrics

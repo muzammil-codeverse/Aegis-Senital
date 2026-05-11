@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from app.api.object_authorization import can_access_analytics_scope
 from app.api.security_dependencies import require_permission as require_api_permission
 from app.models.analytics_models import AnalyticsExportRequest, AnalyticsTimeRange
 from app.models.security_models import AuditAction, UserAccount
@@ -43,6 +44,7 @@ def _analytics_query(
     end: str | None = Query(default=None),
     bucket: str | None = Query(default=None),
     camera_id: str | None = Query(default=None),
+    case_id: str | None = Query(default=None),
     severity: str | None = Query(default=None),
     event_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -65,6 +67,7 @@ def _analytics_query(
     )
     filters = {
         "camera_id": camera_id,
+        "case_id": case_id,
         "severity": severity,
         "event_type": event_type,
         "status": status,
@@ -82,6 +85,28 @@ def _analytics_query(
         "time_range": time_range,
         "filters": {key: value for key, value in filters.items() if value is not None and value != ""},
     }
+
+
+def _normalize_scope_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _enforce_analytics_scope(request: Request, current_user: UserAccount, filters: dict[str, Any]) -> None:
+    scoped_keys = ("camera_id", "case_id", "identity_id", "incident_id")
+    for key in scoped_keys:
+        values = _normalize_scope_values(filters.get(key))
+        for value in values:
+            if can_access_analytics_scope(current_user, **{key: value}):
+                continue
+            raise HTTPException(
+                status_code=403,
+                detail={"status": "error", "detail": f"Access denied for analytics scope '{key}'"},
+            )
 
 
 def _dump_item(item: Any) -> Any:
@@ -151,140 +176,154 @@ def _execute(name: str, fn):
 
 @router.get("/api/analytics/overview")
 def get_analytics_overview_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("overview", lambda: _item_response(service.get_dashboard_overview(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/events/timeseries")
 def get_analytics_event_timeseries_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("events_timeseries", lambda: _list_response(service.get_event_timeseries(params["time_range"], params["time_range"].bucket, params["filters"])))
 
 
 @router.get("/api/analytics/events/by-type")
 def get_analytics_events_by_type_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("events_by_type", lambda: _list_response(service.get_events_by_type(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/cases/summary")
 def get_analytics_case_summary_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("cases_summary", lambda: _item_response(service.get_case_summary(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/cases/timeseries")
 def get_analytics_case_timeseries_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("cases_timeseries", lambda: _list_response(service.get_case_timeseries(params["time_range"], params["time_range"].bucket, params["filters"])))
 
 
 @router.get("/api/analytics/cameras/risk")
 def get_analytics_camera_risk_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("cameras_risk", lambda: _list_response(service.get_camera_risk(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/cameras/heatmap")
 def get_analytics_camera_heatmap_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("cameras_heatmap", lambda: _list_response(service.get_camera_risk_heatmap(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/models/performance")
 def get_analytics_model_performance_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("models_performance", lambda: _list_response(service.get_model_performance(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/anomaly/trends")
 def get_analytics_anomaly_trends_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("anomaly_trends", lambda: _item_response(service.get_anomaly_trends(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/identity/summary")
 def get_analytics_identity_summary_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("identity_summary", lambda: _item_response(service.get_identity_summary(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/open-vocab/summary")
 def get_analytics_open_vocab_summary_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("open_vocab_summary", lambda: _item_response(service.get_open_vocab_summary(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/streams/reliability")
 def get_analytics_stream_reliability_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("streams_reliability", lambda: _list_response(service.get_stream_reliability(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/operators/workload")
 def get_analytics_operator_workload_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("operators_workload", lambda: _list_response(service.get_operator_workload(params["time_range"], params["filters"])))
 
 
 @router.get("/api/analytics/system/performance")
 def get_analytics_system_performance_api(
+    request: Request,
     params: dict[str, Any] = Depends(_analytics_query),
     current_user: UserAccount = Depends(require_api_permission("analytics:read")),
 ):
-    del current_user
+    _enforce_analytics_scope(request, current_user, params["filters"])
     service = get_analytics_service()
     return _execute("system_performance", lambda: _item_response(service.get_system_performance(params["time_range"], params["filters"])))
 
@@ -295,6 +334,7 @@ def export_analytics_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("analytics:export")),
 ):
+    _enforce_analytics_scope(request, current_user, body.filters)
     service = get_analytics_service()
 
     def _run():

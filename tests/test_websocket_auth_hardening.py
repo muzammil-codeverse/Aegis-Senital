@@ -1,18 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 from types import SimpleNamespace
 
 from app.api import websocket_security
-from app.api.websocket_security import authenticate_websocket, extract_ws_token
+from app.api.websocket_security import authenticate_websocket
 from app.models.security_models import UserAccount
 
 
 class DummyWebSocket:
-    def __init__(self, token=None):
+    def __init__(self, *, token: str | None = None, protocols: str = "") -> None:
         self.query_params = {"token": token} if token else {}
         self.cookies = {}
-        self.headers = {}
+        self.headers = {"sec-websocket-protocol": protocols} if protocols else {}
         self.state = SimpleNamespace()
-        self.url = SimpleNamespace(path="/ws/alerts")
+        self.url = SimpleNamespace(path="/ws/open-vocab")
         self.client = SimpleNamespace(host="127.0.0.1")
         self.closed = None
 
@@ -21,15 +23,19 @@ class DummyWebSocket:
 
 
 class AuditStub:
-    def record(self, *args, **kwargs):
+    def __init__(self) -> None:
+        self.entries: list[dict] = []
+
+    def record(self, action, **kwargs):
+        self.entries.append({"action": getattr(action, "value", action), **kwargs})
         return None
 
 
-def _user(role="admin"):
+def _user(role: str = "supervisor") -> UserAccount:
     return UserAccount(
-        user_id="u1",
-        username="admin",
-        display_name="Admin",
+        user_id=f"user-{role}",
+        username=role,
+        display_name=role,
         role=role,
         status="active",
         password_hash="hash",
@@ -38,22 +44,56 @@ def _user(role="admin"):
     )
 
 
-def test_token_extraction_from_query_param():
-    websocket_security.get_auth_config.cache_clear() if hasattr(websocket_security.get_auth_config, "cache_clear") else None
-    websocket = DummyWebSocket(token="abc")
-    original = websocket_security.get_auth_config
-    try:
-        websocket_security.get_auth_config = lambda: {
+def test_query_token_is_rejected_when_disabled(monkeypatch):
+    audit = AuditStub()
+    monkeypatch.setattr(websocket_security, "auth_required", lambda: True)
+    monkeypatch.setattr(
+        websocket_security,
+        "get_auth_config",
+        lambda: {
+            "allow_query_token_for_websocket": False,
+            "allow_subprotocol_token_for_websocket": True,
+            "cookie_name": "aegis_access_token",
+        },
+    )
+    monkeypatch.setattr(websocket_security, "get_audit_log_service", lambda: audit)
+
+    websocket = DummyWebSocket(token="query-token")
+    result = asyncio.run(authenticate_websocket(websocket, "open_vocab:read"))
+
+    assert result is None
+    assert websocket.closed[0] == 1008
+    assert "disabled" in (websocket.closed[1] or "").lower()
+    assert any(entry["action"] == "websocket_denied" for entry in audit.entries)
+
+
+def test_dev_query_token_mode_can_be_enabled_explicitly(monkeypatch):
+    user = _user()
+    monkeypatch.setattr(websocket_security, "auth_required", lambda: True)
+    monkeypatch.setattr(
+        websocket_security,
+        "get_auth_config",
+        lambda: {
             "allow_query_token_for_websocket": True,
             "allow_subprotocol_token_for_websocket": True,
             "cookie_name": "aegis_access_token",
-        }
-        assert extract_ws_token(websocket) == "abc"
-    finally:
-        websocket_security.get_auth_config = original
+        },
+    )
+    monkeypatch.setattr(websocket_security, "get_audit_log_service", lambda: AuditStub())
+    monkeypatch.setattr(
+        websocket_security,
+        "get_auth_service",
+        lambda: SimpleNamespace(get_current_user_from_token=lambda token: user if token == "query-token" else None),
+    )
+
+    websocket = DummyWebSocket(token="query-token")
+    result = asyncio.run(authenticate_websocket(websocket, "open_vocab:read"))
+
+    assert result is user
 
 
-def test_missing_token_fails_when_auth_required(monkeypatch):
+def test_subprotocol_token_is_preferred_non_query_transport(monkeypatch):
+    user = _user()
     monkeypatch.setattr(websocket_security, "auth_required", lambda: True)
     monkeypatch.setattr(
         websocket_security,
@@ -65,54 +105,13 @@ def test_missing_token_fails_when_auth_required(monkeypatch):
         },
     )
     monkeypatch.setattr(websocket_security, "get_audit_log_service", lambda: AuditStub())
-    websocket = DummyWebSocket()
-    result = asyncio.run(authenticate_websocket(websocket, "alert:read"))
-    assert result is None
-    assert websocket.closed[0] == 1008
-
-
-def test_invalid_token_fails(monkeypatch):
-    monkeypatch.setattr(websocket_security, "auth_required", lambda: True)
-    monkeypatch.setattr(
-        websocket_security,
-        "get_auth_config",
-        lambda: {
-            "allow_query_token_for_websocket": True,
-            "allow_subprotocol_token_for_websocket": True,
-            "cookie_name": "aegis_access_token",
-        },
-    )
-    monkeypatch.setattr(websocket_security, "get_audit_log_service", lambda: AuditStub())
     monkeypatch.setattr(
         websocket_security,
         "get_auth_service",
-        lambda: SimpleNamespace(get_current_user_from_token=lambda token: None),
+        lambda: SimpleNamespace(get_current_user_from_token=lambda token: user if token == "subprotocol-token" else None),
     )
-    websocket = DummyWebSocket(token="bad")
-    result = asyncio.run(authenticate_websocket(websocket, "alert:read"))
-    assert result is None
-    assert websocket.closed[0] == 1008
 
+    websocket = DummyWebSocket(protocols="aegis.v1, token.subprotocol-token")
+    result = asyncio.run(authenticate_websocket(websocket, "open_vocab:read"))
 
-def test_valid_token_attaches_user(monkeypatch):
-    user = _user("admin")
-    monkeypatch.setattr(websocket_security, "auth_required", lambda: True)
-    monkeypatch.setattr(
-        websocket_security,
-        "get_auth_config",
-        lambda: {
-            "allow_query_token_for_websocket": True,
-            "allow_subprotocol_token_for_websocket": True,
-            "cookie_name": "aegis_access_token",
-        },
-    )
-    monkeypatch.setattr(websocket_security, "get_audit_log_service", lambda: AuditStub())
-    monkeypatch.setattr(
-        websocket_security,
-        "get_auth_service",
-        lambda: SimpleNamespace(get_current_user_from_token=lambda token: user),
-    )
-    websocket = DummyWebSocket(token="ok")
-    result = asyncio.run(authenticate_websocket(websocket, "alert:read"))
     assert result is user
-    assert websocket.state.current_user is user

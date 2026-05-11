@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { authUsesCookieMode, buildWebSocketProtocols, buildWebSocketUrl } from '../config'
+import { useAuth } from './useAuth'
 
 const WS_RECONNECT_DELAY_MS = 3000
 const WS_MAX_RECONNECT_ATTEMPTS = 10
@@ -11,6 +13,7 @@ const WS_MAX_RECONNECT_ATTEMPTS = 10
  * Never surfaces raw frames or embeddings.
  */
 export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
+  const { token, authRequired } = useAuth()
   const [connected, setConnected] = useState(false)
   const [transport, setTransport] = useState('disconnected') // 'websocket' | 'polling_fallback' | 'disconnected'
   const [lastResult, setLastResult] = useState(null)
@@ -67,12 +70,14 @@ export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
 
   const connect = useCallback(() => {
     if (!enabled || !mountedRef.current) return
-
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const wsHost = window.location.host
-    const url = `${wsProtocol}://${wsHost}/ws/open-vocab`
-
-    const ws = new WebSocket(url)
+    if (authRequired && !token && !authUsesCookieMode()) {
+      setStreamError('Authentication required for Open-Vocab stream')
+      setTransport('disconnected')
+      return
+    }
+    const url = buildWebSocketUrl('/ws/open-vocab', token)
+    const protocols = buildWebSocketProtocols(token)
+    const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -103,7 +108,7 @@ export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
         setStreamError('WebSocket unavailable — using polling fallback')
       }
     }
-  }, [enabled, handleMessage])
+  }, [authRequired, enabled, handleMessage, token])
 
   useEffect(() => {
     mountedRef.current = true

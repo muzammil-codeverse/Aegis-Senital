@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { buildWebSocketUrl } from '../config'
+import { authUsesCookieMode, buildWebSocketProtocols, buildWebSocketUrl } from '../config'
 import { useAuth } from './useAuth'
 
 const RECONNECT_BASE_MS = 1000
@@ -17,16 +17,17 @@ export function useFrameUpdates() {
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return
-    if (authRequired && !token) {
+    if (authRequired && !token && !authUsesCookieMode()) {
       setStatus('auth_error')
       return
     }
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return
 
     const url = buildWebSocketUrl('/ws/frames', token)
+    const protocols = buildWebSocketProtocols(token)
     let ws
     try {
-      ws = new WebSocket(url)
+      ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url)
     } catch {
       scheduleReconnect()
       return

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 import time
 from collections.abc import Callable
 
@@ -22,16 +23,59 @@ PUBLIC_PATHS = {
     "/favicon.ico",
     "/api/auth/login",
 }
+CSRF_EXEMPT_PATHS = {
+    "/api/auth/login",
+    "/api/auth/logout",
+}
+CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+
+def issue_csrf_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _authorization_token(request: Request) -> str | None:
+    header = request.headers.get("authorization") or ""
+    if not header.lower().startswith("bearer "):
+        return None
+    token = header.split(" ", 1)[1].strip()
+    return token or None
+
+
+def _cookie_token(request: Request) -> str | None:
+    cookie_name = str(get_auth_config().get("cookie_name") or "aegis_access_token")
+    cookie_token = request.cookies.get(cookie_name)
+    return cookie_token or None
 
 
 def _extract_bearer_token(request: Request) -> str | None:
-    header = request.headers.get("authorization") or ""
-    if not header.lower().startswith("bearer "):
-        cookie_name = str(get_auth_config().get("cookie_name") or "aegis_access_token")
-        cookie_token = request.cookies.get(cookie_name)
-        return cookie_token or None
-    token = header.split(" ", 1)[1].strip()
-    return token or None
+    token = _authorization_token(request)
+    if token:
+        return token
+    return _cookie_token(request)
+
+
+def _using_cookie_auth(request: Request) -> bool:
+    return _authorization_token(request) is None and _cookie_token(request) is not None
+
+
+def _validate_csrf(request: Request) -> None:
+    auth_cfg = get_auth_config()
+    if request.method.upper() in CSRF_SAFE_METHODS:
+        return
+    if request.url.path in CSRF_EXEMPT_PATHS:
+        return
+    if not bool(auth_cfg.get("csrf_protect_cookie_auth", True)):
+        return
+    if not _using_cookie_auth(request):
+        return
+    header_name = str(auth_cfg.get("csrf_header_name") or "X-CSRF-Token")
+    cookie_name = str(auth_cfg.get("csrf_cookie_name") or "aegis_csrf_token")
+    header_token = (request.headers.get(header_name) or "").strip()
+    cookie_token = (request.cookies.get(cookie_name) or "").strip()
+    if header_token and cookie_token and secrets.compare_digest(header_token, cookie_token):
+        return
+    raise HTTPException(status_code=403, detail="CSRF validation failed")
 
 
 def _structured_error(status_code: int, detail: str, permission: str | None = None) -> JSONResponse:
@@ -91,6 +135,7 @@ async def get_current_user(request: Request) -> UserAccount:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     if user.status != UserStatus.ACTIVE.value:
         raise HTTPException(status_code=403, detail="User account is not active")
+    _validate_csrf(request)
     request.state.current_user = user
     return user
 
@@ -153,6 +198,8 @@ def permission_for_request(method: str, path: str) -> str | None:
         return "admin"
     if path.startswith("/api/audit/"):
         return "audit:read"
+    if path.startswith("/api/system/"):
+        return "system:read"
     if path == "/api/analytics/export":
         return "analytics:export"
     if path.startswith("/api/analytics"):
@@ -171,7 +218,7 @@ def permission_for_request(method: str, path: str) -> str | None:
     if path.startswith("/config/"):
         return "metrics:read"
     if path in {"/events", "/detections"}:
-        return "alert:read"
+        return "event:read"
     if path == "/process-video":
         return "camera:control"
 
@@ -216,6 +263,13 @@ def permission_for_request(method: str, path: str) -> str | None:
     if path.startswith("/api/models"):
         return "model:read" if method == "GET" else "model:write"
 
+    if path.startswith("/api/open-vocab/model/"):
+        return "open_vocab:read" if method == "GET" else "open_vocab:model"
+    if path.startswith("/api/open-vocab/"):
+        if method == "GET":
+            return "open_vocab:read"
+        return "open_vocab:write"
+
     if path.startswith("/api/identities"):
         if method == "GET":
             return "identity:read"
@@ -228,6 +282,8 @@ def permission_for_request(method: str, path: str) -> str | None:
         if method == "GET":
             return "watchlist:read"
         return "watchlist:write"
+    if path.startswith("/api/handoffs/"):
+        return "incident:read"
     if path == "/api/cases" or path.startswith("/api/cases/"):
         if "/enrichment" in path:
             if method == "GET":
@@ -289,6 +345,11 @@ async def enforce_request_security(request: Request, call_next):
         return _structured_error(403, "User account is not active")
 
     request.state.current_user = user
+    try:
+        _validate_csrf(request)
+    except HTTPException as exc:
+        record_access_denied(request, user, str(exc.detail), metadata={"csrf": True})
+        return _structured_error(exc.status_code, str(exc.detail))
     if required_permission and not has_permission(user.role, required_permission, get_rbac_config()):
         record_access_denied(
             request,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { changePassword as changePasswordRequest, getMe, login as loginRequest, logout as logoutRequest } from '../api/authApi'
 import { clearStoredToken, getStoredToken, setStoredToken } from '../api/client'
+import { authUsesCookieMode } from '../config'
 import { authStore } from '../state/authStore'
 
 let bootstrapped = false
@@ -57,7 +58,11 @@ export function useAuth() {
     authStore.setState({ loading: true, error: null })
     try {
       const payload = await loginRequest(username, password)
-      setStoredToken(payload.access_token, { session: !remember })
+      if (payload.access_token) {
+        setStoredToken(payload.access_token, { session: !remember })
+      } else if (authUsesCookieMode()) {
+        clearStoredToken()
+      }
       authStore.setSession({
         token: payload.access_token,
         user: payload.user,
@@ -81,13 +86,13 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
-      if (getStoredToken()) await logoutRequest()
+      if (snapshot.authenticated || getStoredToken()) await logoutRequest()
     } catch {
       // Local session cleanup still wins if the server is unavailable.
     }
     authStore.clearSession()
     window.location.hash = 'login'
-  }, [])
+  }, [snapshot.authenticated])
 
   const changePassword = useCallback(async (currentPassword, newPassword) => {
     const payload = await changePasswordRequest(currentPassword, newPassword)

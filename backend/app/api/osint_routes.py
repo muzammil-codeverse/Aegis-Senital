@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from app.api.object_authorization import ensure_case_access, ensure_osint_source_access
 from app.api.security_dependencies import require_permission as require_api_permission
 from app.models.osint_models import (
     CaseEnrichmentSummaryRequest,
@@ -12,6 +13,7 @@ from app.models.osint_models import (
     CaseExternalSourceUpdateRequest,
 )
 from app.models.security_models import UserAccount
+from app.security.upload_policy import get_upload_security_policy
 from app.services.audit_log_service import get_audit_log_service
 
 router = APIRouter()
@@ -69,6 +71,7 @@ def create_enrichment_source_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_osint_service()
     try:
         item = service.create_source(case_id, body, actor=current_user.username)
@@ -85,8 +88,10 @@ def create_enrichment_source_api(
 @router.get("/api/cases/{case_id}/enrichment/sources")
 def list_enrichment_sources_api(
     case_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_osint_service()
     try:
         items = service.list_sources(case_id)
@@ -100,8 +105,11 @@ def list_enrichment_sources_api(
 def get_enrichment_source_api(
     case_id: str,
     source_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
+    ensure_osint_source_access(request, current_user, source_id)
     source = _require_case_source(case_id, source_id)
     return {"item": source.model_dump(mode="json"), "status": "ok"}
 
@@ -114,6 +122,8 @@ def update_enrichment_source_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
+    ensure_osint_source_access(request, current_user, source_id)
     _require_case_source(case_id, source_id)
     updates = {key: value for key, value in body.model_dump(exclude_none=True, mode="json").items() if key not in {"source_id", "case_id"}}
     try:
@@ -133,6 +143,8 @@ def delete_enrichment_source_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
+    ensure_osint_source_access(request, current_user, source_id)
     _require_case_source(case_id, source_id)
     deleted = _get_osint_service().delete_source(source_id, actor=current_user.username)
     if not deleted:
@@ -152,14 +164,21 @@ async def upload_enrichment_document_api(
     metadata: str | None = Form(default=None),
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     content = await file.read()
+    validation = get_upload_security_policy().validate(
+        filename=file.filename or "upload.bin",
+        content=content,
+        content_type=file.content_type,
+        allowed_classes={"image", "document"},
+    )
     service = _get_osint_service()
     try:
         source, upload = service.create_uploaded_source(
             case_id=case_id,
-            filename=file.filename or "upload.bin",
+            filename=validation.normalized_filename,
             content=content,
-            content_type=file.content_type,
+            content_type=validation.content_type,
             title=title,
             description=description,
             source_reliability=source_reliability,
@@ -172,7 +191,19 @@ async def upload_enrichment_document_api(
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    _audit(request, current_user, "osint_document_uploaded", case_id, {"source_id": source.source_id, "filename": upload["filename"]})
+    _audit(
+        request,
+        current_user,
+        "osint_document_uploaded",
+        case_id,
+        {
+            "source_id": source.source_id,
+            "filename": upload["filename"],
+            "sha256": validation.sha256,
+            "size_bytes": validation.size_bytes,
+            "media_class": validation.media_class,
+        },
+    )
     return {"item": {"source": source.model_dump(mode="json"), "upload": upload}, "status": "ok"}
 
 
@@ -183,6 +214,7 @@ def add_enrichment_link_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     payload = body.model_copy(update={"source_type": "external_link"})
     service = _get_osint_service()
     try:
@@ -204,6 +236,7 @@ def summarize_enrichment_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:summarize")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_osint_service()
     try:
         item = service.summarize(
@@ -226,8 +259,10 @@ def summarize_enrichment_api(
 @router.get("/api/cases/{case_id}/enrichment/summaries")
 def list_enrichment_summaries_api(
     case_id: str,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("osint:read")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_osint_service()
     try:
         items = service.list_summaries(case_id)

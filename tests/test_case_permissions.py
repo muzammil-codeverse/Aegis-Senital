@@ -20,7 +20,7 @@ def _config(tmp_path):
     }
 
 
-def _user(role: str) -> UserAccount:
+def _user(role: str, metadata: dict | None = None) -> UserAccount:
     return UserAccount(
         user_id=f"user-{role}",
         username=role,
@@ -30,6 +30,7 @@ def _user(role: str) -> UserAccount:
         password_hash="hash",
         created_at=1.0,
         updated_at=1.0,
+        metadata=metadata or {},
     )
 
 
@@ -53,6 +54,8 @@ def test_case_permissions_enforced(tmp_path, monkeypatch):
         json={"title": "Possible incident", "severity": "high", "priority": "high"},
     )
     case_id = created.json()["item"]["case_id"]
+    for role in ("viewer", "operator", "supervisor"):
+        users[role].metadata = {"case_scopes": [case_id]}
 
     assert client.get("/api/cases", headers={"Authorization": "Bearer viewer"}).status_code == 200
     assert client.post("/api/cases", headers={"Authorization": "Bearer viewer"}, json={"title": "Denied"}).status_code == 403

@@ -48,21 +48,29 @@ def test_viewer_cannot_load_model(monkeypatch):
     assert response.status_code == 403, f"Expected 403, got {response.status_code}"
 
 
-def test_analyst_can_load_model(monkeypatch):
-    """Analyst has open_vocab:write per RBAC config — load must return 200 or 503, not 403."""
+def test_analyst_cannot_load_model(monkeypatch):
+    """Analyst does not have open_vocab:model — load must return 403."""
     _install_auth(monkeypatch)
     client = TestClient(app, raise_server_exceptions=False)
     response = client.post("/api/open-vocab/model/load", headers={"Authorization": "Bearer analyst"})
+    assert response.status_code == 403, f"Expected 403, got {response.status_code}"
+
+
+def test_admin_can_load_model(monkeypatch):
+    """Admin has open_vocab:model — load must return 200 or 503, not 403."""
+    _install_auth(monkeypatch)
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.post("/api/open-vocab/model/load", headers={"Authorization": "Bearer admin"})
     assert response.status_code in {200, 503}, (
         f"Expected 200 or 503 (not 403), got {response.status_code}"
     )
 
 
-def test_admin_can_load_model(monkeypatch):
-    """Admin has open_vocab:write — load must return 200 or 503, not 403."""
+def test_supervisor_can_load_model(monkeypatch):
+    """Supervisor has open_vocab:model — load must return 200 or 503, not 403."""
     _install_auth(monkeypatch)
     client = TestClient(app, raise_server_exceptions=False)
-    response = client.post("/api/open-vocab/model/load", headers={"Authorization": "Bearer admin"})
+    response = client.post("/api/open-vocab/model/load", headers={"Authorization": "Bearer supervisor"})
     assert response.status_code in {200, 503}, (
         f"Expected 200 or 503 (not 403), got {response.status_code}"
     )
@@ -79,7 +87,7 @@ def test_viewer_cannot_unload_model(monkeypatch):
 
 
 def test_admin_can_unload_model(monkeypatch):
-    """Admin has open_vocab:write — unload must return 200 or 503, not 403."""
+    """Admin has open_vocab:model — unload must return 200 or 503, not 403."""
     _install_auth(monkeypatch)
     client = TestClient(app, raise_server_exceptions=False)
     response = client.post("/api/open-vocab/model/unload", headers={"Authorization": "Bearer admin"})
@@ -91,7 +99,7 @@ def test_admin_can_unload_model(monkeypatch):
 # ── Reload endpoint RBAC ──────────────────────────────────────────────────────
 
 def test_admin_can_reload_model(monkeypatch):
-    """Admin has open_vocab:write — reload must return 200 or 503, not 403."""
+    """Admin has open_vocab:model — reload must return 200 or 503, not 403."""
     _install_auth(monkeypatch)
     client = TestClient(app, raise_server_exceptions=False)
     response = client.post("/api/open-vocab/model/reload", headers={"Authorization": "Bearer admin"})

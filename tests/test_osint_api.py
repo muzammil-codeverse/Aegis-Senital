@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.api import case_routes as case_routes_module
+from app.api import object_authorization as authz_module
 from app.api import osint_routes as osint_routes_module
 from app.models.security_models import UserAccount
 from app.repositories.case_repository import JsonlCaseRepository
@@ -76,7 +77,7 @@ def _llm_config():
     }
 
 
-def _user(role: str) -> UserAccount:
+def _user(role: str, metadata: dict | None = None) -> UserAccount:
     return UserAccount(
         user_id=f"user-{role}",
         username=role,
@@ -86,6 +87,7 @@ def _user(role: str) -> UserAccount:
         password_hash="hash",
         created_at=1.0,
         updated_at=1.0,
+        metadata=metadata or {},
     )
 
 
@@ -98,10 +100,11 @@ def _install_auth(monkeypatch):
     }
     service = auth_module.get_auth_service()
     monkeypatch.setattr(service, "get_current_user_from_token", lambda token: users.get(token))
+    return users
 
 
 def _install_services(tmp_path, monkeypatch):
-    _install_auth(monkeypatch)
+    users = _install_auth(monkeypatch)
     monkeypatch.setattr(case_service_module, "_CASE_SERVICE_SUBSCRIBED", True)
     case_service = CaseService(repository=JsonlCaseRepository(config=_case_config(tmp_path)), config=_case_config(tmp_path))
     llm_service = LlmService(config=_llm_config(), case_service=case_service)
@@ -122,15 +125,18 @@ def _install_services(tmp_path, monkeypatch):
     monkeypatch.setattr(case_routes_module, "get_case_service", lambda: case_service)
     monkeypatch.setattr(osint_routes_module, "get_osint_service", lambda: osint_service)
     monkeypatch.setattr(osint_routes_module, "get_audit_log_service", lambda: audit_service)
+    monkeypatch.setattr(authz_module, "get_osint_service", lambda: osint_service)
     monkeypatch.setattr("app.services.case_service.get_case_service", lambda: case_service)
     monkeypatch.setattr("app.services.osint_summary_service.get_llm_service", lambda: llm_service)
     monkeypatch.setattr("app.services.osint_service.get_case_service", lambda: case_service, raising=False)
-    return case_service, osint_service, audit_service
+    return case_service, osint_service, audit_service, users
 
 
 def test_osint_api_create_list_update_delete_and_summarize(tmp_path, monkeypatch):
-    case_service, osint_service, audit_service = _install_services(tmp_path, monkeypatch)
+    case_service, osint_service, audit_service, users = _install_services(tmp_path, monkeypatch)
     case = case_service.create_case({"title": "Possible analyst review case"}, actor="operator")
+    users["operator"].metadata = {"case_scopes": [case.case_id]}
+    users["viewer"].metadata = {"case_scopes": [case.case_id]}
     client = TestClient(app, raise_server_exceptions=False)
 
     created = client.post(
@@ -182,8 +188,10 @@ def test_osint_api_create_list_update_delete_and_summarize(tmp_path, monkeypatch
 
 
 def test_osint_api_upload_and_rbac(tmp_path, monkeypatch):
-    case_service, _, _ = _install_services(tmp_path, monkeypatch)
+    case_service, _, _, users = _install_services(tmp_path, monkeypatch)
     case = case_service.create_case({"title": "Possible upload review case"}, actor="operator")
+    users["operator"].metadata = {"case_scopes": [case.case_id]}
+    users["viewer"].metadata = {"case_scopes": [case.case_id]}
     client = TestClient(app, raise_server_exceptions=False)
 
     denied = client.post(

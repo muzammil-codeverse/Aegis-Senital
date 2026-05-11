@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SECURITY_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "security.yaml"
+UPLOAD_SECURITY_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "upload_security.yaml"
 PRODUCTION_ENVS = {"prod", "production"}
 _DEV_JWT_SECRET: str | None = None
 
@@ -26,6 +27,14 @@ except Exception:
 
 def _environment_name() -> str:
     return (os.getenv("APP_ENV") or os.getenv("AEGIS_ENV") or "dev").strip().lower()
+
+
+def environment_name() -> str:
+    return _environment_name()
+
+
+def is_production_environment() -> bool:
+    return _environment_name() in PRODUCTION_ENVS
 
 
 @lru_cache(maxsize=1)
@@ -65,7 +74,23 @@ def _resolve_jwt_secret(config: dict[str, Any]) -> str:
 
 
 def get_auth_config() -> dict[str, Any]:
-    return dict(load_security_config().get("auth") or {})
+    auth_cfg = dict(load_security_config().get("auth") or {})
+    if is_production_environment():
+        if bool(auth_cfg.get("set_auth_cookie", True)):
+            auth_cfg["cookie_secure"] = True
+        auth_cfg["allow_query_token_for_websocket"] = False
+        auth_cfg["expose_bearer_response"] = False
+    else:
+        auth_cfg["allow_query_token_for_websocket"] = bool(auth_cfg.get("allow_query_token_for_websocket", False))
+        auth_cfg["expose_bearer_response"] = bool(auth_cfg.get("expose_bearer_response", True))
+    auth_cfg["allow_subprotocol_token_for_websocket"] = bool(
+        auth_cfg.get("allow_subprotocol_token_for_websocket", True)
+    )
+    auth_cfg["cookie_path"] = str(auth_cfg.get("cookie_path") or "/")
+    auth_cfg["csrf_cookie_name"] = str(auth_cfg.get("csrf_cookie_name") or "aegis_csrf_token")
+    auth_cfg["csrf_header_name"] = str(auth_cfg.get("csrf_header_name") or "X-CSRF-Token")
+    auth_cfg["csrf_protect_cookie_auth"] = bool(auth_cfg.get("csrf_protect_cookie_auth", True))
+    return auth_cfg
 
 
 def get_password_config() -> dict[str, Any]:
@@ -94,6 +119,16 @@ def get_rbac_config() -> dict[str, list[str]]:
 
 def get_mfa_config() -> dict[str, Any]:
     return dict(load_security_config().get("mfa") or {})
+
+
+def get_upload_security_config() -> dict[str, Any]:
+    if not UPLOAD_SECURITY_CONFIG_PATH.exists():
+        return {}
+    with UPLOAD_SECURITY_CONFIG_PATH.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid upload security config: {UPLOAD_SECURITY_CONFIG_PATH}")
+    return data
 
 
 def auth_required() -> bool:

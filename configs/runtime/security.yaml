@@ -10,7 +10,13 @@ auth:
   cookie_secure: false
   cookie_samesite: lax
   cookie_httponly: true
-  allow_query_token_for_websocket: true
+  cookie_path: /
+  csrf_cookie_name: aegis_csrf_token
+  csrf_header_name: X-CSRF-Token
+  csrf_protect_cookie_auth: true
+  allow_query_token_for_websocket: false
+  allow_subprotocol_token_for_websocket: true
+  expose_bearer_response: true
   bootstrap_admin_username: admin
   bootstrap_admin_password_env: AEGIS_BOOTSTRAP_ADMIN_PASSWORD
 password:
@@ -52,6 +58,7 @@ rbac:
     - "camera:control"
     - "analytics:read"
     - "analytics:export"
+    - "event:read"
     - "stream:read"
     - "stream:write"
     - "stream:replay"
@@ -66,9 +73,12 @@ rbac:
     - "map:read"
     - "metrics:read"
     - "model:read"
+    - "model:write"
     - "audit:read"
+    - "system:read"
     - "open_vocab:read"
     - "open_vocab:write"
+    - "open_vocab:model"
     - "case:read"
     - "case:write"
     - "case:assign"
@@ -84,6 +94,7 @@ rbac:
     - "camera:read"
     - "analytics:read"
     - "analytics:export"
+    - "event:read"
     - "stream:read"
     - "stream:replay"
     - "alert:read"
@@ -95,6 +106,7 @@ rbac:
     - "forensics:read"
     - "map:read"
     - "model:read"
+    - "system:read"
     - "open_vocab:read"
     - "open_vocab:write"
     - "case:read"
@@ -111,6 +123,7 @@ rbac:
     - "camera:read"
     - "camera:control"
     - "analytics:read"
+    - "event:read"
     - "stream:read"
     - "stream:replay"
     - "alert:read"
@@ -118,6 +131,7 @@ rbac:
     - "incident:read"
     - "map:read"
     - "metrics:read"
+    - "system:read"
     - "open_vocab:read"
     - "case:read"
     - "case:write"
@@ -131,6 +145,7 @@ rbac:
   viewer:
     - "camera:read"
     - "analytics:read"
+    - "event:read"
     - "stream:read"
     - "alert:read"
     - "incident:read"

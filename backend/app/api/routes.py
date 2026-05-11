@@ -7,8 +7,16 @@ from pydantic import BaseModel
 from app.api.object_authorization import (
     can_access_alert,
     can_access_camera,
+    can_access_event_payload,
     can_access_identity,
     can_access_incident,
+    can_access_watchlist,
+    ensure_alert_access,
+    ensure_camera_access,
+    ensure_event_payload_access,
+    ensure_identity_access,
+    ensure_incident_access,
+    ensure_watchlist_access,
 )
 from app.api.analytics_routes import router as analytics_router
 from app.api.case_routes import router as case_router
@@ -17,6 +25,7 @@ from app.api.osint_routes import router as osint_router
 from app.api.streaming_routes import router as streaming_router
 from app.api.security_dependencies import (
     get_current_user_from_request,
+    issue_csrf_token,
     require_auth as require_api_auth,
     require_permission as require_api_permission,
 )
@@ -27,6 +36,7 @@ from app.services.intelligence_response_builder import IntelligenceResponseBuild
 from app.models.security_models import AuditAction, UserAccount
 from app.security.config import auth_required, get_auth_config, get_rbac_config
 from app.security.permissions import permissions_for_role
+from app.security.upload_policy import get_upload_security_policy
 from app.services.audit_log_service import get_audit_log_service
 from app.services.auth_service import AuthError, AuthRateLimitError, get_auth_service
 from app.services.privacy_filter import (
@@ -47,6 +57,15 @@ router.include_router(osint_router)
 router.include_router(streaming_router)
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
+
+
+def _sensitive_headers(**extra: str) -> dict[str, str]:
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    headers.update(extra)
+    return headers
 
 
 def _get_identity_db():
@@ -169,16 +188,21 @@ def _role_permissions(role: str | None) -> list[str]:
 
 
 def _current_user_payload(user: UserAccount | None) -> dict:
+    auth_cfg = get_auth_config()
     if user is None:
         return {
             "user": None,
             "permissions": [],
             "auth_required": auth_required(),
+            "auth_storage_mode": "cookie" if bool(auth_cfg.get("set_auth_cookie", True)) else "bearer",
+            "csrf_header_name": str(auth_cfg.get("csrf_header_name") or "X-CSRF-Token"),
         }
     return {
         "user": user.to_dict(),
         "permissions": _role_permissions(user.role),
         "auth_required": auth_required(),
+        "auth_storage_mode": "cookie" if bool(auth_cfg.get("set_auth_cookie", True)) else "bearer",
+        "csrf_header_name": str(auth_cfg.get("csrf_header_name") or "X-CSRF-Token"),
     }
 
 
@@ -229,6 +253,22 @@ def _require_object_access(
 ) -> None:
     if not auth_required():
         return
+    current_user = _request_user(request)
+    if resource_type == "camera":
+        ensure_camera_access(request, current_user, resource_id)
+        return
+    if resource_type == "identity":
+        ensure_identity_access(request, current_user, resource_id)
+        return
+    if resource_type == "incident":
+        ensure_incident_access(request, current_user, resource_id)
+        return
+    if resource_type == "alert":
+        ensure_alert_access(request, current_user, resource_id)
+        return
+    if resource_type == "watchlist":
+        ensure_watchlist_access(request, current_user, resource_id)
+        return
     if not allowed:
         _deny_object_access(request, resource_type, resource_id)
 
@@ -239,6 +279,7 @@ def login_api(body: LoginRequest, request: Request, response: Response):
         payload = get_auth_service().login(body.username, body.password, request=request)
         auth_cfg = get_auth_config()
         if bool(auth_cfg.get("set_auth_cookie", True)):
+            csrf_token = issue_csrf_token()
             response.set_cookie(
                 str(auth_cfg.get("cookie_name") or "aegis_access_token"),
                 payload["access_token"],
@@ -246,7 +287,23 @@ def login_api(body: LoginRequest, request: Request, response: Response):
                 secure=bool(auth_cfg.get("cookie_secure", False)),
                 samesite=str(auth_cfg.get("cookie_samesite") or "lax"),
                 max_age=payload.get("expires_in_seconds", 0),
+                path=str(auth_cfg.get("cookie_path") or "/"),
             )
+            response.set_cookie(
+                str(auth_cfg.get("csrf_cookie_name") or "aegis_csrf_token"),
+                csrf_token,
+                httponly=False,
+                secure=bool(auth_cfg.get("cookie_secure", False)),
+                samesite=str(auth_cfg.get("cookie_samesite") or "lax"),
+                max_age=payload.get("expires_in_seconds", 0),
+                path=str(auth_cfg.get("cookie_path") or "/"),
+            )
+            payload["csrf_token"] = csrf_token
+        payload["auth_storage_mode"] = "cookie" if bool(auth_cfg.get("set_auth_cookie", True)) else "bearer"
+        payload["csrf_header_name"] = str(auth_cfg.get("csrf_header_name") or "X-CSRF-Token")
+        if not bool(auth_cfg.get("expose_bearer_response", True)):
+            payload.pop("access_token", None)
+            payload["token_type"] = "cookie"
         return payload
     except AuthRateLimitError:
         raise HTTPException(status_code=429, detail="Too many login attempts")
@@ -264,7 +321,9 @@ def logout_api(
 ):
     payload = get_auth_service().logout(current_user, request=request)
     auth_cfg = get_auth_config()
-    response.delete_cookie(str(auth_cfg.get("cookie_name") or "aegis_access_token"))
+    cookie_path = str(auth_cfg.get("cookie_path") or "/")
+    response.delete_cookie(str(auth_cfg.get("cookie_name") or "aegis_access_token"), path=cookie_path)
+    response.delete_cookie(str(auth_cfg.get("csrf_cookie_name") or "aegis_csrf_token"), path=cookie_path)
     return payload
 
 
@@ -554,20 +613,26 @@ def health_check():
 
 @router.post("/process-video")
 async def process_video(
+    request: Request,
     file: UploadFile = File(...),
     scenario: str = Query(default="security"),
 ):
-    if not file.filename.lower().endswith((".mp4", ".avi", ".mov", ".mkv")):
-        raise HTTPException(status_code=400, detail="Unsupported video format")
+    content = await file.read()
+    validation = get_upload_security_policy().validate(
+        filename=file.filename or "upload.mp4",
+        content=content,
+        content_type=file.content_type,
+        allowed_classes={"video"},
+    )
     if scenario not in VALID_SCENARIOS:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid scenario '{scenario}'. Choose from: {VALID_SCENARIOS}",
         )
 
-    logger.info(f"Received video upload: {file.filename} | scenario={scenario}")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
-        tmp.write(await file.read())
+    logger.info(f"Received video upload: {validation.normalized_filename} | scenario={scenario}")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=validation.extension) as tmp:
+        tmp.write(content)
         tmp_path = tmp.name
 
     try:
@@ -714,9 +779,10 @@ def get_config(scenario: str):
 
 
 @router.get("/events")
-def list_events():
+def list_events(request: Request):
     logger.info("Events list requested")
-    events = _get_identity_db().get_events(limit=50)
+    user = _request_user(request)
+    events = [event for event in _get_identity_db().get_events(limit=50) if can_access_event_payload(user, event)]
     return [
         {
             "id": e.get("event_id"),
@@ -731,9 +797,10 @@ def list_events():
 
 
 @router.get("/detections")
-def list_detections():
+def list_detections(request: Request):
     logger.info("Detections list requested")
-    tracks = _get_identity_db().get_tracks(limit=50)
+    user = _request_user(request)
+    tracks = [track for track in _get_identity_db().get_tracks(limit=50) if can_access_event_payload(user, track)]
     return [
         {
             "id": t.get("track_id"),
@@ -799,7 +866,13 @@ def remove_stream(body: StreamRemoveRequest, request: Request):
 @router.get("/api/incidents")
 @router.get("/incidents")
 def list_incidents_api(request: Request):
-    incidents = _get_intelligence_runtime().get_incidents()
+    user = _request_user(request)
+    incidents = [
+        incident
+        for incident in _get_intelligence_runtime().get_incidents()
+        if can_access_incident(user, str(incident.get("incident_id") or incident.get("id") or ""))
+        or can_access_event_payload(user, incident)
+    ]
     return _filter_incident_response(IntelligenceResponseBuilder.incident_feed(incidents), request)
 
 
@@ -817,18 +890,22 @@ def get_incident_api(incident_id: str, request: Request):
 @router.get("/timeline/{track_id}")
 def get_timeline(track_id: str, request: Request):
     events = _get_intelligence_runtime().get_track_timeline(track_id)
+    visible_events = [event for event in events if can_access_event_payload(_request_user(request), event)]
+    if events and not visible_events:
+        _deny_object_access(request, "event", track_id)
     try:
         metrics.increment("forensic_sensitive_reads")
     except Exception:
         pass
     _audit(request, AuditAction.FORENSIC_REPLAY_VIEWED, resource_type="track", resource_id=track_id)
-    return _filter_incident_response(IntelligenceResponseBuilder.timeline(track_id, events), request)
+    return _filter_incident_response(IntelligenceResponseBuilder.timeline(track_id, visible_events), request)
 
 
 @router.get("/api/anomalies/live")
 @router.get("/anomalies/live")
-def get_live_anomalies():
-    anomalies = _get_intelligence_runtime().get_live_anomalies()
+def get_live_anomalies(request: Request):
+    user = _request_user(request)
+    anomalies = [item for item in _get_intelligence_runtime().get_live_anomalies() if can_access_event_payload(user, item)]
     return IntelligenceResponseBuilder.anomalies(anomalies)
 
 
@@ -839,19 +916,40 @@ def list_alerts_api(
     severity: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
 ):
+    user = _request_user(request)
     response = _get_intelligence_runtime().get_alerts(state=state, severity=severity, limit=limit)
+    response["items"] = [
+        item
+        for item in response["items"]
+        if can_access_alert(user, str(item.get("alert_id") or ""))
+        or can_access_event_payload(user, item)
+    ]
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_feed_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/live")
 def live_alerts_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
     response = _get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    user = _request_user(request)
+    response["items"] = [
+        item
+        for item in response["items"]
+        if can_access_alert(user, str(item.get("alert_id") or ""))
+        or can_access_event_payload(user, item)
+    ]
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_feed_payload(response["items"]), request)
 
 
 @router.get("/api/alerts/operator-queue")
 def operator_queue_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
     response = _get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    user = _request_user(request)
+    response["items"] = [
+        item
+        for item in response["items"]
+        if can_access_alert(user, str(item.get("alert_id") or ""))
+        or can_access_event_payload(user, item)
+    ]
     return _filter_alert_response(IntelligenceResponseBuilder.build_operator_queue_payload(response["items"]), request)
 
 
@@ -864,6 +962,7 @@ def get_alert_api(alert_id: str, request: Request):
 
 @router.post("/api/alerts/{alert_id}/acknowledge")
 def acknowledge_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
+    ensure_alert_access(request, _request_user(request), alert_id)
     operator_id = body.operator_id if body else None
     response = _get_intelligence_runtime().acknowledge_alert(alert_id, operator_id=operator_id)
     _audit(request, AuditAction.ALERT_ACKNOWLEDGED, resource_type="alert", resource_id=alert_id)
@@ -872,6 +971,7 @@ def acknowledge_alert_api(alert_id: str, request: Request, body: AlertActionRequ
 
 @router.post("/api/alerts/{alert_id}/resolve")
 def resolve_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
+    ensure_alert_access(request, _request_user(request), alert_id)
     operator_id = body.operator_id if body else None
     response = _get_intelligence_runtime().resolve_alert(alert_id, operator_id=operator_id)
     _audit(request, AuditAction.ALERT_RESOLVED, resource_type="alert", resource_id=alert_id)
@@ -880,6 +980,7 @@ def resolve_alert_api(alert_id: str, request: Request, body: AlertActionRequest 
 
 @router.post("/api/alerts/{alert_id}/escalate")
 def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest | None = None):
+    ensure_alert_access(request, _request_user(request), alert_id)
     reason = body.reason if body else None
     response = _get_intelligence_runtime().escalate_alert(alert_id, reason=reason)
     _audit(
@@ -894,7 +995,14 @@ def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest
 
 @router.get("/api/alerts/{alert_id}/history")
 def alert_history_api(alert_id: str, request: Request):
+    ensure_alert_access(request, _request_user(request), alert_id)
     response = _get_intelligence_runtime().get_alert_history(alert_id)
+    response["items"] = [
+        item
+        for item in response["items"]
+        if can_access_alert(_request_user(request), str(item.get("alert_id") or alert_id))
+        or can_access_event_payload(_request_user(request), item)
+    ]
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_history_payload(response["items"]), request)
 
 
@@ -902,12 +1010,17 @@ def alert_history_api(alert_id: str, request: Request):
 
 @router.get("/api/cameras")
 def list_cameras_api(
+    request: Request,
     status: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
 ):
     from app.services.camera_registry import get_camera_registry
     enabled_filter = enabled
-    cameras = get_camera_registry().list_cameras(status=status, enabled=enabled_filter)
+    cameras = [
+        camera
+        for camera in get_camera_registry().list_cameras(status=status, enabled=enabled_filter)
+        if can_access_camera(_request_user(request), camera.camera_id)
+    ]
     items = [c.to_dict() for c in cameras]
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
@@ -928,7 +1041,11 @@ def create_camera_api(body: CameraCreateRequest, request: Request):
 @router.get("/api/cameras/latest-frames")
 def list_latest_frames_api(request: Request):
     from app.services.frame_snapshot_service import get_frame_snapshot_service
-    items = get_frame_snapshot_service().list_latest_frames()
+    items = [
+        item
+        for item in get_frame_snapshot_service().list_latest_frames()
+        if can_access_camera(_request_user(request), str(item.get("camera_id") or ""))
+    ]
     return _filter_incident_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
 
 
@@ -982,7 +1099,7 @@ def get_camera_latest_frame_image(camera_id: str, request: Request):
         )
 
     media_type = "image/png" if resolved.suffix.lower() == ".png" else "image/jpeg"
-    return FileResponse(str(resolved), media_type=media_type)
+    return FileResponse(str(resolved), media_type=media_type, headers=_sensitive_headers())
 
 
 @router.get("/api/cameras/{camera_id}/latest-frame/annotated-image")
@@ -1022,16 +1139,18 @@ def get_camera_latest_frame_annotated_image(camera_id: str, request: Request):
             content={"status": "error", "detail": "Unsupported frame file type"},
         )
     media_type = "image/png" if resolved.suffix.lower() == ".png" else "image/jpeg"
-    return FileResponse(str(resolved), media_type=media_type)
+    return FileResponse(str(resolved), media_type=media_type, headers=_sensitive_headers())
 
 
 @router.get("/api/cameras/{camera_id}/mjpeg")
-async def camera_mjpeg_stream(camera_id: str):
+async def camera_mjpeg_stream(camera_id: str, request: Request):
     """Lightweight MJPEG stream using latest frame snapshots (annotated preferred)."""
     import asyncio
     from fastapi.responses import StreamingResponse, JSONResponse
     from app.services.frame_snapshot_service import get_frame_snapshot_service
     from app.core.security import safe_frame_path, is_safe_extension
+
+    ensure_camera_access(request, _request_user(request), camera_id)
 
     # Load streaming config
     try:
@@ -1108,7 +1227,7 @@ async def camera_mjpeg_stream(camera_id: str):
     return StreamingResponse(
         generate(),
         media_type="multipart/x-mixed-replace; boundary=aegisframe",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=_sensitive_headers(**{"X-Accel-Buffering": "no"}),
     )
 
 
@@ -1121,6 +1240,7 @@ def get_camera_timeline_api(
     limit: int = Query(default=100, ge=1, le=500),
 ):
     """Return recent timeline entries for a camera, optionally bounded by time range."""
+    ensure_camera_access(request, _request_user(request), camera_id)
     import time as _time
     try:
         from inference.metrics import metrics as core_metrics
@@ -1239,7 +1359,8 @@ async def websocket_frames_endpoint(websocket: WebSocket):
 
 @router.get("/api/cameras/{camera_id}/heatmap")
 @router.get("/cameras/{camera_id}/heatmap")
-def get_camera_heatmap(camera_id: str):
+def get_camera_heatmap(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     heatmap = _get_intelligence_runtime().get_camera_heatmap(camera_id)
     return IntelligenceResponseBuilder.heatmap(heatmap, camera_id)
 
@@ -1257,6 +1378,7 @@ def get_camera_api(camera_id: str, request: Request):
 
 @router.patch("/api/cameras/{camera_id}")
 def update_camera_api(camera_id: str, body: CameraUpdateRequest, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.camera_registry import get_camera_registry
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     camera = get_camera_registry().update_camera(camera_id, updates)
@@ -1268,6 +1390,7 @@ def update_camera_api(camera_id: str, body: CameraUpdateRequest, request: Reques
 
 @router.delete("/api/cameras/{camera_id}")
 def delete_camera_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.camera_registry import get_camera_registry
     removed = get_camera_registry().remove_camera(camera_id)
     if not removed:
@@ -1280,6 +1403,7 @@ def delete_camera_api(camera_id: str, request: Request):
 
 @router.post("/api/cameras/{camera_id}/start")
 def start_camera_stream_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().start_stream(camera_id)
     _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream start requested")
@@ -1288,6 +1412,7 @@ def start_camera_stream_api(camera_id: str, request: Request):
 
 @router.post("/api/cameras/{camera_id}/stop")
 def stop_camera_stream_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().stop_stream(camera_id)
     _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream stop requested")
@@ -1296,6 +1421,7 @@ def stop_camera_stream_api(camera_id: str, request: Request):
 
 @router.post("/api/cameras/{camera_id}/pause")
 def pause_camera_stream_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().pause_stream(camera_id)
     _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream pause requested")
@@ -1304,6 +1430,7 @@ def pause_camera_stream_api(camera_id: str, request: Request):
 
 @router.post("/api/cameras/{camera_id}/resume")
 def resume_camera_stream_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().resume_stream(camera_id)
     _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream resume requested")
@@ -1312,6 +1439,7 @@ def resume_camera_stream_api(camera_id: str, request: Request):
 
 @router.post("/api/cameras/{camera_id}/restart")
 def restart_camera_stream_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.stream_session_manager import get_stream_session_manager
     result = get_stream_session_manager().restart_stream(camera_id)
     _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="camera", resource_id=camera_id, detail="Stream restart requested")
@@ -1321,14 +1449,19 @@ def restart_camera_stream_api(camera_id: str, request: Request):
 # ── Stream session list endpoints ─────────────────────────────────────────────
 
 @router.get("/api/streams")
-def list_stream_sessions_api():
+def list_stream_sessions_api(request: Request):
     from app.services.stream_session_manager import get_stream_session_manager
-    items = get_stream_session_manager().list_stream_states()
+    items = [
+        item
+        for item in get_stream_session_manager().list_stream_states()
+        if can_access_camera(_request_user(request), str(item.get("camera_id") or ""))
+    ]
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/streams/{camera_id}")
-def get_stream_session_api(camera_id: str):
+def get_stream_session_api(camera_id: str, request: Request):
+    ensure_camera_access(request, _request_user(request), camera_id)
     from app.services.stream_session_manager import get_stream_session_manager
     item = get_stream_session_manager().get_stream_state(camera_id)
     return {"item": item, "status": "ok"}
@@ -1348,16 +1481,58 @@ def _geo_metric(name: str) -> None:
         pass
 
 
+def _map_camera_visible(user: UserAccount | None, camera_id: str | None) -> bool:
+    value = str(camera_id or "").strip()
+    return bool(value) and can_access_camera(user, value)
+
+
+def _filter_map_cameras(user: UserAccount | None, items: list[dict]) -> list[dict]:
+    return [item for item in items if _map_camera_visible(user, item.get("camera_id"))]
+
+
+def _filter_map_connections(user: UserAccount | None, items: list[dict]) -> list[dict]:
+    return [
+        item
+        for item in items
+        if _map_camera_visible(user, item.get("from_camera")) and _map_camera_visible(user, item.get("to_camera"))
+    ]
+
+
+def _filter_map_handoffs(user: UserAccount | None, items: list[dict]) -> list[dict]:
+    return [
+        item
+        for item in items
+        if can_access_camera(user, str(item.get("source_camera") or ""))
+        or can_access_camera(user, str(item.get("target_camera") or ""))
+        or can_access_identity(user, str(item.get("identity_id") or ""))
+    ]
+
+
 @router.get("/api/map/state")
 def get_map_state_api(request: Request):
     _geo_metric("map_state_requests")
+    user = _request_user(request)
     state = _geo().get_map_state()
+    state["cameras"] = _filter_map_cameras(user, list(state.get("cameras") or []))
+    state["connections"] = _filter_map_connections(user, list(state.get("connections") or []))
+    state["incidents"] = [
+        item
+        for item in list(state.get("incidents") or [])
+        if can_access_incident(user, str(item.get("incident_id") or ""))
+        or can_access_camera(user, str(item.get("camera_id") or ""))
+    ]
+    state["alerts"] = [
+        item
+        for item in list(state.get("alerts") or [])
+        if can_access_alert(user, str(item.get("alert_id") or ""))
+        or can_access_camera(user, str(item.get("camera_id") or ""))
+    ]
     _geo_metric("map_incident_markers")
     _geo_metric("map_alert_markers")
     # Attach active handoffs to map state
     try:
         handoffs = _get_intelligence_runtime().handoff_store.list_active(limit=100)
-        state["handoffs"] = handoffs
+        state["handoffs"] = _filter_map_handoffs(user, handoffs)
     except Exception:
         state["handoffs"] = []
     _audit(request, AuditAction.MAP_VIEWED, resource_type="map", resource_id="state")
@@ -1401,35 +1576,56 @@ def list_map_geofences_api():
 
 
 @router.get("/api/map/cameras")
-def list_map_cameras_api():
-    items = _geo().get_camera_nodes()
+def list_map_cameras_api(request: Request):
+    items = _filter_map_cameras(_request_user(request), _geo().get_camera_nodes())
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/map/connections")
-def list_map_connections_api():
-    items = _geo().get_camera_connections()
+def list_map_connections_api(request: Request):
+    items = _filter_map_connections(_request_user(request), _geo().get_camera_connections())
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/map/incidents")
-def list_map_incidents_api():
+def list_map_incidents_api(request: Request):
     _geo_metric("map_incident_markers")
-    items = _geo().get_incident_markers()
+    user = _request_user(request)
+    items = [
+        item
+        for item in _geo().get_incident_markers()
+        if can_access_incident(user, str(item.get("incident_id") or ""))
+        or can_access_camera(user, str(item.get("camera_id") or ""))
+    ]
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/map/alerts")
-def list_map_alerts_api():
+def list_map_alerts_api(request: Request):
     _geo_metric("map_alert_markers")
-    items = _geo().get_alert_markers()
+    user = _request_user(request)
+    items = [
+        item
+        for item in _geo().get_alert_markers()
+        if can_access_alert(user, str(item.get("alert_id") or ""))
+        or can_access_camera(user, str(item.get("camera_id") or ""))
+    ]
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/map/topology")
-def get_map_topology_api():
+def get_map_topology_api(request: Request):
     _geo_metric("map_topology_queries")
     topology = _geo().get_camera_topology()
+    user = _request_user(request)
+    topology["cameras"] = _filter_map_cameras(user, list(topology.get("cameras") or []))
+    topology["connections"] = _filter_map_connections(user, list(topology.get("connections") or []))
+    visible_camera_ids = {str(item.get("camera_id") or "") for item in topology["cameras"]}
+    topology["adjacency"] = {
+        camera_id: [peer for peer in peers if peer in visible_camera_ids]
+        for camera_id, peers in dict(topology.get("adjacency") or {}).items()
+        if camera_id in visible_camera_ids
+    }
     return {"item": topology, "status": "ok"}
 
 
@@ -1440,23 +1636,38 @@ def _handoff_store():
 
 
 @router.get("/api/handoffs/active")
-def list_active_handoffs_api(limit: int = Query(default=100, ge=1, le=500)):
+def list_active_handoffs_api(request: Request, limit: int = Query(default=100, ge=1, le=500)):
     try:
         metrics.increment("active_handoffs")
     except Exception:
         pass
-    items = _handoff_store().list_active(limit=limit)
+    user = _request_user(request)
+    items = [
+        item
+        for item in _handoff_store().list_active(limit=limit)
+        if can_access_camera(user, str(item.get("source_camera") or ""))
+        or can_access_camera(user, str(item.get("target_camera") or ""))
+        or can_access_identity(user, str(item.get("identity_id") or ""))
+    ]
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/handoffs/recent")
-def list_recent_handoffs_api(limit: int = Query(default=100, ge=1, le=500)):
-    items = _handoff_store().list_recent(limit=limit)
+def list_recent_handoffs_api(request: Request, limit: int = Query(default=100, ge=1, le=500)):
+    user = _request_user(request)
+    items = [
+        item
+        for item in _handoff_store().list_recent(limit=limit)
+        if can_access_camera(user, str(item.get("source_camera") or ""))
+        or can_access_camera(user, str(item.get("target_camera") or ""))
+        or can_access_identity(user, str(item.get("identity_id") or ""))
+    ]
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
 
 @router.get("/api/handoffs/identity/{identity_id}")
-def list_handoffs_by_identity_api(identity_id: str, limit: int = Query(default=100, ge=1, le=500)):
+def list_handoffs_by_identity_api(identity_id: str, request: Request, limit: int = Query(default=100, ge=1, le=500)):
+    ensure_identity_access(request, _request_user(request), identity_id)
     items = _handoff_store().list_by_identity(identity_id, limit=limit)
     return {"items": items, "count": len(items), "status": "ok" if items else "empty"}
 
@@ -1469,10 +1680,16 @@ def list_handoffs_by_camera_api(camera_id: str, request: Request, limit: int = Q
 
 
 @router.get("/api/handoffs/{handoff_id}")
-def get_handoff_api(handoff_id: str):
+def get_handoff_api(handoff_id: str, request: Request):
     item = _handoff_store().get_handoff(handoff_id)
     if item is None:
         raise HTTPException(status_code=404, detail=f"Handoff '{handoff_id}' not found")
+    if not (
+        can_access_camera(_request_user(request), str(item.get("source_camera") or ""))
+        or can_access_camera(_request_user(request), str(item.get("target_camera") or ""))
+        or can_access_identity(_request_user(request), str(item.get("identity_id") or ""))
+    ):
+        _deny_object_access(request, "handoff", handoff_id)
     return {"item": item, "status": "ok"}
 
 
@@ -1628,7 +1845,11 @@ def list_global_identity_registry_api(
     limit: int = Query(default=100, ge=1, le=500),
 ):
     try:
-        items = _identity_service().list_global_identities(status=status, limit=limit)
+        items = [
+            item
+            for item in _identity_service().list_global_identities(status=status, limit=limit)
+            if can_access_identity(_request_user(request), str(item.get("identity_id") or ""))
+        ]
         return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
@@ -1641,12 +1862,24 @@ async def enroll_identity_api(
     identity_id: Optional[str] = Form(default=None),
     display_name: Optional[str] = Form(default=None),
     metadata_json: Optional[str] = Form(default=None),
+    current_user: UserAccount = Depends(require_api_permission("identity:write")),
 ):
     try:
         metadata = json.loads(metadata_json) if metadata_json else {}
         images = []
+        accepted_uploads = []
         for file in files:
-            images.append({"filename": file.filename, "data": await file.read()})
+            content = await file.read()
+            validation = get_upload_security_policy().validate(
+                filename=file.filename or "upload.jpg",
+                content=content,
+                content_type=file.content_type,
+                allowed_classes={"image"},
+            )
+            images.append({"filename": validation.normalized_filename, "data": content})
+            accepted_uploads.append(validation)
+        if identity_id:
+            ensure_identity_access(request, current_user, identity_id)
         result = _identity_service().enroll(
             images,
             identity_id=identity_id,
@@ -1662,6 +1895,7 @@ async def enroll_identity_api(
                 "identity_id": result.get("identity_id"),
                 "accepted_images": result.get("accepted_images", 0),
                 "rejected_images": result.get("rejected_images", 0),
+                "sha256": [item.sha256 for item in accepted_uploads],
             },
         )
         return _filter_identity_response(result, request)
@@ -1674,28 +1908,47 @@ def list_identity_enrollment_profiles_api(
     request: Request,
     identity_id: Optional[str] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
+    current_user: UserAccount = Depends(require_api_permission("identity:read")),
 ):
     try:
-        items = _identity_service().list_enrollment_profiles(identity_id=identity_id, limit=limit)
+        if identity_id:
+            ensure_identity_access(request, current_user, identity_id)
+        items = [
+            item
+            for item in _identity_service().list_enrollment_profiles(identity_id=identity_id, limit=limit)
+            if can_access_identity(current_user, str(item.get("identity_id") or ""))
+        ]
         return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
 
 
 @router.get("/api/identity/enrollments/{enrollment_id}")
-def get_identity_enrollment_profile_api(enrollment_id: str, request: Request):
+def get_identity_enrollment_profile_api(
+    enrollment_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("identity:read")),
+):
     try:
         item = _identity_service().get_enrollment_profile(enrollment_id)
         if item is None:
             return {"item": None, "status": "not_found", "detail": f"Enrollment {enrollment_id} not found"}
+        ensure_identity_access(request, current_user, str(item.get("identity_id") or ""))
         return _filter_identity_response({"item": item, "status": "ok"}, request)
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
 
 
 @router.delete("/api/identity/enrollments/{enrollment_id}")
-def delete_identity_enrollment_profile_api(enrollment_id: str, request: Request):
+def delete_identity_enrollment_profile_api(
+    enrollment_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("identity:write")),
+):
     try:
+        profile = _identity_service().get_enrollment_profile(enrollment_id)
+        if profile is not None:
+            ensure_identity_access(request, current_user, str(profile.get("identity_id") or ""))
         ok = _identity_service().delete_enrollment_profile(enrollment_id)
         if not ok:
             return {"status": "not_found", "detail": f"Enrollment {enrollment_id} not found"}
@@ -1720,7 +1973,11 @@ def list_identities_api(
 ):
     try:
         store = _id_store()
-        items = [p.to_dict() for p in store.list_identities(status=status, tag=tag, limit=limit)]
+        items = [
+            p.to_dict()
+            for p in store.list_identities(status=status, tag=tag, limit=limit)
+            if can_access_identity(_request_user(request), p.identity_id)
+        ]
         return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
@@ -1766,6 +2023,7 @@ def get_identity_api(identity_id: str, request: Request):
 
 @router.patch("/api/identities/{identity_id}")
 async def update_identity_api(identity_id: str, payload: dict, request: Request):
+    ensure_identity_access(request, _request_user(request), identity_id)
     try:
         store = _id_store()
         profile = store.update_identity(identity_id, payload)
@@ -1783,6 +2041,7 @@ async def update_identity_api(identity_id: str, payload: dict, request: Request)
 
 @router.delete("/api/identities/{identity_id}")
 def archive_identity_api(identity_id: str, request: Request):
+    ensure_identity_access(request, _request_user(request), identity_id)
     try:
         store = _id_store()
         ok = store.archive_identity(identity_id)
@@ -1802,9 +2061,16 @@ async def enroll_face_api(
     display_name: Optional[str] = Query(default=None),
 ):
     try:
+        ensure_identity_access(request, _request_user(request), identity_id)
         data = await file.read()
+        validation = get_upload_security_policy().validate(
+            filename=file.filename or "enrollment.jpg",
+            content=data,
+            content_type=file.content_type,
+            allowed_classes={"image"},
+        )
         result = _identity_service().enroll(
-            [{"filename": file.filename, "data": data}],
+            [{"filename": validation.normalized_filename, "data": data}],
             identity_id=identity_id,
             display_name=display_name,
         )
@@ -1813,7 +2079,7 @@ async def enroll_face_api(
             AuditAction.FACE_ENROLLED,
             resource_type="identity",
             resource_id=identity_id,
-            metadata={"enrollment_id": result.get("enrollment_id")},
+            metadata={"enrollment_id": result.get("enrollment_id"), "sha256": validation.sha256},
         )
         return _filter_identity_response(result, request)
     except HTTPException:
@@ -1825,6 +2091,7 @@ async def enroll_face_api(
 @router.get("/api/identities/{identity_id}/enrollments")
 def list_identity_enrollments_api(identity_id: str, request: Request):
     try:
+        ensure_identity_access(request, _request_user(request), identity_id)
         items = _identity_service().list_face_enrollments(identity_id)
         return _filter_identity_response({"items": items, "count": len(items), "status": "ok" if items else "empty"}, request)
     except Exception as exc:
@@ -1838,6 +2105,7 @@ def list_identity_matches_api(
     limit: int = Query(default=100, ge=1, le=500),
 ):
     try:
+        ensure_identity_access(request, _request_user(request), identity_id)
         store = _id_store()
         matches = store.list_matches(identity_id=identity_id, limit=limit)
         items = [m.to_dict() for m in matches]
@@ -1859,7 +2127,12 @@ def list_watchlist_api(
 ):
     try:
         store = _wl_store()
-        entries = store.list_watchlist(active=active, severity=severity, limit=limit)
+        entries = [
+            entry
+            for entry in store.list_watchlist(active=active, severity=severity, limit=limit)
+            if can_access_watchlist(_request_user(request), entry.watchlist_id)
+            or can_access_identity(_request_user(request), entry.identity_id)
+        ]
         items = [e.to_dict() for e in entries]
         try:
             metrics.increment("watchlist_sensitive_reads")
@@ -1874,6 +2147,7 @@ def list_watchlist_api(
 async def add_watchlist_entry_api(payload: dict, request: Request):
     try:
         import time as _time
+        ensure_identity_access(request, _request_user(request), str(payload.get("identity_id") or ""))
         store = _wl_store()
         expires_at = None
         if payload.get("expires_days"):
@@ -1902,6 +2176,7 @@ async def add_watchlist_entry_api(payload: dict, request: Request):
 @router.delete("/api/watchlist/{watchlist_id}")
 def remove_watchlist_entry_api(watchlist_id: str, request: Request):
     try:
+        ensure_watchlist_access(request, _request_user(request), watchlist_id)
         store = _wl_store()
         ok = store.remove_from_watchlist(watchlist_id)
         if not ok:
@@ -1918,6 +2193,7 @@ def remove_watchlist_entry_api(watchlist_id: str, request: Request):
 @router.get("/api/watchlist/identity/{identity_id}")
 def get_identity_watchlist_api(identity_id: str, request: Request):
     try:
+        ensure_identity_access(request, _request_user(request), identity_id)
         store = _wl_store()
         entries = store.get_identity_watchlist(identity_id)
         items = [e.to_dict() for e in entries]
@@ -2081,6 +2357,7 @@ def open_vocab_scan_latest_frame_api(
     current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
 ):
     """Trigger an open-vocabulary scan on the latest frame from a camera."""
+    ensure_camera_access(request, current_user, camera_id)
     prompts = (body.prompts if body and body.prompts else None)
     try:
         runtime = _get_intelligence_runtime()
@@ -2103,6 +2380,7 @@ def open_vocab_scan_incident_api(
     current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
 ):
     """Trigger an open-vocabulary scan on incident frame references."""
+    ensure_incident_access(request, current_user, incident_id)
     prompts = (body.prompts if body and body.prompts else None)
     try:
         runtime = _get_intelligence_runtime()
@@ -2125,19 +2403,13 @@ async def open_vocab_scan_image_api(
 ):
     """Scan an uploaded image using open-vocabulary prompts."""
     import json as _json
-
-    # Validate extension
-    allowed_exts = {".jpg", ".jpeg", ".png"}
-    filename = (file.filename or "").lower()
-    ext = os.path.splitext(filename)[1]
-    if ext not in allowed_exts:
-        raise HTTPException(status_code=400, detail=f"Unsupported file extension '{ext}'. Allowed: {sorted(allowed_exts)}")
-
-    # Validate size (max 10 MB)
-    max_bytes = 10 * 1024 * 1024
     content = await file.read()
-    if len(content) > max_bytes:
-        raise HTTPException(status_code=413, detail="File exceeds maximum size of 10 MB")
+    validation = get_upload_security_policy().validate(
+        filename=file.filename or "upload.jpg",
+        content=content,
+        content_type=file.content_type,
+        allowed_classes={"image"},
+    )
 
     # Extract prompts from form (may be JSON array or missing)
     form = await request.form()
@@ -2155,7 +2427,7 @@ async def open_vocab_scan_image_api(
     upload_dir = "storage/open_vocab/uploads"
     os.makedirs(upload_dir, exist_ok=True)
     import uuid as _uuid
-    safe_name = f"{_uuid.uuid4().hex}{ext}"
+    safe_name = f"{_uuid.uuid4().hex}{validation.extension}"
     temp_path = os.path.join(upload_dir, safe_name)
     try:
         with open(temp_path, "wb") as fout:
@@ -2171,7 +2443,7 @@ async def open_vocab_scan_image_api(
             source="upload",
         )
         _audit(request, AuditAction.OPEN_VOCAB_SCAN, resource_type="open_vocab",
-               detail="Image scan via upload", metadata={"filename": file.filename})
+               detail="Image scan via upload", metadata={"filename": validation.normalized_filename, "sha256": validation.sha256})
         # Do not expose temp path in response
         result.pop("image_path", None)
         result.pop("upload_path", None)
@@ -2194,6 +2466,14 @@ def list_open_vocab_results_api(
     try:
         runtime = _get_intelligence_runtime()
         response = runtime.get_open_vocab_results(limit=limit)
+        response["items"] = [
+            item
+            for item in response.get("items", [])
+            if can_access_event_payload(current_user, item)
+            or can_access_camera(current_user, str(item.get("camera_id") or ""))
+            or can_access_incident(current_user, str(item.get("incident_id") or ""))
+        ]
+        response["count"] = len(response["items"])
         return response
     except Exception as exc:
         return {"items": [], "count": 0, "status": "error", "detail": str(exc)}
@@ -2213,6 +2493,12 @@ def get_open_vocab_result_api(
         result = scanner.get_result_store().get_result(scan_id)
         if result is None:
             return {"item": None, "status": "not_found", "detail": f"Scan '{scan_id}' not found"}
+        if result.get("camera_id"):
+            ensure_camera_access(request, current_user, str(result.get("camera_id")))
+        elif result.get("incident_id"):
+            ensure_incident_access(request, current_user, str(result.get("incident_id")))
+        else:
+            ensure_event_payload_access(request, current_user, resource_id=scan_id, payload=result)
         return {"item": result, "status": "ok"}
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
@@ -2226,6 +2512,7 @@ def get_open_vocab_results_by_camera_api(
     current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
 ):
     """List open-vocabulary scan results for a specific camera."""
+    ensure_camera_access(request, current_user, camera_id)
     try:
         runtime = _get_intelligence_runtime()
         response = runtime.get_open_vocab_results(camera_id=camera_id, limit=limit)
@@ -2242,6 +2529,7 @@ def get_open_vocab_results_by_incident_api(
     current_user: UserAccount = Depends(require_api_permission("open_vocab:read")),
 ):
     """List open-vocabulary scan results for a specific incident."""
+    ensure_incident_access(request, current_user, incident_id)
     try:
         runtime = _get_intelligence_runtime()
         response = runtime.get_open_vocab_results(incident_id=incident_id, limit=limit)
@@ -2270,7 +2558,7 @@ def _ov_load_metrics(event: str) -> None:
 @router.post("/api/open-vocab/model/load")
 def open_vocab_model_load_api(
     request: Request,
-    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:model")),
 ):
     """
     Hot-load the open-vocabulary model adapter.
@@ -2339,7 +2627,7 @@ def open_vocab_model_load_api(
 @router.post("/api/open-vocab/model/unload")
 def open_vocab_model_unload_api(
     request: Request,
-    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:model")),
 ):
     """Unload the open-vocabulary model adapter to free memory."""
     _ov_load_metrics("open_vocab_model_unloads")
@@ -2366,7 +2654,7 @@ def open_vocab_model_unload_api(
 @router.post("/api/open-vocab/model/reload")
 def open_vocab_model_reload_api(
     request: Request,
-    current_user: UserAccount = Depends(require_api_permission("open_vocab:write")),
+    current_user: UserAccount = Depends(require_api_permission("open_vocab:model")),
 ):
     """Unload then re-load the open-vocabulary model adapter (hot-reload)."""
     _ov_load_metrics("open_vocab_model_load_attempts")

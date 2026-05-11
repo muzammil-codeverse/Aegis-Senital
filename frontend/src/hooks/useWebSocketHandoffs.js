@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { buildWebSocketUrl } from '../config'
+import { authUsesCookieMode, buildWebSocketProtocols, buildWebSocketUrl } from '../config'
 import { useAuth } from './useAuth'
 
 const BASE_DELAY_MS = 1000
@@ -20,12 +20,13 @@ export function useWebSocketHandoffs() {
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return
-    if (authRequired && !token) {
+    if (authRequired && !token && !authUsesCookieMode()) {
       setStatus('auth_error')
       return
     }
     const url = buildWebSocketUrl('/ws/handoffs', token)
-    const ws = new WebSocket(url)
+    const protocols = buildWebSocketProtocols(token)
+    const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url)
     wsRef.current = ws
     setStatus('connecting')
 

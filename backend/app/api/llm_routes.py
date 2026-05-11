@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.api.object_authorization import ensure_case_access
 from app.api.security_dependencies import require_permission as require_api_permission
 from app.models.llm_models import (
     LlmEvidenceSummaryRequest,
@@ -78,8 +79,10 @@ def verify_llm_provider_api(
 def summarize_case_api(
     case_id: str,
     body: LlmSummaryRequest,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_llm_service()
     try:
         output = service.summarize_case(case_id, body, actor=current_user.username)
@@ -89,6 +92,7 @@ def summarize_case_api(
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    _audit(request, current_user, "llm_case_summary_generated", {"case_id": case_id})
     return {"item": output.model_dump(mode="json"), "status": "ok"}
 
 
@@ -96,8 +100,10 @@ def summarize_case_api(
 def summarize_timeline_api(
     case_id: str,
     body: LlmTimelineSummaryRequest,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_llm_service()
     try:
         output = service.summarize_timeline(case_id, body.model_dump(mode="json"), actor=current_user.username)
@@ -105,6 +111,7 @@ def summarize_timeline_api(
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    _audit(request, current_user, "llm_timeline_summary_generated", {"case_id": case_id})
     return {"item": output.model_dump(mode="json"), "status": "ok"}
 
 
@@ -112,8 +119,10 @@ def summarize_timeline_api(
 def summarize_evidence_api(
     case_id: str,
     body: LlmEvidenceSummaryRequest,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_llm_service()
     try:
         output = service.summarize_evidence(case_id, body.model_dump(mode="json"), actor=current_user.username)
@@ -121,6 +130,7 @@ def summarize_evidence_api(
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    _audit(request, current_user, "llm_evidence_summary_generated", {"case_id": case_id, "evidence_ids": body.evidence_ids})
     return {"item": output.model_dump(mode="json"), "status": "ok"}
 
 
@@ -128,8 +138,10 @@ def summarize_evidence_api(
 def draft_report_api(
     case_id: str,
     body: LlmReportRequest,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:report")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_llm_service()
     try:
         output = service.draft_report(case_id, body.model_dump(mode="json"), actor=current_user.username)
@@ -139,6 +151,7 @@ def draft_report_api(
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    _audit(request, current_user, "llm_report_generated", {"case_id": case_id, "report_type": body.report_kind})
     return {"item": output.model_dump(mode="json"), "status": "ok"}
 
 
@@ -146,8 +159,10 @@ def draft_report_api(
 def case_query_api(
     case_id: str,
     body: LlmQueryRequest,
+    request: Request,
     current_user: UserAccount = Depends(require_api_permission("llm:write")),
 ):
+    ensure_case_access(request, current_user, case_id)
     service = _get_llm_service()
     try:
         output = service.answer_case_query(
@@ -160,4 +175,5 @@ def case_query_api(
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    _audit(request, current_user, "llm_case_query_generated", {"case_id": case_id})
     return {"item": output.model_dump(mode="json"), "status": "ok"}

@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.object_authorization import can_access_camera, can_access_identity
 from app.models.security_models import AuditAction
 from app.services.audit_log_service import get_audit_log_service
 
@@ -97,6 +98,18 @@ class WebSocketHandoffService:
         with self._lock:
             clients = list(self._clients.values())
         for client in clients:
+            if client.user is not None:
+                source_camera = str(handoff.get("source_camera") or "")
+                target_camera = str(handoff.get("target_camera") or "")
+                identity_id = str(handoff.get("identity_id") or "")
+                if not any(
+                    (
+                        source_camera and can_access_camera(client.user, source_camera),
+                        target_camera and can_access_camera(client.user, target_camera),
+                        identity_id and can_access_identity(client.user, identity_id),
+                    )
+                ):
+                    continue
             client.enqueue(message)
 
         try:

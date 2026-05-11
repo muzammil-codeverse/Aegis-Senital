@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
+from app.api.object_authorization import ensure_case_access, ensure_replay_access, ensure_stream_access
 from app.api.security_dependencies import (
     get_current_user_from_request,
     require_permission as require_api_permission,
@@ -19,6 +20,15 @@ from app.services.stream_session_manager import get_stream_session_manager
 from app.services.webrtc_service import get_webrtc_service
 
 router = APIRouter()
+
+
+def _sensitive_headers(**extra: str) -> dict[str, str]:
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    headers.update(extra)
+    return headers
 
 
 def _audit(
@@ -62,6 +72,7 @@ def get_stream_health_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     health = get_stream_session_manager().get_stream_health(camera_id)
     _audit(request, AuditAction.CAMERA_VIEWED, resource_type="stream", resource_id=camera_id, detail="Stream health viewed")
     return {"item": health, "status": "ok"}
@@ -83,6 +94,7 @@ def get_stream_stats_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     stats = get_stream_session_manager().get_stream_stats(camera_id)
     _audit(request, AuditAction.CAMERA_VIEWED, resource_type="stream", resource_id=camera_id, detail="Stream stats viewed")
     return {"item": stats, "status": "ok"}
@@ -94,6 +106,7 @@ def start_stream_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:write")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     result = get_stream_session_manager().start_stream(camera_id)
     processor = get_stream_session_manager().get_stream_processor(camera_id)
     if processor is not None:
@@ -108,6 +121,7 @@ async def stop_stream_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:write")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     await get_webrtc_service().stop(camera_id)
     get_hls_service().stop_preview(camera_id)
     result = get_stream_session_manager().stop_stream(camera_id)
@@ -121,6 +135,7 @@ async def restart_stream_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:write")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     await get_webrtc_service().stop(camera_id)
     get_hls_service().stop_preview(camera_id)
     result = get_stream_session_manager().restart_stream(camera_id)
@@ -138,6 +153,7 @@ async def stream_webrtc_offer_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     answer = await get_webrtc_service().handle_offer(camera_id, body)
     _audit(request, AuditAction.CAMERA_VIEWED, resource_type="stream", resource_id=camera_id, detail="WebRTC preview offer handled")
     return {"item": answer.model_dump(mode="json"), "status": answer.status}
@@ -149,6 +165,7 @@ async def stream_webrtc_stop_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:write")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     result = await get_webrtc_service().stop(camera_id)
     _audit(request, AuditAction.CAMERA_CONTROLLED, resource_type="stream", resource_id=camera_id, detail="WebRTC preview stopped")
     return {"item": result, "status": "ok"}
@@ -160,6 +177,7 @@ def stream_webrtc_status_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     status = get_webrtc_service().get_status(camera_id)
     _audit(request, AuditAction.CAMERA_VIEWED, resource_type="stream", resource_id=camera_id, detail="WebRTC preview status viewed")
     return {"item": status, "status": "ok"}
@@ -171,6 +189,7 @@ def stream_hls_playlist_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     processor = get_stream_session_manager().get_stream_processor(camera_id)
     get_hls_service().ensure_preview(camera_id, getattr(processor, "source", None) if processor is not None else None)
     playlist_path = get_hls_service().resolve_playlist_path(camera_id)
@@ -178,7 +197,11 @@ def stream_hls_playlist_api(
         info = get_hls_service().get_playlist_info(camera_id)
         return JSONResponse(status_code=503, content={"item": info.model_dump(mode="json"), "status": "unavailable"})
     _audit(request, AuditAction.CAMERA_VIEWED, resource_type="stream", resource_id=camera_id, detail="HLS playlist viewed")
-    return FileResponse(str(playlist_path), media_type="application/vnd.apple.mpegurl")
+    return FileResponse(
+        str(playlist_path),
+        media_type="application/vnd.apple.mpegurl",
+        headers=_sensitive_headers(),
+    )
 
 
 @router.get("/api/streams/{camera_id}/hls/{segment_name}")
@@ -188,6 +211,7 @@ def stream_hls_segment_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     try:
         path = get_hls_service().resolve_segment_path(camera_id, segment_name)
     except ValueError as exc:
@@ -195,7 +219,7 @@ def stream_hls_segment_api(
     if not path.exists():
         raise HTTPException(status_code=404, detail="HLS segment not found")
     _audit(request, AuditAction.CAMERA_VIEWED, resource_type="stream", resource_id=camera_id, detail="HLS segment viewed")
-    return FileResponse(str(path), media_type="video/mp2t")
+    return FileResponse(str(path), media_type="video/mp2t", headers=_sensitive_headers())
 
 
 @router.post("/api/streams/{camera_id}/replay/export")
@@ -205,6 +229,9 @@ def stream_replay_export_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:replay")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
+    if body.case_id:
+        ensure_case_access(request, current_user, body.case_id)
     clip = get_replay_clip_service().export_clip(camera_id, body, actor=current_user.username)
     _audit(
         request,
@@ -224,6 +251,7 @@ def stream_replay_get_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:replay")),
 ):
+    ensure_replay_access(request, current_user, camera_id, clip_id)
     try:
         path = get_replay_clip_service().resolve_clip_path(camera_id, clip_id)
     except ValueError as exc:
@@ -231,7 +259,12 @@ def stream_replay_get_api(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Replay clip not found")
     _audit(request, AuditAction.FORENSIC_REPLAY_VIEWED, resource_type="stream_replay", resource_id=f"{camera_id}:{clip_id}")
-    return FileResponse(str(path), media_type="video/mp4", filename=path.name)
+    return FileResponse(
+        str(path),
+        media_type="video/mp4",
+        filename=path.name,
+        headers=_sensitive_headers(),
+    )
 
 
 @router.get("/api/streams/{camera_id}/mjpeg")
@@ -240,6 +273,7 @@ async def stream_mjpeg_api(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("stream:read")),
 ):
+    ensure_stream_access(request, current_user, camera_id)
     processor = get_stream_session_manager().get_stream_processor(camera_id)
     if processor is None:
         return JSONResponse(status_code=404, content={"status": "not_found", "detail": "stream is not running"})
@@ -264,9 +298,10 @@ async def stream_mjpeg_api(
     return StreamingResponse(
         _generate(),
         media_type="multipart/x-mixed-replace; boundary=aegisstream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "X-Stream-Opened-At": datetime.now(timezone.utc).isoformat(),
-        },
+        headers=_sensitive_headers(
+            **{
+                "X-Accel-Buffering": "no",
+                "X-Stream-Opened-At": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
     )
