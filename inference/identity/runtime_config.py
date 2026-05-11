@@ -50,6 +50,11 @@ _DEFAULT_CONFIG: dict[str, Any] = {
         "encrypt_embeddings": False,
         "max_identity_history_days": 30,
     },
+    "raw_asset_access": {
+        "enabled": False,
+        "admin_only": True,
+        "audit_all_access": True,
+    },
 }
 
 

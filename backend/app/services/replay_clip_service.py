@@ -51,7 +51,7 @@ class ReplayClipService:
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._default_before = int(self._replay_cfg.get("evidence_clip_seconds_before", 10))
         self._default_after = int(self._replay_cfg.get("evidence_clip_seconds_after", 20))
-        self._hash_enabled = bool(self._replay_cfg.get("include_sha256", False))
+        self._hash_enabled = True
 
     @property
     def enabled(self) -> bool:
@@ -120,10 +120,19 @@ class ReplayClipService:
                 "clip_end_at": clip_end_at.isoformat(),
             }
         )
+        digest = compute_sha256(str(clip_path)) if (self._hash_enabled or request.include_hash) else None
+        export_meta.update(
+            {
+                "content_type": "video/mp4",
+                "size_bytes": clip_path.stat().st_size if clip_path.exists() else None,
+                "hash_sha256": digest,
+                "integrity_status": "verified" if digest else "pending",
+                "last_verified_at": _now_iso() if digest else None,
+            }
+        )
         metadata_path.write_text(json.dumps(export_meta, indent=2), encoding="utf-8")
         self._increment_metric("stream_replay_clips_created_total")
 
-        digest = compute_sha256(str(clip_path)) if (self._hash_enabled or request.include_hash) else None
         attached_case_id = None
         if request.case_id and self._should_attach_to_case(request):
             attached_case_id = self._attach_to_case(
@@ -310,11 +319,15 @@ class ReplayClipService:
                 "description": "Operator-requested replay clip export.",
                 "camera_id": camera_id,
                 "storage_uri": str(clip_path),
+                "original_filename": clip_path.name,
+                "safe_filename": clip_path.name,
+                "content_type": "video/mp4",
+                "size_bytes": clip_path.stat().st_size if clip_path.exists() else None,
                 "timestamp": clip_start_at.isoformat(),
                 "metadata": {
                     "clip_id": clip_id,
                     "clip_end_at": clip_end_at.isoformat(),
-                    "hash_sha256": digest,
+                    "export_type": "replay_clip",
                 },
             },
             actor=actor,

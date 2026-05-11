@@ -16,15 +16,28 @@ CaseEvidenceType = Literal[
     "event",
     "frame",
     "clip",
+    "upload",
+    "document",
+    "image",
     "detection",
     "anomaly",
     "identity",
+    "osint",
     "segmentation",
     "note",
     "external_link",
     "attachment",
     "system_report",
 ]
+EvidenceIntegrityStatus = Literal[
+    "verified",
+    "missing_file",
+    "hash_mismatch",
+    "not_applicable",
+    "failed",
+    "pending",
+]
+EvidenceChainStatus = Literal["active", "archived", "legal_hold", "deleted"]
 
 CASE_STATUSES = ("open", "investigating", "resolved", "dismissed", "archived")
 CASE_PRIORITIES = ("low", "medium", "high", "critical")
@@ -34,15 +47,28 @@ CASE_EVIDENCE_TYPES = (
     "event",
     "frame",
     "clip",
+    "upload",
+    "document",
+    "image",
     "detection",
     "anomaly",
     "identity",
+    "osint",
     "segmentation",
     "note",
     "external_link",
     "attachment",
     "system_report",
 )
+EVIDENCE_INTEGRITY_STATUSES = (
+    "verified",
+    "missing_file",
+    "hash_mismatch",
+    "not_applicable",
+    "failed",
+    "pending",
+)
+EVIDENCE_CHAIN_STATUSES = ("active", "archived", "legal_hold", "deleted")
 
 
 def _now_iso() -> str:
@@ -84,6 +110,7 @@ class CaseBaseModel(BaseModel):
         "format",
         "report_type",
         "integrity_status",
+        "chain_status",
         "type",
         mode="before",
         check_fields=False,
@@ -183,7 +210,7 @@ class CaseUpdateRequest(CaseBaseModel):
 
 
 class CaseEvidence(CaseBaseModel):
-    evidence_id: str = Field(default_factory=lambda: _gen_id("evi"))
+    evidence_id: str = Field(default_factory=lambda: _gen_id("evd"))
     case_id: str
     evidence_type: CaseEvidenceType
     title: str = ""
@@ -193,12 +220,18 @@ class CaseEvidence(CaseBaseModel):
     track_ids: list[str] = Field(default_factory=list)
     storage_uri: str | None = None
     snapshot_uri: str | None = None
+    original_filename: str | None = None
+    safe_filename: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
     created_by: str = "system"
     created_at: str = Field(default_factory=_now_iso)
     timestamp: str = Field(default_factory=_now_iso)
     hash_sha256: str | None = None
     hash_verified: bool | None = None
-    integrity_status: str = "not_applicable"
+    integrity_status: EvidenceIntegrityStatus = "not_applicable"
+    chain_status: EvidenceChainStatus = "active"
+    last_verified_at: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -211,7 +244,49 @@ class CaseEvidenceCreateRequest(CaseBaseModel):
     track_ids: list[str] = Field(default_factory=list)
     storage_uri: str | None = None
     snapshot_uri: str | None = None
+    original_filename: str | None = None
+    safe_filename: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    hash_sha256: str | None = None
+    hash_verified: bool | None = None
+    integrity_status: EvidenceIntegrityStatus | None = None
+    chain_status: EvidenceChainStatus = "active"
+    last_verified_at: str | None = None
     timestamp: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceVerificationResult(CaseBaseModel):
+    case_id: str
+    evidence_id: str
+    storage_uri: str | None = None
+    expected_hash_sha256: str | None = None
+    computed_hash_sha256: str | None = None
+    hash_verified: bool | None = None
+    integrity_status: EvidenceIntegrityStatus = "pending"
+    size_bytes: int | None = None
+    content_type: str | None = None
+    verified_at: str = Field(default_factory=_now_iso)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceManifestItem(CaseBaseModel):
+    evidence_id: str
+    type: str
+    filename: str | None = None
+    hash_sha256: str | None = None
+    size_bytes: int | None = None
+    integrity_status: EvidenceIntegrityStatus = "pending"
+    created_at: str | None = None
+
+
+class EvidenceManifest(CaseBaseModel):
+    case_id: str
+    generated_at: str = Field(default_factory=_now_iso)
+    generated_by: str = "system"
+    evidence_items: list[EvidenceManifestItem] = Field(default_factory=list)
+    audit_summary: dict[str, int] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -274,6 +349,7 @@ class CaseReport(CaseBaseModel):
     audit_summary: list[dict[str, Any]] = Field(default_factory=list)
     enrichment_sources: list[dict[str, Any]] = Field(default_factory=list)
     enrichment_summaries: list[dict[str, Any]] = Field(default_factory=list)
+    chain_of_custody_manifest: dict[str, Any] | None = None
     model_caveats: list[str] = Field(default_factory=list)
     operator_review_caveat: str
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -288,4 +364,10 @@ class CaseExport(CaseBaseModel):
     generated_at: str = Field(default_factory=_now_iso)
     generated_by: str = "system"
     artifact_uri: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
+    hash_sha256: str | None = None
+    hash_verified: bool | None = None
+    integrity_status: EvidenceIntegrityStatus = "pending"
+    last_verified_at: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

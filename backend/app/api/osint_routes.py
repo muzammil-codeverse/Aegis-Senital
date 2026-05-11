@@ -15,6 +15,7 @@ from app.models.osint_models import (
 from app.models.security_models import UserAccount
 from app.security.upload_policy import get_upload_security_policy
 from app.services.audit_log_service import get_audit_log_service
+from app.services.osint_file_service import get_osint_file_service
 
 router = APIRouter()
 
@@ -112,6 +113,21 @@ def get_enrichment_source_api(
     ensure_osint_source_access(request, current_user, source_id)
     source = _require_case_source(case_id, source_id)
     return {"item": source.model_dump(mode="json"), "status": "ok"}
+
+
+@router.get("/api/cases/{case_id}/enrichment/sources/{source_id}/download")
+def download_enrichment_source_api(
+    case_id: str,
+    source_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("osint:read")),
+):
+    ensure_case_access(request, current_user, case_id)
+    ensure_osint_source_access(request, current_user, source_id)
+    source = _require_case_source(case_id, source_id)
+    response = get_osint_file_service().build_download_response(case_id=case_id, source=source, user=current_user, request=request)
+    _audit(request, current_user, "osint_source_file_downloaded", case_id, {"source_id": source_id})
+    return response
 
 
 @router.patch("/api/cases/{case_id}/enrichment/sources/{source_id}")

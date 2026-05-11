@@ -42,3 +42,8 @@ identity:
     store_embeddings: true
     encrypt_embeddings: false
     max_identity_history_days: 30
+
+  raw_asset_access:
+    enabled: false
+    admin_only: true
+    audit_all_access: true

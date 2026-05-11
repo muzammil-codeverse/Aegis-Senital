@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from app.api.object_authorization import (
     can_access_case,
     ensure_camera_access,
     ensure_case_access,
+    ensure_evidence_access,
     ensure_event_payload_access,
 )
 from app.api.security_dependencies import require_permission as require_api_permission
@@ -20,6 +22,7 @@ from app.models.case_models import (
 )
 from app.models.security_models import UserAccount
 from app.services.audit_log_service import get_audit_log_service
+from app.services.evidence_file_service import get_evidence_file_service
 
 router = APIRouter()
 
@@ -57,6 +60,50 @@ def _audit_write(request: Request, current_user: UserAccount | None, action: str
             detail=action.replace("_", " "),
             request=request,
             metadata=metadata or {},
+        )
+    except Exception:
+        pass
+
+
+def _parse_metadata(raw_metadata: str | None) -> dict[str, Any]:
+    text = str(raw_metadata or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="metadata must be valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="metadata must be a JSON object")
+    return payload
+
+
+def _parse_track_ids(raw_track_ids: str | None) -> list[str]:
+    text = str(raw_track_ids or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="track_ids must be valid JSON or comma-separated text") from exc
+        if not isinstance(payload, list):
+            raise HTTPException(status_code=400, detail="track_ids JSON must be an array")
+        return [str(item).strip() for item in payload if str(item).strip()]
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def _audit_access_denied(request: Request, current_user: UserAccount | None, case_id: str, evidence_id: str | None = None) -> None:
+    try:
+        get_audit_log_service().record(
+            "case_evidence_access_denied",
+            user=current_user,
+            resource_type="case_evidence",
+            resource_id=evidence_id or case_id,
+            success=False,
+            detail="case evidence access denied",
+            request=request,
+            metadata={"case_id": case_id, "evidence_id": evidence_id},
         )
     except Exception:
         pass
@@ -284,6 +331,121 @@ def list_case_evidence_api(
         raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
     payload = [item.model_dump(mode="json") for item in items]
     return {"items": payload, "count": len(payload), "status": "ok" if payload else "empty"}
+
+
+@router.post("/api/cases/{case_id}/evidence/upload")
+def upload_case_evidence_file_api(
+    case_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    title: str = Form(default=""),
+    description: str = Form(default=""),
+    evidence_type: str | None = Form(default=None),
+    source_event_id: str | None = Form(default=None),
+    camera_id: str | None = Form(default=None),
+    track_ids: str | None = Form(default=None),
+    metadata: str | None = Form(default=None),
+    current_user: UserAccount = Depends(require_api_permission("case:write")),
+):
+    try:
+        ensure_case_access(request, current_user, case_id)
+    except HTTPException:
+        _audit_access_denied(request, current_user, case_id)
+        raise
+    payload = _parse_metadata(metadata)
+    if title:
+        payload["title"] = title
+    if description:
+        payload["description"] = description
+    if evidence_type:
+        payload["evidence_type"] = evidence_type
+    if source_event_id:
+        payload["source_event_id"] = source_event_id
+    if camera_id:
+        ensure_camera_access(request, current_user, camera_id)
+        payload["camera_id"] = camera_id
+    elif payload.get("camera_id"):
+        ensure_camera_access(request, current_user, str(payload.get("camera_id")))
+    parsed_track_ids = _parse_track_ids(track_ids)
+    if parsed_track_ids:
+        payload["track_ids"] = parsed_track_ids
+    if source_event_id:
+        resolved = _resolve_event_payload(source_event_id)
+        if resolved is None:
+            raise HTTPException(status_code=404, detail=f"Event '{source_event_id}' was not found")
+        ensure_event_payload_access(
+            request,
+            current_user,
+            resource_id=source_event_id,
+            payload=(resolved.get("payload") if isinstance(resolved, dict) else None) or resolved,
+        )
+    elif payload.get("source_event_id"):
+        resolved = _resolve_event_payload(str(payload["source_event_id"]))
+        if resolved is None:
+            raise HTTPException(status_code=404, detail=f"Event '{payload['source_event_id']}' was not found")
+        ensure_event_payload_access(
+            request,
+            current_user,
+            resource_id=str(payload["source_event_id"]),
+            payload=(resolved.get("payload") if isinstance(resolved, dict) else None) or resolved,
+        )
+    try:
+        evidence = get_evidence_file_service().upload_case_evidence_file(case_id, file, payload, current_user, request=request)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
+    _audit_write(request, current_user, "case_evidence_file_uploaded", case_id, {"evidence_id": evidence.evidence_id})
+    return {"item": evidence.model_dump(mode="json"), "status": "ok"}
+
+
+@router.get("/api/cases/{case_id}/evidence/manifest")
+def get_case_evidence_manifest_api(
+    case_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("case:export")),
+):
+    try:
+        ensure_case_access(request, current_user, case_id)
+    except HTTPException:
+        _audit_access_denied(request, current_user, case_id)
+        raise
+    try:
+        manifest = get_evidence_file_service().build_evidence_manifest(case_id, current_user, request=request)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found")
+    return {"item": manifest.model_dump(mode="json"), "status": "ok"}
+
+
+@router.get("/api/cases/{case_id}/evidence/{evidence_id}/download")
+def download_case_evidence_file_api(
+    case_id: str,
+    evidence_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("case:read")),
+):
+    try:
+        ensure_case_access(request, current_user, case_id)
+        ensure_evidence_access(request, current_user, evidence_id)
+    except HTTPException:
+        _audit_access_denied(request, current_user, case_id, evidence_id)
+        raise
+    return get_evidence_file_service().get_case_evidence_file(case_id, evidence_id, current_user, request=request)
+
+
+@router.post("/api/cases/{case_id}/evidence/{evidence_id}/verify")
+def verify_case_evidence_file_api(
+    case_id: str,
+    evidence_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("case:read")),
+):
+    try:
+        ensure_case_access(request, current_user, case_id)
+        ensure_evidence_access(request, current_user, evidence_id)
+    except HTTPException:
+        _audit_access_denied(request, current_user, case_id, evidence_id)
+        raise
+    result = get_evidence_file_service().verify_case_evidence_file(case_id, evidence_id, current_user, request=request)
+    return {"item": result.model_dump(mode="json"), "status": "ok"}
 
 
 @router.post("/api/cases/{case_id}/notes")

@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from inference.identity.runtime_config import load_identity_config as load_identity_runtime_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,8 +47,10 @@ class FaceEnrollmentService:
 
     def __init__(self, image_dir: Optional[str] = None) -> None:
         self._config = _load_identity_config()
+        self._runtime_config = load_identity_runtime_config()
         fe_cfg = self._config.get("face_enrollment", {})
         storage_cfg = self._config.get("storage", {})
+        self._raw_asset_cfg = dict(self._runtime_config.get("raw_asset_access") or {})
 
         self._allowed_ext = set(
             fe_cfg.get("allowed_extensions", list(self.DEFAULT_ALLOWED_EXTENSIONS))
@@ -246,6 +250,45 @@ class FaceEnrollmentService:
             for e in enrollments:
                 results.append(e.to_public_dict())
         return results
+
+    def raw_asset_policy(self) -> dict:
+        return dict(self._raw_asset_cfg)
+
+    def is_raw_asset_http_enabled(self) -> bool:
+        return bool(self._raw_asset_cfg.get("enabled", False))
+
+    def resolve_raw_enrollment_image(self, enrollment_id: str, image_id: str) -> dict:
+        if not self.is_raw_asset_http_enabled():
+            raise PermissionError("Raw identity enrollment asset retrieval is disabled by policy")
+
+        from inference.identity.identity_profile_store import get_identity_store
+
+        store = get_identity_store()
+        profile = store.get_enrollment_profile(enrollment_id)
+        if profile is None:
+            raise KeyError(enrollment_id)
+
+        for _identity_id, enrollments in getattr(store, "_enrollments", {}).items():
+            for enrollment in enrollments:
+                if enrollment.enrollment_id != image_id:
+                    continue
+                if enrollment.batch_enrollment_id != enrollment_id:
+                    continue
+                if not enrollment.image_path:
+                    raise FileNotFoundError(image_id)
+                target = (self._image_dir / enrollment.image_path).resolve()
+                base = self._image_dir.resolve()
+                if base not in target.parents:
+                    raise ValueError("Unsafe raw asset path")
+                if not target.exists() or not target.is_file():
+                    raise FileNotFoundError(image_id)
+                return {
+                    "identity_id": enrollment.identity_id,
+                    "path": target,
+                    "filename": Path(enrollment.image_path).name,
+                    "content_type": "image/jpeg" if target.suffix.lower() in {".jpg", ".jpeg"} else "image/png",
+                }
+        raise KeyError(image_id)
 
 
 # ---------------------------------------------------------------------------

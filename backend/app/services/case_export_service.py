@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from app.models.case_models import CaseExport, CaseReport
 from app.repositories.case_repository import CaseRepository, get_case_repository
+from app.services.chain_of_custody_service import ChainOfCustodyService
 from app.services.evidence_integrity import safe_evidence_metadata
 from app.services.case_timeline_service import CaseTimelineService
 
@@ -26,9 +28,17 @@ class CaseExportService:
         self,
         repository: CaseRepository | None = None,
         timeline_service: CaseTimelineService | None = None,
+        chain_service: ChainOfCustodyService | None = None,
     ) -> None:
         self._repository = repository or get_case_repository()
         self._timeline_service = timeline_service or CaseTimelineService(self._repository)
+        self._chain_service = chain_service or ChainOfCustodyService(repository=self._repository)
+        storage_dir = getattr(self._repository, "_storage_dir", None)
+        if storage_dir is not None:
+            self._export_dir = Path(storage_dir).resolve() / "exports"
+        else:
+            self._export_dir = Path(__file__).resolve().parents[3] / "storage" / "cases" / "exports"
+        self._export_dir.mkdir(parents=True, exist_ok=True)
 
     def build_report(self, case_id: str, generated_by: str = "system") -> CaseReport:
         case = self._repository.get_case(case_id)
@@ -39,6 +49,7 @@ class CaseExportService:
         notes = self._repository.list_notes(case_id)
         audit_summary = self._repository.list_audit_logs(case_id)
         enrichment_sources, enrichment_summaries = self._load_enrichment(case_id)
+        manifest = self._chain_service.build_manifest(case_id, generated_by=generated_by)
         return CaseReport(
             case_id=case_id,
             generated_by=generated_by,
@@ -49,6 +60,7 @@ class CaseExportService:
             audit_summary=[item.model_dump(mode="json") for item in audit_summary],
             enrichment_sources=enrichment_sources,
             enrichment_summaries=enrichment_summaries,
+            chain_of_custody_manifest=manifest.model_dump(mode="json"),
             model_caveats=list(DEFAULT_MODEL_CAVEATS),
             operator_review_caveat=DEFAULT_OPERATOR_REVIEW_CAVEAT,
             metadata={
@@ -56,6 +68,7 @@ class CaseExportService:
                 "status": case.status,
                 "enrichment_source_count": len(enrichment_sources),
                 "enrichment_summary_count": len(enrichment_summaries),
+                "evidence_manifest_items": len(manifest.evidence_items),
             },
         )
 
@@ -74,8 +87,27 @@ class CaseExportService:
             report_type="case_export",
             content=content,
             generated_by=generated_by,
-            metadata={"report_id": report.report_id},
+            content_type="application/json" if lowered_format == "json" else "text/markdown",
+            metadata={
+                "report_id": report.report_id,
+                "evidence_manifest": report.chain_of_custody_manifest or {},
+            },
         )
+        target_dir = (self._export_dir / case_id).resolve()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        suffix = ".json" if lowered_format == "json" else ".md"
+        target_path = (target_dir / f"{export.export_id}{suffix}").resolve()
+        target_path.write_text(content, encoding="utf-8")
+        digest = _compute_sha256_bytes(content.encode("utf-8"))
+        try:
+            export.artifact_uri = str(target_path.relative_to(Path(__file__).resolve().parents[3]).as_posix())
+        except ValueError:
+            export.artifact_uri = str(target_path)
+        export.size_bytes = target_path.stat().st_size
+        export.hash_sha256 = digest
+        export.hash_verified = True
+        export.integrity_status = "verified"
+        export.last_verified_at = export.generated_at
         self._repository.add_report(export)
         return export
 
@@ -158,6 +190,23 @@ class CaseExportService:
         else:
             lines.append("- No case audit entries recorded.")
 
+        manifest = report.chain_of_custody_manifest or {}
+        lines.extend(["", "## Chain Of Custody"])
+        if manifest.get("evidence_items"):
+            for item in manifest["evidence_items"]:
+                lines.append(
+                    f"- {item.get('evidence_id')} | {item.get('type')} | "
+                    f"{item.get('filename') or 'n/a'} | hash={item.get('hash_sha256') or 'missing'} | "
+                    f"integrity={item.get('integrity_status') or 'pending'}"
+                )
+        else:
+            lines.append("- No file-backed evidence items recorded.")
+        audit_counts = manifest.get("audit_summary") or {}
+        lines.append(
+            f"- Audit counts: uploads={audit_counts.get('uploads', 0)}, downloads={audit_counts.get('downloads', 0)}, "
+            f"verifications={audit_counts.get('verifications', 0)}, exports={audit_counts.get('exports', 0)}"
+        )
+
         lines.extend(["", "## Model Caveats"])
         for caveat in report.model_caveats:
             lines.append(f"- {caveat}")
@@ -189,6 +238,12 @@ def _export_source(source: Any) -> dict[str, Any]:
         "title": str(getattr(source, "title", "") or "").strip(),
         "description": str(getattr(source, "description", "") or "").strip(),
         "url": getattr(source, "url", None),
+        "original_filename": getattr(source, "original_filename", None),
+        "safe_filename": getattr(source, "safe_filename", None),
+        "content_type": getattr(source, "content_type", None),
+        "size_bytes": getattr(source, "size_bytes", None),
+        "hash_sha256": getattr(source, "hash_sha256", None),
+        "integrity_status": getattr(source, "integrity_status", "not_applicable"),
         "source_reliability": getattr(source, "source_reliability", "unknown"),
         "analyst_provided": bool(getattr(source, "analyst_provided", True)),
         "created_by": getattr(source, "created_by", None),
@@ -216,3 +271,9 @@ def _export_summary(summary: Any) -> dict[str, Any]:
         "created_at": getattr(summary, "created_at", None),
         "metadata": safe_evidence_metadata(getattr(summary, "metadata", {}) or {}),
     }
+
+
+def _compute_sha256_bytes(content: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(content).hexdigest()

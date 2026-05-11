@@ -40,6 +40,10 @@ export default function CaseDetailDrawer({
   onClose,
   onAssign,
   onAddEvidence,
+  onUploadEvidenceFile,
+  onVerifyEvidenceFile,
+  onDownloadEvidenceFile,
+  onExportEvidenceManifest,
   onAddNote,
   onResolve,
   onReopen,
@@ -76,6 +80,7 @@ export default function CaseDetailDrawer({
             <CasePriorityBadge priority={caseItem.priority} />
             <span className="state-chip">{caseItem.requires_review ? 'requires review' : 'reviewed'}</span>
             <span className="state-chip">{caseItem.review_status || 'pending'}</span>
+            {caseItem.metadata?.legal_hold ? <span className="state-chip">legal hold</span> : null}
           </div>
           <p className="drawer-description">{caseItem.description || 'Possible incident requires operator review.'}</p>
           <LlmSafetyBadge status={llmStatus} />
@@ -142,9 +147,14 @@ export default function CaseDetailDrawer({
           <CaseEvidencePanel
             items={evidence}
             onAddEvidence={onAddEvidence}
+            onUploadEvidenceFile={onUploadEvidenceFile}
+            onVerifyEvidence={onVerifyEvidenceFile}
+            onDownloadEvidence={onDownloadEvidenceFile}
+            onExportManifest={onExportEvidenceManifest}
             busy={busy}
             caseId={caseItem.case_id}
             defaultCameraId={caseItem.camera_ids?.[0] || evidence?.[0]?.camera_id || null}
+            legalHoldEnabled={Boolean(caseItem.metadata?.legal_hold)}
           />
           <CaseNotesPanel items={notes} onAddNote={onAddNote} busy={busy} />
           <CaseAssignmentPanel caseItem={caseItem} onAssign={onAssign} busy={busy} />

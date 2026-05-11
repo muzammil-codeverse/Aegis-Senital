@@ -324,6 +324,55 @@ def validate_osint_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_evidence_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[Evidence]")
+    config_path = ROOT / "configs" / "runtime" / "evidence.yaml"
+    if not config_path.exists():
+        results.append(check("evidence config", False, str(config_path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("evidence config parseable", False, str(exc), required=True))
+        return results
+
+    evidence_cfg = cfg.get("evidence", cfg)
+    enabled = bool(evidence_cfg.get("enabled", False))
+    results.append(check("evidence enabled", True, "enabled" if enabled else "disabled", required=False))
+    if not enabled:
+        return results
+
+    storage_cfg = dict(evidence_cfg.get("storage") or {})
+    local_dir = ROOT / str(storage_cfg.get("local_dir") or "storage/evidence")
+    local_dir.mkdir(parents=True, exist_ok=True)
+    results.append(check("storage/evidence", os.access(str(local_dir), os.W_OK), str(local_dir), required=profile == "production"))
+
+    hashing_cfg = dict(evidence_cfg.get("hashing") or {})
+    algorithm = str(hashing_cfg.get("algorithm") or "sha256").lower()
+    results.append(check("evidence hashing algorithm", algorithm == "sha256", algorithm, required=True))
+    results.append(check(
+        "evidence file hashing required",
+        bool(hashing_cfg.get("required_for_file_backed_evidence", True)),
+        "required" if bool(hashing_cfg.get("required_for_file_backed_evidence", True)) else "disabled",
+        required=True,
+    ))
+
+    identity_cfg_path = ROOT / "configs" / "runtime" / "identity.yaml"
+    try:
+        identity_cfg = yaml.safe_load(identity_cfg_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        identity_cfg = {}
+    raw_asset_cfg = dict((identity_cfg.get("identity", identity_cfg) or {}).get("raw_asset_access") or {})
+    results.append(check(
+        "identity raw asset http access",
+        not bool(raw_asset_cfg.get("enabled", False)),
+        "disabled" if not bool(raw_asset_cfg.get("enabled", False)) else "enabled",
+        required=True,
+    ))
+    return results
+
+
 def validate_streaming_configuration(profile: str) -> list[dict]:
     results: list[dict] = []
     print("\n[Streaming]")
@@ -388,6 +437,7 @@ def validate(profile: str) -> None:
         "configs/runtime/dependency_policy.yaml",
         "configs/runtime/identity.yaml",
         "configs/runtime/case_management.yaml",
+        "configs/runtime/evidence.yaml",
         "configs/runtime/llm.yaml",
         "configs/runtime/osint_enrichment.yaml",
         "configs/runtime/streaming.yaml",
@@ -516,6 +566,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(osint_results)
+
+    evidence_results = validate_evidence_configuration(profile)
+    for r in evidence_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(evidence_results)
 
     streaming_results = validate_streaming_configuration(profile)
     for r in streaming_results:

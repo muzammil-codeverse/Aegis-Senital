@@ -211,6 +211,10 @@ export default function CasesPage({ caseState }) {
         onClose={() => caseState.selectCase(null)}
         onAssign={(assignedTo, reason) => caseState.assignCase(caseState.selectedCase.case_id, assignedTo, reason)}
         onAddEvidence={payload => caseState.addEvidence(caseState.selectedCase.case_id, payload)}
+        onUploadEvidenceFile={formData => caseState.uploadEvidenceFile(caseState.selectedCase.case_id, formData)}
+        onVerifyEvidenceFile={evidenceId => caseState.verifyEvidenceFile(caseState.selectedCase.case_id, evidenceId)}
+        onDownloadEvidenceFile={evidenceId => caseState.downloadEvidenceFile(caseState.selectedCase.case_id, evidenceId)}
+        onExportEvidenceManifest={() => caseState.exportEvidenceManifest(caseState.selectedCase.case_id)}
         onAddNote={payload => caseState.addNote(caseState.selectedCase.case_id, payload)}
         onResolve={reason => caseState.closeCase(caseState.selectedCase.case_id, reason)}
         onReopen={reason => caseState.reopenCase(caseState.selectedCase.case_id, reason)}

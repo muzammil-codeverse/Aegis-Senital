@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, WebSocket, Request, Depends, Response
 from pydantic import BaseModel
@@ -1937,6 +1938,82 @@ def get_identity_enrollment_profile_api(
         return _filter_identity_response({"item": item, "status": "ok"}, request)
     except Exception as exc:
         return {"item": None, "status": "error", "detail": str(exc)}
+
+
+@router.get("/api/identity/enrollments/{enrollment_id}/images/{image_id}")
+def get_identity_enrollment_image_api(
+    enrollment_id: str,
+    image_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_api_permission("identity:read")),
+):
+    from fastapi.responses import FileResponse
+    from app.services.face_enrollment_service import get_enrollment_service
+
+    service = get_enrollment_service()
+    policy = service.raw_asset_policy()
+    audit_all = bool(policy.get("audit_all_access", True))
+    if not service.is_raw_asset_http_enabled():
+        if audit_all:
+            _audit(
+                request,
+                AuditAction.ACCESS_DENIED,
+                resource_type="identity_raw_asset",
+                resource_id=image_id,
+                success=False,
+                detail="Raw identity enrollment asset retrieval disabled by policy",
+                metadata={"enrollment_id": enrollment_id},
+            )
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        asset = service.resolve_raw_enrollment_image(enrollment_id, image_id)
+    except PermissionError:
+        if audit_all:
+            _audit(
+                request,
+                AuditAction.ACCESS_DENIED,
+                resource_type="identity_raw_asset",
+                resource_id=image_id,
+                success=False,
+                detail="Raw identity enrollment asset retrieval disabled by policy",
+                metadata={"enrollment_id": enrollment_id},
+            )
+        raise HTTPException(status_code=404, detail="Not found")
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Enrollment image '{image_id}' not found")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Enrollment image '{image_id}' not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    ensure_identity_access(request, current_user, str(asset.get("identity_id") or ""))
+    if bool(policy.get("admin_only", True)) and str(current_user.role).lower() not in {"admin", "supervisor"}:
+        if audit_all:
+            _audit(
+                request,
+                AuditAction.ACCESS_DENIED,
+                resource_type="identity_raw_asset",
+                resource_id=image_id,
+                success=False,
+                detail="Admin approval required for raw identity asset retrieval",
+                metadata={"enrollment_id": enrollment_id, "identity_id": asset.get("identity_id")},
+            )
+        raise HTTPException(status_code=403, detail="Insufficient permission")
+
+    if audit_all:
+        _audit(
+            request,
+            "identity_raw_asset_downloaded",
+            resource_type="identity_raw_asset",
+            resource_id=image_id,
+            metadata={"enrollment_id": enrollment_id, "identity_id": asset.get("identity_id")},
+        )
+    return FileResponse(
+        str(asset["path"]),
+        media_type=str(asset.get("content_type") or "application/octet-stream"),
+        filename=str(asset.get("filename") or Path(str(asset["path"])).name),
+        headers=_sensitive_headers(),
+    )
 
 
 @router.delete("/api/identity/enrollments/{enrollment_id}")

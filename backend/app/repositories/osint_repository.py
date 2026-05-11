@@ -272,6 +272,14 @@ class PostgresOsintRepository(OsintRepository):
         title TEXT NOT NULL,
         url TEXT NULL,
         storage_uri TEXT NULL,
+        original_filename TEXT NULL,
+        safe_filename TEXT NULL,
+        content_type TEXT NULL,
+        size_bytes BIGINT NULL,
+        hash_sha256 TEXT NULL,
+        hash_verified BOOLEAN NULL,
+        integrity_status TEXT NOT NULL DEFAULT 'not_applicable',
+        last_verified_at TIMESTAMPTZ NULL,
         description TEXT NOT NULL,
         source_reliability TEXT NOT NULL,
         analyst_provided BOOLEAN NOT NULL,
@@ -325,10 +333,12 @@ class PostgresOsintRepository(OsintRepository):
         self._require_available()
         query = """
             INSERT INTO osint_sources (
-                source_id, case_id, source_type, title, url, storage_uri, description,
+                source_id, case_id, source_type, title, url, storage_uri, original_filename, safe_filename,
+                content_type, size_bytes, hash_sha256, hash_verified, integrity_status, last_verified_at, description,
                 source_reliability, analyst_provided, created_by, created_at, metadata, summary, requires_review
             ) VALUES (
-                %(source_id)s, %(case_id)s, %(source_type)s, %(title)s, %(url)s, %(storage_uri)s, %(description)s,
+                %(source_id)s, %(case_id)s, %(source_type)s, %(title)s, %(url)s, %(storage_uri)s, %(original_filename)s, %(safe_filename)s,
+                %(content_type)s, %(size_bytes)s, %(hash_sha256)s, %(hash_verified)s, %(integrity_status)s, %(last_verified_at)s, %(description)s,
                 %(source_reliability)s, %(analyst_provided)s, %(created_by)s, %(created_at)s, %(metadata)s, %(summary)s, %(requires_review)s
             )
         """
@@ -357,6 +367,14 @@ class PostgresOsintRepository(OsintRepository):
                 title = %(title)s,
                 url = %(url)s,
                 storage_uri = %(storage_uri)s,
+                original_filename = %(original_filename)s,
+                safe_filename = %(safe_filename)s,
+                content_type = %(content_type)s,
+                size_bytes = %(size_bytes)s,
+                hash_sha256 = %(hash_sha256)s,
+                hash_verified = %(hash_verified)s,
+                integrity_status = %(integrity_status)s,
+                last_verified_at = %(last_verified_at)s,
                 description = %(description)s,
                 source_reliability = %(source_reliability)s,
                 analyst_provided = %(analyst_provided)s,
@@ -430,6 +448,17 @@ class PostgresOsintRepository(OsintRepository):
             with self._connect() as conn:
                 with conn.cursor() as cursor:
                     for statement in [part.strip() for part in self._DDL.split(";") if part.strip()]:
+                        cursor.execute(statement)
+                    for statement in (
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS original_filename TEXT NULL",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS safe_filename TEXT NULL",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS content_type TEXT NULL",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS size_bytes BIGINT NULL",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS hash_sha256 TEXT NULL",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS hash_verified BOOLEAN NULL",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS integrity_status TEXT NOT NULL DEFAULT 'not_applicable'",
+                        "ALTER TABLE osint_sources ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ NULL",
+                    ):
                         cursor.execute(statement)
                 conn.commit()
             self._available = True

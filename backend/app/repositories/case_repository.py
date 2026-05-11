@@ -166,6 +166,14 @@ class CaseRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def get_evidence(self, evidence_id: str) -> CaseEvidence | None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def update_evidence(self, evidence_id: str, updates: dict[str, Any]) -> CaseEvidence:
+        raise NotImplementedError
+
+    @abstractmethod
     def list_evidence(self, case_id: str) -> list[CaseEvidence]:
         raise NotImplementedError
 
@@ -233,7 +241,7 @@ class JsonlCaseRepository(CaseRepository):
         }
         self._lock = threading.RLock()
         self._cases: dict[str, CaseRecord] = {}
-        self._evidence: dict[str, list[CaseEvidence]] = {}
+        self._evidence: dict[str, CaseEvidence] = {}
         self._notes: dict[str, list[CaseNote]] = {}
         self._audit_logs: dict[str, list[CaseAuditLog]] = {}
         self._reports: dict[str, list[CaseExport]] = {}
@@ -293,13 +301,30 @@ class JsonlCaseRepository(CaseRepository):
     def add_evidence(self, evidence: CaseEvidence) -> CaseEvidence:
         self._require_available()
         with self._lock:
-            self._evidence.setdefault(evidence.case_id, []).append(evidence)
+            self._evidence[evidence.evidence_id] = evidence
+            self._append(self._paths["evidence"], evidence.model_dump(mode="json"))
+        return evidence
+
+    def get_evidence(self, evidence_id: str) -> CaseEvidence | None:
+        with self._lock:
+            return self._evidence.get(evidence_id)
+
+    def update_evidence(self, evidence_id: str, updates: dict[str, Any]) -> CaseEvidence:
+        self._require_available()
+        with self._lock:
+            existing = self._evidence.get(evidence_id)
+            if existing is None:
+                raise KeyError(evidence_id)
+            payload = existing.model_dump(mode="json")
+            payload.update({key: value for key, value in updates.items() if value is not None})
+            evidence = CaseEvidence.model_validate(payload)
+            self._evidence[evidence_id] = evidence
             self._append(self._paths["evidence"], evidence.model_dump(mode="json"))
         return evidence
 
     def list_evidence(self, case_id: str) -> list[CaseEvidence]:
         with self._lock:
-            items = list(self._evidence.get(case_id, []))
+            items = [item for item in self._evidence.values() if item.case_id == case_id]
         items.sort(key=lambda item: (_parse_timestamp(item.timestamp), _parse_timestamp(item.created_at)))
         return items
 
@@ -349,7 +374,7 @@ class JsonlCaseRepository(CaseRepository):
     def _load_all(self) -> None:
         loaders = {
             "cases": (CaseRecord, self._cases, None),
-            "evidence": (CaseEvidence, self._evidence, "case_id"),
+            "evidence": (CaseEvidence, self._evidence, "evidence_id"),
             "notes": (CaseNote, self._notes, "case_id"),
             "audit": (CaseAuditLog, self._audit_logs, "case_id"),
             "reports": (CaseExport, self._reports, "case_id"),
@@ -367,6 +392,8 @@ class JsonlCaseRepository(CaseRepository):
                         continue
                     if grouping_key is None:
                         target[obj.case_id] = obj
+                    elif name == "evidence":
+                        target[getattr(obj, grouping_key)] = obj
                     else:
                         target.setdefault(getattr(obj, grouping_key), []).append(obj)
 
@@ -404,12 +431,18 @@ class PostgresCaseRepository(CaseRepository):
         track_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         storage_uri TEXT NULL,
         snapshot_uri TEXT NULL,
+        original_filename TEXT NULL,
+        safe_filename TEXT NULL,
+        content_type TEXT NULL,
+        size_bytes BIGINT NULL,
         created_by TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL,
         timestamp TIMESTAMPTZ NOT NULL,
         hash_sha256 TEXT NULL,
         hash_verified BOOLEAN NULL,
         integrity_status TEXT NOT NULL,
+        chain_status TEXT NOT NULL DEFAULT 'active',
+        last_verified_at TIMESTAMPTZ NULL,
         metadata JSONB NOT NULL DEFAULT '{}'::jsonb
     );
     CREATE TABLE IF NOT EXISTS case_notes (
@@ -438,6 +471,12 @@ class PostgresCaseRepository(CaseRepository):
         generated_at TIMESTAMPTZ NOT NULL,
         generated_by TEXT NOT NULL,
         artifact_uri TEXT NULL,
+        content_type TEXT NULL,
+        size_bytes BIGINT NULL,
+        hash_sha256 TEXT NULL,
+        hash_verified BOOLEAN NULL,
+        integrity_status TEXT NOT NULL DEFAULT 'pending',
+        last_verified_at TIMESTAMPTZ NULL,
         metadata JSONB NOT NULL DEFAULT '{}'::jsonb
     );
     """
@@ -534,13 +573,57 @@ class PostgresCaseRepository(CaseRepository):
         query = """
             INSERT INTO case_evidence (
                 evidence_id, case_id, evidence_type, title, description, source_event_id,
-                camera_id, track_ids, storage_uri, snapshot_uri, created_by, created_at,
-                timestamp, hash_sha256, hash_verified, integrity_status, metadata
+                camera_id, track_ids, storage_uri, snapshot_uri, original_filename, safe_filename,
+                content_type, size_bytes, created_by, created_at, timestamp, hash_sha256,
+                hash_verified, integrity_status, chain_status, last_verified_at, metadata
             ) VALUES (
                 %(evidence_id)s, %(case_id)s, %(evidence_type)s, %(title)s, %(description)s, %(source_event_id)s,
-                %(camera_id)s, %(track_ids)s, %(storage_uri)s, %(snapshot_uri)s, %(created_by)s, %(created_at)s,
-                %(timestamp)s, %(hash_sha256)s, %(hash_verified)s, %(integrity_status)s, %(metadata)s
+                %(camera_id)s, %(track_ids)s, %(storage_uri)s, %(snapshot_uri)s, %(original_filename)s, %(safe_filename)s,
+                %(content_type)s, %(size_bytes)s, %(created_by)s, %(created_at)s, %(timestamp)s, %(hash_sha256)s,
+                %(hash_verified)s, %(integrity_status)s, %(chain_status)s, %(last_verified_at)s, %(metadata)s
             )
+        """
+        self._execute(query, self._evidence_params(evidence))
+        return evidence
+
+    def get_evidence(self, evidence_id: str) -> CaseEvidence | None:
+        self._require_available()
+        row = self._fetchone("SELECT * FROM case_evidence WHERE evidence_id = %(evidence_id)s", {"evidence_id": evidence_id})
+        return CaseEvidence.model_validate(dict(row)) if row else None
+
+    def update_evidence(self, evidence_id: str, updates: dict[str, Any]) -> CaseEvidence:
+        self._require_available()
+        existing = self.get_evidence(evidence_id)
+        if existing is None:
+            raise KeyError(evidence_id)
+        payload = existing.model_dump(mode="json")
+        payload.update({key: value for key, value in updates.items() if value is not None})
+        evidence = CaseEvidence.model_validate(payload)
+        query = """
+            UPDATE case_evidence
+            SET case_id = %(case_id)s,
+                evidence_type = %(evidence_type)s,
+                title = %(title)s,
+                description = %(description)s,
+                source_event_id = %(source_event_id)s,
+                camera_id = %(camera_id)s,
+                track_ids = %(track_ids)s,
+                storage_uri = %(storage_uri)s,
+                snapshot_uri = %(snapshot_uri)s,
+                original_filename = %(original_filename)s,
+                safe_filename = %(safe_filename)s,
+                content_type = %(content_type)s,
+                size_bytes = %(size_bytes)s,
+                created_by = %(created_by)s,
+                created_at = %(created_at)s,
+                timestamp = %(timestamp)s,
+                hash_sha256 = %(hash_sha256)s,
+                hash_verified = %(hash_verified)s,
+                integrity_status = %(integrity_status)s,
+                chain_status = %(chain_status)s,
+                last_verified_at = %(last_verified_at)s,
+                metadata = %(metadata)s
+            WHERE evidence_id = %(evidence_id)s
         """
         self._execute(query, self._evidence_params(evidence))
         return evidence
@@ -591,10 +674,14 @@ class PostgresCaseRepository(CaseRepository):
         self._require_available()
         query = """
             INSERT INTO case_reports (
-                export_id, case_id, format, report_type, content, generated_at, generated_by, artifact_uri, metadata
+                export_id, case_id, format, report_type, content, generated_at, generated_by,
+                artifact_uri, content_type, size_bytes, hash_sha256, hash_verified,
+                integrity_status, last_verified_at, metadata
             )
             VALUES (
-                %(export_id)s, %(case_id)s, %(format)s, %(report_type)s, %(content)s, %(generated_at)s, %(generated_by)s, %(artifact_uri)s, %(metadata)s
+                %(export_id)s, %(case_id)s, %(format)s, %(report_type)s, %(content)s, %(generated_at)s, %(generated_by)s,
+                %(artifact_uri)s, %(content_type)s, %(size_bytes)s, %(hash_sha256)s, %(hash_verified)s,
+                %(integrity_status)s, %(last_verified_at)s, %(metadata)s
             )
         """
         self._execute(query, self._report_params(export))
@@ -622,9 +709,22 @@ class PostgresCaseRepository(CaseRepository):
                 with conn.cursor() as cursor:
                     for statement in [part.strip() for part in self._DDL.split(";") if part.strip()]:
                         cursor.execute(statement)
-                    cursor.execute(
-                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFAULT 'case_export'"
-                    )
+                    for statement in (
+                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS original_filename TEXT NULL",
+                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS safe_filename TEXT NULL",
+                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS content_type TEXT NULL",
+                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS size_bytes BIGINT NULL",
+                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS chain_status TEXT NOT NULL DEFAULT 'active'",
+                        "ALTER TABLE case_evidence ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ NULL",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS report_type TEXT NOT NULL DEFAULT 'case_export'",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS content_type TEXT NULL",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS size_bytes BIGINT NULL",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS hash_sha256 TEXT NULL",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS hash_verified BOOLEAN NULL",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS integrity_status TEXT NOT NULL DEFAULT 'pending'",
+                        "ALTER TABLE case_reports ADD COLUMN IF NOT EXISTS last_verified_at TIMESTAMPTZ NULL",
+                    ):
+                        cursor.execute(statement)
                 conn.commit()
             self._available = True
             self._set_error(None)

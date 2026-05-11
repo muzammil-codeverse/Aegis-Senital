@@ -147,6 +147,12 @@ def _case_scope_decision(user: UserAccount | None, case_id: str) -> ObjectAccess
 
 def _find_evidence(evidence_id: str):
     service = get_case_service()
+    try:
+        evidence = service.get_evidence(evidence_id)
+    except Exception:
+        evidence = None
+    if evidence is not None:
+        return evidence
     for case in service.list_cases({"limit": 5000}):
         for item in service.list_evidence(case.case_id):
             if item.evidence_id == evidence_id:

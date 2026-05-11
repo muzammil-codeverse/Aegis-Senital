@@ -7,8 +7,10 @@ import {
   closeCase,
   createCase,
   createCaseFromEvent,
+  downloadEvidenceFile,
   dismissCase,
   exportCase,
+  getEvidenceManifest,
   getCase,
   getTimeline,
   listCases,
@@ -16,6 +18,8 @@ import {
   listNotes,
   reopenCase,
   updateCase,
+  uploadEvidenceFile,
+  verifyEvidenceFile,
 } from '../api/caseApi'
 import {
   askCaseQuestion,
@@ -190,6 +194,56 @@ export function useCases({ enabled = true, pollMs = 15000, initialFilters = {} }
     { caseId },
   ), [applyAction])
 
+  const uploadCaseEvidenceFile = useCallback((caseId, formData) => applyAction(
+    () => uploadEvidenceFile(caseId, formData),
+    { caseId },
+  ), [applyAction])
+
+  const verifySelectedEvidence = useCallback(async (caseId, evidenceId) => {
+    setActionLoading(true)
+    try {
+      const response = await verifyEvidenceFile(caseId, evidenceId)
+      await loadCaseDetail(caseId)
+      setError(null)
+      return response.item
+    } catch (err) {
+      setError(normalizeError(err))
+      throw err
+    } finally {
+      setActionLoading(false)
+    }
+  }, [loadCaseDetail])
+
+  const downloadSelectedEvidence = useCallback(async (caseId, evidenceId) => {
+    setActionLoading(true)
+    try {
+      const payload = await downloadEvidenceFile(caseId, evidenceId)
+      await loadCaseDetail(caseId)
+      setError(null)
+      return payload
+    } catch (err) {
+      setError(normalizeError(err))
+      throw err
+    } finally {
+      setActionLoading(false)
+    }
+  }, [loadCaseDetail])
+
+  const exportEvidenceManifest = useCallback(async (caseId) => {
+    setActionLoading(true)
+    try {
+      const response = await getEvidenceManifest(caseId)
+      await loadCaseDetail(caseId)
+      setError(null)
+      return response.item
+    } catch (err) {
+      setError(normalizeError(err))
+      throw err
+    } finally {
+      setActionLoading(false)
+    }
+  }, [loadCaseDetail])
+
   const addCaseNote = useCallback((caseId, payload) => applyAction(
     () => addNote(caseId, payload),
     { caseId },
@@ -330,6 +384,10 @@ export function useCases({ enabled = true, pollMs = 15000, initialFilters = {} }
     updateCase: updateExistingCase,
     createCaseFromEvent: createFromEvent,
     addEvidence: addCaseEvidence,
+    uploadEvidenceFile: uploadCaseEvidenceFile,
+    verifyEvidenceFile: verifySelectedEvidence,
+    downloadEvidenceFile: downloadSelectedEvidence,
+    exportEvidenceManifest,
     addNote: addCaseNote,
     assignCase: assignSelectedCase,
     closeCase: closeSelectedCase,

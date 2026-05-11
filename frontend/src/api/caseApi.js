@@ -1,4 +1,4 @@
-import { normalizeItemResponse, normalizeListResponse, request } from './client'
+import { apiClient, normalizeItemResponse, normalizeListResponse, request } from './client'
 
 export async function listCases(params = {}) {
   return normalizeListResponse(await request({ url: '/api/cases', method: 'GET', params }))
@@ -47,6 +47,44 @@ export async function listEvidence(caseId) {
     url: `/api/cases/${encodeURIComponent(caseId)}/evidence`,
     method: 'GET',
   }))
+}
+
+export async function uploadEvidenceFile(caseId, formData) {
+  return normalizeItemResponse(await request({
+    url: `/api/cases/${encodeURIComponent(caseId)}/evidence/upload`,
+    method: 'POST',
+    data: formData,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }))
+}
+
+export async function verifyEvidenceFile(caseId, evidenceId) {
+  return normalizeItemResponse(await request({
+    url: `/api/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/verify`,
+    method: 'POST',
+  }))
+}
+
+export async function getEvidenceManifest(caseId) {
+  return normalizeItemResponse(await request({
+    url: `/api/cases/${encodeURIComponent(caseId)}/evidence/manifest`,
+    method: 'GET',
+  }))
+}
+
+export async function downloadEvidenceFile(caseId, evidenceId) {
+  const response = await apiClient.request({
+    url: `/api/cases/${encodeURIComponent(caseId)}/evidence/${encodeURIComponent(evidenceId)}/download`,
+    method: 'GET',
+    responseType: 'blob',
+  })
+  const disposition = response.headers['content-disposition'] || ''
+  const match = disposition.match(/filename=\"?([^"]+)\"?/)
+  return {
+    blob: response.data,
+    filename: match?.[1] || `${evidenceId}`,
+    contentType: response.headers['content-type'] || response.data?.type || 'application/octet-stream',
+  }
 }
 
 export async function addNote(caseId, payload) {

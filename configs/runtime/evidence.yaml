@@ -1,0 +1,57 @@
+evidence:
+  enabled: true
+
+  storage:
+    dev_backend: "local"
+    production_backend: "s3_or_filesystem"
+    local_dir: "storage/evidence"
+    require_production_storage: true
+
+  hashing:
+    required_for_file_backed_evidence: true
+    algorithm: "sha256"
+    verify_on_download: true
+    verify_on_export: true
+
+  access:
+    require_case_access: true
+    require_evidence_access: true
+    sensitive_headers: true
+    audit_downloads: true
+
+  uploads:
+    enabled: true
+    max_file_size_mb: 250
+    allowed_extensions:
+      video:
+        - ".mp4"
+        - ".avi"
+        - ".mov"
+        - ".mkv"
+      image:
+        - ".jpg"
+        - ".jpeg"
+        - ".png"
+      document:
+        - ".pdf"
+        - ".txt"
+        - ".md"
+        - ".json"
+        - ".csv"
+    reject_archives: true
+    reject_executables: true
+    malware_scan_required_in_production: false
+    malware_scan_placeholder: true
+
+  identity_assets:
+    expose_raw_images_http: false
+    admin_retrieval_enabled: false
+
+  osint_assets:
+    protected_retrieval_enabled: true
+
+  retention:
+    enabled: true
+    default_days: 180
+    archived_case_days: 365
+    legal_hold_blocks_deletion: true

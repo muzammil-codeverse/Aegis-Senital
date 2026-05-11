@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from core.event_bus import EventType, get_event_bus
@@ -27,7 +28,12 @@ from app.repositories.case_repository import (
 )
 from app.services.case_export_service import CaseExportService
 from app.services.case_timeline_service import CaseTimelineService
-from app.services.evidence_integrity import compute_sha256, safe_evidence_metadata, verify_evidence_hash
+from app.services.evidence_integrity import (
+    describe_local_artifact,
+    guess_content_type,
+    resolve_local_storage_uri,
+    safe_evidence_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +168,7 @@ class CaseService:
         if len(self._repository.list_evidence(case_id)) >= max_items:
             raise ValueError(f"Case '{case_id}' reached the evidence limit ({max_items})")
         integrity = self._build_integrity_payload(request.storage_uri)
+        file_backed = integrity["integrity_status"] != "not_applicable"
         evidence = CaseEvidence(
             case_id=case_id,
             evidence_type=request.evidence_type,
@@ -172,24 +179,66 @@ class CaseService:
             track_ids=request.track_ids,
             storage_uri=request.storage_uri,
             snapshot_uri=request.snapshot_uri,
+            original_filename=request.original_filename or integrity["original_filename"],
+            safe_filename=request.safe_filename or integrity["safe_filename"],
+            content_type=request.content_type or integrity["content_type"],
+            size_bytes=request.size_bytes if request.size_bytes is not None else integrity["size_bytes"],
             created_by=actor,
             timestamp=request.timestamp or _now_iso(),
-            hash_sha256=integrity["hash_sha256"],
-            hash_verified=integrity["hash_verified"],
-            integrity_status=integrity["integrity_status"],
+            hash_sha256=integrity["hash_sha256"] if file_backed else request.hash_sha256,
+            hash_verified=integrity["hash_verified"] if file_backed else request.hash_verified,
+            integrity_status=integrity["integrity_status"] if file_backed else (request.integrity_status or integrity["integrity_status"]),
+            chain_status=request.chain_status,
+            last_verified_at=integrity["last_verified_at"] if file_backed else request.last_verified_at,
             metadata=safe_evidence_metadata({**(request.metadata or {}), **integrity["metadata"]}),
         )
-        stored = self._repository.add_evidence(evidence)
-        self._touch_case(case_id)
-        self._record_case_audit(
-            case_id,
-            action="evidence_added",
+        return self.store_evidence(
+            evidence,
             actor=actor,
+            action="evidence_added",
             detail="Evidence item attached.",
-            metadata={"evidence_type": stored.evidence_type, "source_event_id": stored.source_event_id},
+            metadata={"evidence_type": evidence.evidence_type, "source_event_id": evidence.source_event_id},
+        )
+
+    def store_evidence(
+        self,
+        evidence: CaseEvidence,
+        *,
+        actor: str = "system",
+        action: str = "evidence_added",
+        detail: str = "Evidence item attached.",
+        metadata: dict[str, Any] | None = None,
+    ) -> CaseEvidence:
+        self._require_case(evidence.case_id)
+        max_items = int(((self._config.get("evidence") or {}).get("max_items_per_case")) or 500)
+        if self._repository.get_evidence(evidence.evidence_id) is None and len(self._repository.list_evidence(evidence.case_id)) >= max_items:
+            raise ValueError(f"Case '{evidence.case_id}' reached the evidence limit ({max_items})")
+        stored = self._repository.add_evidence(evidence)
+        self._touch_case(evidence.case_id)
+        self._record_case_audit(
+            evidence.case_id,
+            action=action,
+            actor=actor,
+            detail=detail,
+            metadata=metadata or {"evidence_type": stored.evidence_type, "source_event_id": stored.source_event_id},
         )
         _increment_metric("case_evidence_items_total")
         return stored
+
+    def get_evidence(self, evidence_id: str) -> CaseEvidence | None:
+        return self._repository.get_evidence(evidence_id)
+
+    def update_evidence(self, evidence_id: str, updates: dict[str, Any], actor: str = "system") -> CaseEvidence:
+        evidence = self._repository.update_evidence(evidence_id, updates)
+        self._touch_case(evidence.case_id)
+        self._record_case_audit(
+            evidence.case_id,
+            action="evidence_updated",
+            actor=actor,
+            detail="Evidence metadata updated.",
+            metadata={"evidence_id": evidence_id, "updated_fields": sorted(updates.keys())},
+        )
+        return evidence
 
     def list_evidence(self, case_id: str) -> list[CaseEvidence]:
         self._require_case(case_id)
@@ -275,6 +324,17 @@ class CaseService:
         )
         _increment_metric("case_exports_total")
         return export
+
+    def record_case_audit_event(
+        self,
+        case_id: str,
+        *,
+        action: str,
+        actor: str,
+        detail: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> CaseAuditLog:
+        return self._record_case_audit(case_id, action=action, actor=actor, detail=detail, metadata=metadata or {})
 
     def create_case_from_event_id(self, event_id: str, actor: str = "system") -> CaseRecord:
         payload = self.resolve_event_by_id(event_id)
@@ -556,29 +616,33 @@ class CaseService:
                 "hash_sha256": None,
                 "hash_verified": None,
                 "integrity_status": "not_applicable",
-                "metadata": {"missing_evidence": True},
-            }
-        path = _local_path(storage_uri)
-        if path is None:
-            return {
-                "hash_sha256": None,
-                "hash_verified": None,
-                "integrity_status": "not_applicable",
+                "size_bytes": None,
+                "content_type": None,
+                "safe_filename": None,
+                "original_filename": None,
+                "last_verified_at": None,
                 "metadata": {},
             }
-        if not path.exists() or not path.is_file():
-            return {
-                "hash_sha256": None,
-                "hash_verified": False,
-                "integrity_status": "missing_file",
-                "metadata": {"missing_evidence": True, "missing_path": str(path)},
-            }
-        digest = compute_sha256(str(path))
+        resolved = resolve_local_storage_uri(storage_uri)
+        artifact = describe_local_artifact(
+            storage_uri,
+            allowed_roots=[resolved.parent] if resolved is not None else None,
+            content_type=guess_content_type(storage_uri),
+        )
+        path = artifact.get("path")
         return {
-            "hash_sha256": digest,
-            "hash_verified": verify_evidence_hash(str(path), digest),
-            "integrity_status": "verified",
-            "metadata": {},
+            "hash_sha256": artifact.get("hash_sha256"),
+            "hash_verified": artifact.get("hash_verified"),
+            "integrity_status": artifact.get("integrity_status"),
+            "size_bytes": artifact.get("size_bytes"),
+            "content_type": artifact.get("content_type"),
+            "safe_filename": artifact.get("safe_filename"),
+            "original_filename": path.name if isinstance(path, Path) else None,
+            "last_verified_at": artifact.get("last_verified_at"),
+            "metadata": {
+                "missing_evidence": artifact.get("integrity_status") == "missing_file",
+                **({"missing_path": str(path)} if artifact.get("integrity_status") == "missing_file" and isinstance(path, Path) else {}),
+            },
         }
 
     def _touch_case(self, case_id: str) -> None:
@@ -736,15 +800,6 @@ def _parse_timestamp(value: str | None) -> float:
     from app.repositories.case_repository import _parse_timestamp as _repo_parse_timestamp
 
     return _repo_parse_timestamp(value)
-
-
-def _local_path(storage_uri: str):
-    from pathlib import Path
-
-    lowered = str(storage_uri).lower()
-    if lowered.startswith(("http://", "https://", "s3://", "gs://")):
-        return None
-    return Path(storage_uri)
 
 
 def _increment_metric(name: str, count: int = 1) -> None:

@@ -291,6 +291,12 @@ def permission_for_request(method: str, path: str) -> str | None:
             if path.endswith("/summarize"):
                 return "osint:summarize"
             return "osint:write"
+        if path.endswith("/evidence/manifest"):
+            return "case:export"
+        if path.endswith("/download") or path.endswith("/verify"):
+            return "case:read"
+        if path.endswith("/upload"):
+            return "case:write"
         if method == "GET":
             if path.endswith("/export"):
                 return "case:export"

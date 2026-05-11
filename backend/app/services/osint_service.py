@@ -114,6 +114,14 @@ class OsintEnrichmentService:
             stored.source_id,
             {
                 "storage_uri": upload.storage_uri,
+                "original_filename": upload.original_filename,
+                "safe_filename": upload.safe_filename,
+                "content_type": upload.content_type,
+                "size_bytes": upload.size_bytes,
+                "hash_sha256": upload.hash_sha256,
+                "hash_verified": upload.hash_verified,
+                "integrity_status": upload.integrity_status,
+                "last_verified_at": upload.last_verified_at,
                 "metadata": {
                     **stored.metadata,
                     "filename": upload.filename,
@@ -121,6 +129,7 @@ class OsintEnrichmentService:
                     "extension": upload.extension,
                     "size_bytes": upload.size_bytes,
                     "sha256": upload.sha256,
+                    "safe_filename": upload.safe_filename,
                 },
             },
         )

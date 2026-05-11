@@ -11,6 +11,7 @@ from typing import Any
 from app.models.case_models import CaseExport
 from app.models.llm_models import LlmGeneratedOutput, LlmSummaryRequest, SourceReference
 from app.services.audit_log_service import AuditLogService, get_audit_log_service
+from app.services.chain_of_custody_service import ChainOfCustodyService
 from app.services.case_service import CaseService, get_case_service
 from app.services.evidence_integrity import safe_evidence_metadata
 from app.services.llm_provider import LocalStubProvider, OpenAIResponsesProvider
@@ -91,6 +92,7 @@ class LlmService:
         self._config = dict(self._raw_config.get("llm") or {})
         self._case_service = case_service or get_case_service()
         self._audit_service = audit_service or get_audit_log_service()
+        self._custody_service = ChainOfCustodyService(case_service=self._case_service)
         self._providers: dict[str, Any] = {}
 
     def status(self) -> dict[str, Any]:
@@ -394,6 +396,7 @@ class LlmService:
         timeline = self._case_service.get_timeline(case_id)[:max_events]
         notes = self._case_service.list_notes(case_id)[:max_notes]
         enrichment_sources, enrichment_summaries = self._load_enrichment_context(case_id, limit=max_notes)
+        manifest = self._custody_service.build_manifest(case_id, generated_by="llm_context")
         case_payload = {
             "case_id": case.case_id,
             "title": self._sanitize_text(case.title),
@@ -410,6 +413,12 @@ class LlmService:
             "review_status": case.review_status,
             "requires_review": case.requires_review,
             "metadata": self._trim_metadata(case.metadata),
+            "chain_of_custody": {
+                "evidence_count": len(manifest.evidence_items),
+                "verified_count": sum(1 for item in manifest.evidence_items if item.integrity_status == "verified"),
+                "integrity_issues": sum(1 for item in manifest.evidence_items if item.integrity_status in {"missing_file", "hash_mismatch", "failed"}),
+                "legal_hold": bool(manifest.metadata.get("legal_hold", False)),
+            },
         }
         evidence_payload = [
             {
