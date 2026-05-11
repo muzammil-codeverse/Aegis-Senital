@@ -138,6 +138,10 @@ def test_llm_endpoints_use_local_stub_and_persist_reports(tmp_path, monkeypatch)
     assert report.json()["item"]["report_id"]
     stored_report = case_service.repository.list_reports(case.case_id)[0]
     assert stored_report.report_type == "draft_case_report"
+    assert stored_report.content_type == "text/markdown"
+    assert stored_report.hash_sha256
+    assert stored_report.hash_verified is True
+    assert stored_report.integrity_status == "verified"
 
     query = client.post(
         f"/api/llm/cases/{case.case_id}/query",

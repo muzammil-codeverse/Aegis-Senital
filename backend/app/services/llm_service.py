@@ -13,7 +13,7 @@ from app.models.llm_models import LlmGeneratedOutput, LlmSummaryRequest, SourceR
 from app.services.audit_log_service import AuditLogService, get_audit_log_service
 from app.services.chain_of_custody_service import ChainOfCustodyService
 from app.services.case_service import CaseService, get_case_service
-from app.services.evidence_integrity import safe_evidence_metadata
+from app.services.evidence_integrity import compute_bytes_sha256, safe_evidence_metadata
 from app.services.llm_provider import LocalStubProvider, OpenAIResponsesProvider
 from inference.config_runtime import load_runtime_config
 
@@ -769,6 +769,8 @@ class LlmService:
     def _persist_generated_report(self, output: LlmGeneratedOutput, *, actor: str, requested_format: str) -> CaseExport:
         if requested_format != "markdown":
             raise ValueError("Only markdown report persistence is currently supported")
+        content_bytes = output.content.encode("utf-8")
+        digest = compute_bytes_sha256(content_bytes)
         report = CaseExport(
             case_id=str(output.case_id),
             format="markdown",
@@ -776,6 +778,12 @@ class LlmService:
             content=output.content,
             generated_at=output.generated_at,
             generated_by=actor,
+            content_type="text/markdown",
+            size_bytes=len(content_bytes),
+            hash_sha256=digest,
+            hash_verified=True,
+            integrity_status="verified",
+            last_verified_at=output.generated_at,
             metadata={
                 "provider": output.provider,
                 "model": output.model,
