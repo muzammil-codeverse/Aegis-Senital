@@ -13,7 +13,19 @@
 
 /** Default dev credentials. Change via env if needed. */
 export const TEST_USERNAME = process.env.AEGIS_E2E_USER || 'admin'
-export const TEST_PASSWORD = process.env.AEGIS_E2E_PASS || 'admin'
+export const TEST_PASSWORD = process.env.AEGIS_E2E_PASS || 'ChangeMe123'
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 45000
+
+export async function waitForAuthBootstrap(page, timeout = AUTH_BOOTSTRAP_TIMEOUT_MS) {
+  await page.waitForFunction(
+    () => {
+      const text = document.body?.innerText?.toLowerCase() || ''
+      return !text.includes('loading session')
+    },
+    null,
+    { timeout },
+  ).catch(() => null)
+}
 
 /**
  * Attempt to log in via the UI login form.
@@ -21,15 +33,18 @@ export const TEST_PASSWORD = process.env.AEGIS_E2E_PASS || 'admin'
  * (meaning the app is already authenticated or in a public-shell mode).
  */
 export async function loginIfRequired(page) {
+  await waitForAuthBootstrap(page)
+
   // Check if we're on the login page
-  const loginInput = page.locator('input[autocomplete="username"], input[aria-label="Username"]')
-  const isLoginPage = await loginInput.count() > 0
+  const loginInput = page.locator('input[autocomplete="username"], input[aria-label="Username"]').first()
+  const appShell = page.locator('nav, [role="navigation"], [aria-label="Search command palette"]').first()
+  const isLoginPage = await loginInput.isVisible().catch(() => false)
 
   if (!isLoginPage) {
     return false
   }
 
-  await loginInput.first().fill(TEST_USERNAME)
+  await loginInput.fill(TEST_USERNAME)
 
   const passwordInput = page.locator('input[type="password"]').first()
   await passwordInput.fill(TEST_PASSWORD)
@@ -37,10 +52,17 @@ export async function loginIfRequired(page) {
   const submitBtn = page.locator('button[type="submit"]').first()
   await submitBtn.click()
 
-  // Wait for navigation away from login page
-  await page.waitForURL(url => !url.toString().includes('login'), { timeout: 10000 }).catch(() => {
-    // Login may have failed — tests will handle this gracefully
-  })
+  await waitForAuthBootstrap(page)
+  await Promise.race([
+    loginInput.waitFor({ state: 'hidden', timeout: AUTH_BOOTSTRAP_TIMEOUT_MS }).catch(() => null),
+    appShell.waitFor({ state: 'visible', timeout: AUTH_BOOTSTRAP_TIMEOUT_MS }).catch(() => null),
+  ])
+
+  const shellVisible = await appShell.isVisible().catch(() => false)
+  if (!shellVisible) {
+    const loginError = await page.locator('.form-error').first().innerText().catch(() => '')
+    throw new Error(`E2E login did not complete. ${loginError || 'Login form remained visible.'}`)
+  }
 
   return true
 }

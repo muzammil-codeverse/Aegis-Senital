@@ -24,6 +24,10 @@ export default function PathReconstructionPanel({
   };
 
   const selectedHyp = hypotheses.find((h) => h.hypothesis_id === selected);
+  const confidenceLabel = (value) => {
+    if (value == null || Number.isNaN(Number(value))) return 'Confidence unavailable';
+    return `Confidence ${Math.round(Number(value) * 100)}%`;
+  };
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 text-sm">
@@ -82,6 +86,7 @@ export default function PathReconstructionPanel({
                 <span className="font-medium truncate">{h.hypothesis_id}</span>
                 <span className="text-gray-500 capitalize">{h.review_status}</span>
               </div>
+              <div className="mt-1 text-[11px] text-blue-700">{confidenceLabel(h.confidence)}</div>
               <p className="mt-1 text-xs text-gray-600">{h.safe_summary}</p>
               {selected === h.hypothesis_id && selectedHyp && (
                 <div className="mt-2 space-y-2 border-t pt-2">
@@ -102,6 +107,16 @@ export default function PathReconstructionPanel({
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {!reconstructing && hypotheses.length === 0 && (
+        <div className="rounded border border-dashed bg-white p-3 text-xs text-gray-600">
+          <div className="font-semibold text-gray-700">No results yet</div>
+          <p className="mt-1">
+            Enter a case or event ID to generate an evidence-backed hypothesis. If no correlated observations are available,
+            the workspace will continue to report Insufficient data instead of inventing a movement path.
+          </p>
         </div>
       )}
     </div>

@@ -19,7 +19,7 @@ REQUIRED_DEPENDENCIES = {
 OPTIONAL_DEPENDENCIES = {
     "face_recognition": "insightface + onnxruntime",
     "reid_model": "osnet (torchreid)",
-    "segmentation": "SAM2",
+    "segmentation": "Ultralytics SAM2",
 }
 
 _BOOT_LOCK = threading.Lock()
@@ -206,9 +206,9 @@ def validate_segmentation_dependencies(profile: str | None = None) -> None:
 
     missing: list[str] = []
     try:
-        importlib.import_module("sam2")
-    except Exception:
-        missing.append("sam2 package")
+        from ultralytics import SAM  # noqa: F401
+    except Exception as exc:
+        missing.append(f"ultralytics.SAM: {exc}")
 
     sam2_cfg = seg.get("sam2", {}) if isinstance(seg.get("sam2"), dict) else {}
     checkpoint = _PROJECT_ROOT / sam2_cfg.get("checkpoint_path", "models/segmentation/sam2/checkpoint.pt")

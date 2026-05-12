@@ -27,7 +27,7 @@ def _demo_user() -> UserAccount:
         user_id="smoke_user",
         username="smoke_analyst",
         display_name="Smoke Analyst",
-        role="analyst",
+        role="admin",
         status=UserStatus.ACTIVE.value,
         password_hash="x",
         created_at=1.0,
@@ -65,8 +65,7 @@ def main() -> None:
     nodes, edges = build_camera_graph(gis_repo, user)
     print(f"  Nodes: {len(nodes)}, Edges: {len(edges)}")
     if not nodes:
-        print("  WARNING: No camera nodes — seeding may have failed.")
-        return
+        raise SystemExit("FAIL: camera graph is empty after seeding demo GIS profiles")
 
     print("\n[3] Running path reconstruction...")
     req = PathReconstructionRequest(

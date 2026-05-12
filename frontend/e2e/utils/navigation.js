@@ -1,7 +1,7 @@
 /**
  * E2E navigation helpers for the Aegis Sentinel Command Center.
  */
-import { loginIfRequired } from './auth.js'
+import { loginIfRequired, waitForAuthBootstrap } from './auth.js'
 
 /** All known app route hashes */
 export const ROUTES = {
@@ -28,6 +28,11 @@ export async function goTo(page, route) {
   }
   // Give the SPA a moment to hydrate
   await page.waitForLoadState('domcontentloaded')
+  await waitForAuthBootstrap(page)
+  const loginInput = page.locator('input[autocomplete="username"], input[aria-label="Username"]').first()
+  if (await loginInput.isVisible().catch(() => false)) {
+    throw new Error(`Route ${route} did not reach an authenticated shell`)
+  }
 }
 
 /**
