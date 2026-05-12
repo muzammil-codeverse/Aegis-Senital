@@ -11,6 +11,7 @@ Date validated: May 12, 2026
 - Drone pipeline smoke: PASS
 - Mission smoke: PASS
 - Fusion live smoke: PASS
+- Phase 50 live revalidation against the running Blocks runtime: PASS
 - Unresolved blockers: none on the validated setup
 
 ## Baseline environment

@@ -15,6 +15,10 @@
 - [x] LLM case workflow smoke completes with operator-review caveats and source references.
 - [x] Safe wording static guardrails remain active.
 - [x] Accessibility static guardrails remain active.
+- [x] Frontend validation passes locally: `npm run test` (`76/76`), `npm run build`, and `npm run e2e` (`60 passed`, `3 skipped` optional live-drone checks).
+- [x] `local_mock` GIS rendering path works without a paid map token.
+- [x] Model governance and analytics views render in browser validation.
+- [x] Optional live drone validation re-passed against a running Cosys-AirSim Blocks runtime.
 
 ## Demo-Day Checks
 

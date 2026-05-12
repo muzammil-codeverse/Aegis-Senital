@@ -59,11 +59,20 @@ class UserStore:
             fh.write(json.dumps(user.to_record(), sort_keys=True) + "\n")
 
     def _rewrite(self) -> None:
-        tmp = self._path.with_suffix(".jsonl.tmp")
+        tmp = self._path.with_name(f".{self._path.name}.{uuid.uuid4().hex}.tmp")
         with tmp.open("w", encoding="utf-8") as fh:
             for user in self._users.values():
                 fh.write(json.dumps(user.to_record(), sort_keys=True) + "\n")
-        tmp.replace(self._path)
+            fh.flush()
+            os.fsync(fh.fileno())
+        for attempt in range(8):
+            try:
+                tmp.replace(self._path)
+                return
+            except PermissionError:
+                if attempt >= 7:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
 
     @staticmethod
     def _normalize_username(username: str) -> str:

@@ -37,4 +37,4 @@ Aegis Sentinel is currently capable of supporting a final FYP demo across the fu
 - Safe wording checks remain active for phrases such as `Possible incident`, `Possible identity match`, `Candidate cross-source observation`, `Simulated drone feed`, `Operator review required`, `Evidence-backed hypothesis`, `Model limitation`, and `Insufficient data`.
 - Frontend accessibility static checks remain part of the validation toolchain.
 - Frontend performance and bundle-budget checks remain available for release gating.
-- End-to-end and build validation remain available through the frontend test/build toolchain and should be rerun for the final frozen demo package.
+- Current local validation evidence passed with `compileall`, backend `pytest` (`871 passed`, `4 skipped`), frontend unit tests (`76/76`), frontend build, and Playwright E2E (`60 passed`, `3 skipped` optional live-drone checks).
