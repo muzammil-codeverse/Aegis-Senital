@@ -24,6 +24,7 @@ build/
 .env.*
 !.env.example
 !.env.docker.example
+*.local
 
 # Kaggle secrets — never commit tokens
 .kaggle/
@@ -35,6 +36,10 @@ node_modules/
 dist/
 .cache/
 *.log
+coverage/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 
 # IDEs
 .vscode/
@@ -111,6 +116,7 @@ storage/test_outputs/
 storage/cases/
 storage/osint/
 storage/osint_uploads/
+storage/production_readiness/
 
 # Local machine-specific evaluation benchmark overrides
 configs/evaluation/evaluation.local.yaml

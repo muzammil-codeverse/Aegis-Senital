@@ -1,10 +1,8 @@
 import os
-from pathlib import Path
-from dotenv import load_dotenv
 
-# Load .env from the backend/ directory (one level above app/)
-_env_path = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(_env_path)
+from app.core.env_loader import load_project_env
+
+load_project_env()
 
 APP_ENV = os.getenv("APP_ENV", "dev")
 

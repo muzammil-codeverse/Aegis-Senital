@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.core.env_loader import load_project_env
 from app.models.case_models import CaseExport
 from app.models.llm_models import LlmGeneratedOutput, LlmSummaryRequest, SourceReference
 from app.services.audit_log_service import AuditLogService, get_audit_log_service
@@ -52,13 +53,7 @@ LLM_FUSION_SAFETY_CONTEXT = (
 _LLM_SERVICE: "LlmService | None" = None
 _LLM_SERVICE_LOCK = threading.Lock()
 
-try:  # pragma: no cover - optional bootstrap behavior
-    from dotenv import load_dotenv
-
-    load_dotenv(PROJECT_ROOT / ".env")
-    load_dotenv(PROJECT_ROOT / "backend" / ".env")
-except Exception:
-    pass
+load_project_env()
 
 
 def _now_iso() -> str:

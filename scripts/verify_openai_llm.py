@@ -13,6 +13,13 @@ for path in (str(ROOT), str(BACKEND)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
+from app.core.env_loader import load_project_env
+from app.core.secret_safety import sanitize_secret_text
+
+
+def _safe_print(value: str) -> None:
+    print(sanitize_secret_text(value))
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify the configured OpenAI LLM provider.")
@@ -20,6 +27,8 @@ def main() -> int:
     parser.add_argument("--verify-escalation", action="store_true", help="Also verify the configured escalation model.")
     parser.add_argument("--verify-final-report", action="store_true", help="Also verify the configured final report model.")
     args = parser.parse_args()
+
+    load_project_env()
 
     from app.services.llm_service import get_llm_service
 
@@ -29,22 +38,22 @@ def main() -> int:
         include_final_report=args.verify_final_report,
     )
     model = result.get("model") or args.model or "configured default"
-    print(f"Model used: {model}")
+    _safe_print(f"Model used: {model}")
 
     if result.get("status") == "not_verified":
-        print(result.get("detail") or "OpenAI provider not verified.")
+        _safe_print(result.get("detail") or "OpenAI provider not verified.")
         return 0
 
     if result.get("status") != "ok":
-        print(result.get("detail") or "OpenAI provider verification failed.")
+        _safe_print(result.get("detail") or "OpenAI provider verification failed.")
         for item in result.get("models_checked") or []:
-            print(f"Checked {item.get('kind')}: {item.get('model')} -> {item.get('status')}")
+            _safe_print(f"Checked {item.get('kind')}: {item.get('model')} -> {item.get('status')}")
         return 1
 
-    print("Verification result: ok")
-    print(f"Safe response: {result.get('response_preview') or ''}")
+    _safe_print("Verification result: ok")
+    _safe_print(f"Safe response: {result.get('response_preview') or ''}")
     for item in result.get("models_checked") or []:
-        print(f"Checked {item.get('kind')}: {item.get('model')} -> {item.get('status')}")
+        _safe_print(f"Checked {item.get('kind')}: {item.get('model')} -> {item.get('status')}")
     return 0
 
 

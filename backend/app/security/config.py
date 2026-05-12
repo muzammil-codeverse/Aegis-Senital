@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from app.core.env_loader import load_project_env
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -17,12 +19,7 @@ UPLOAD_SECURITY_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "upload_sec
 PRODUCTION_ENVS = {"prod", "production"}
 _DEV_JWT_SECRET: str | None = None
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv(PROJECT_ROOT / "backend" / ".env")
-except Exception:
-    pass
+load_project_env()
 
 
 def _environment_name() -> str:
