@@ -59,8 +59,8 @@ export default function CaseEnrichmentPanel({
               <option value="analyst_note">Analyst note</option>
               <option value="manual_metadata">Manual metadata</option>
             </select>
-            <input value={manualTitle} onChange={event => setManualTitle(event.target.value)} placeholder="Manual source title" />
-            <input value={manualDescription} onChange={event => setManualDescription(event.target.value)} placeholder="Analyst-provided enrichment note" />
+            <input aria-label="Manual source title" value={manualTitle} onChange={event => setManualTitle(event.target.value)} placeholder="Manual source title" />
+            <input aria-label="Analyst enrichment note" value={manualDescription} onChange={event => setManualDescription(event.target.value)} placeholder="Analyst-provided enrichment note" />
             <button type="submit" className="text-button" disabled={enrichmentState?.actionLoading}>Save Manual Source</button>
           </form>
         </>

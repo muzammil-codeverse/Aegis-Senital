@@ -99,7 +99,7 @@ export default function CasesPage({ caseState }) {
             <article className="metric-tile"><span>Requires Review</span><strong>{caseState.requiringReviewCount}</strong></article>
           </div>
           <div className="filter-row case-filter-row">
-            <input value={caseState.filters.q || ''} onChange={event => caseState.setFilters(current => ({ ...current, q: event.target.value }))} placeholder="Search title or case ID" />
+            <input aria-label="Search cases" value={caseState.filters.q || ''} onChange={event => caseState.setFilters(current => ({ ...current, q: event.target.value }))} placeholder="Search title or case ID" />
             <select value={caseState.filters.status || ''} onChange={event => caseState.setFilters(current => ({ ...current, status: event.target.value }))}>
               <option value="">All Statuses</option>
               <option value="open">Open</option>
@@ -115,13 +115,13 @@ export default function CasesPage({ caseState }) {
               <option value="high">High</option>
               <option value="critical">Critical</option>
             </select>
-            <input value={caseState.filters.camera || ''} onChange={event => caseState.setFilters(current => ({ ...current, camera: event.target.value }))} placeholder="Camera ID" />
-            <input value={caseState.filters.tag || ''} onChange={event => caseState.setFilters(current => ({ ...current, tag: event.target.value }))} placeholder="Tag" />
+            <input aria-label="Filter by camera" value={caseState.filters.camera || ''} onChange={event => caseState.setFilters(current => ({ ...current, camera: event.target.value }))} placeholder="Camera ID" />
+            <input aria-label="Filter by tag" value={caseState.filters.tag || ''} onChange={event => caseState.setFilters(current => ({ ...current, tag: event.target.value }))} placeholder="Tag" />
             <button type="button" className="text-button" onClick={() => caseState.refresh()}>Apply Filters</button>
           </div>
           <form className="case-create-form" onSubmit={submitCreate}>
-            <input value={createForm.title} onChange={event => setCreateForm(current => ({ ...current, title: event.target.value }))} placeholder="Case title" />
-            <input value={createForm.description} onChange={event => setCreateForm(current => ({ ...current, description: event.target.value }))} placeholder="Case description" />
+            <input aria-label="Case title" value={createForm.title} onChange={event => setCreateForm(current => ({ ...current, title: event.target.value }))} placeholder="Case title" />
+            <input aria-label="Case description" value={createForm.description} onChange={event => setCreateForm(current => ({ ...current, description: event.target.value }))} placeholder="Case description" />
             <select value={createForm.priority} onChange={event => setCreateForm(current => ({ ...current, priority: event.target.value }))}>
               <option value="low">Low Priority</option>
               <option value="medium">Medium Priority</option>
@@ -134,8 +134,8 @@ export default function CasesPage({ caseState }) {
               <option value="high">High Severity</option>
               <option value="critical">Critical Severity</option>
             </select>
-            <input value={createForm.camera_ids} onChange={event => setCreateForm(current => ({ ...current, camera_ids: event.target.value }))} placeholder="Camera IDs (comma separated)" />
-            <input value={createForm.tags} onChange={event => setCreateForm(current => ({ ...current, tags: event.target.value }))} placeholder="Tags (comma separated)" />
+            <input aria-label="Camera IDs" value={createForm.camera_ids} onChange={event => setCreateForm(current => ({ ...current, camera_ids: event.target.value }))} placeholder="Camera IDs (comma separated)" />
+            <input aria-label="Case tags" value={createForm.tags} onChange={event => setCreateForm(current => ({ ...current, tags: event.target.value }))} placeholder="Tags (comma separated)" />
             <button type="submit" className="primary-button" disabled={caseState.actionLoading}>Create Case</button>
           </form>
         </section>

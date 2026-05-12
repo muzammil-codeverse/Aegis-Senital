@@ -18,8 +18,8 @@ export default function CaseAssignmentPanel({ caseItem, onAssign, busy }) {
         <span>{caseItem?.assigned_to || 'Unassigned'}</span>
       </div>
       <form className="case-inline-form" onSubmit={submit}>
-        <input value={assignedTo} onChange={event => setAssignedTo(event.target.value)} placeholder="Assignee username" />
-        <input value={reason} onChange={event => setReason(event.target.value)} placeholder="Assignment note" />
+        <input aria-label="Assignee username" value={assignedTo} onChange={event => setAssignedTo(event.target.value)} placeholder="Assignee username" />
+        <input aria-label="Assignment note" value={reason} onChange={event => setReason(event.target.value)} placeholder="Assignment note" />
         <button type="submit" className="text-button" disabled={busy}>Assign</button>
       </form>
     </section>

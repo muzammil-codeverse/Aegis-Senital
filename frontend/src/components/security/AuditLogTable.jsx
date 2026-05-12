@@ -16,16 +16,19 @@ export default function AuditLogTable({ logs, loading, error, filters, onFilters
       </div>
       <div className="filter-row">
         <input
+          aria-label="Filter by action"
           placeholder="Action"
           value={filters.action || ''}
           onChange={event => updateFilter('action', event.target.value)}
         />
         <input
+          aria-label="Filter by user"
           placeholder="User"
           value={filters.user_id || ''}
           onChange={event => updateFilter('user_id', event.target.value)}
         />
         <input
+          aria-label="Filter by resource"
           placeholder="Resource"
           value={filters.resource_type || ''}
           onChange={event => updateFilter('resource_type', event.target.value)}

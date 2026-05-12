@@ -40,8 +40,8 @@ export default function ModelRollbackPanel() {
         Metadata-only rollback. Requires <code>enable_file_writes</code> on the file registry in server config.
       </p>
       <div style={{ display: 'grid', gap: 8, maxWidth: 420 }}>
-        <input className="text-input" value={modelKey} onChange={(e) => setModelKey(e.target.value)} />
-        <input className="text-input" value={version} onChange={(e) => setVersion(e.target.value)} />
+        <input aria-label="Model key" className="text-input" value={modelKey} onChange={(e) => setModelKey(e.target.value)} />
+        <input aria-label="Model version" className="text-input" value={version} onChange={(e) => setVersion(e.target.value)} />
         <textarea className="text-input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Audit reason (required)" />
         <button type="button" className="primary-button" onClick={submit}>Execute rollback</button>
       </div>

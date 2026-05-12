@@ -56,6 +56,7 @@ export default function DroneFusionPage() {
         actions={(
           <div className="button-row">
             <input
+              aria-label="Filter by case ID"
               value={caseId}
               onChange={event => setCaseId(event.target.value)}
               placeholder="Filter by case ID"

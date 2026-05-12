@@ -120,6 +120,7 @@ export default function WatchlistPanel({ watchlistHook, identityHook }) {
             <option value="critical">Critical</option>
           </select>
           <input
+            aria-label="Watchlist reason"
             placeholder="Reason (optional)"
             value={form.reason}
             onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
@@ -136,6 +137,7 @@ export default function WatchlistPanel({ watchlistHook, identityHook }) {
             }}
           />
           <input
+            aria-label="Expiry days"
             placeholder="Expires in days (optional)"
             type="number"
             value={form.expires_days}

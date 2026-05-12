@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright artifacts — never commit
+playwright-report/
+test-results/
+.playwright/

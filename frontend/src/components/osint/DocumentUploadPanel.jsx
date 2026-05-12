@@ -26,9 +26,9 @@ export default function DocumentUploadPanel({ busy, disabled, onUpload }) {
 
   return (
     <form className="case-inline-form" onSubmit={submit}>
-      <input type="file" accept=".pdf,.txt,.md,.json,.csv,.png,.jpg,.jpeg" onChange={event => setFile(event.target.files?.[0] || null)} />
-      <input value={form.title} onChange={event => setForm(current => ({ ...current, title: event.target.value }))} placeholder="Upload title" />
-      <input value={form.description} onChange={event => setForm(current => ({ ...current, description: event.target.value }))} placeholder="Analyst note for upload" />
+      <input aria-label="Upload document file" type="file" accept=".pdf,.txt,.md,.json,.csv,.png,.jpg,.jpeg" onChange={event => setFile(event.target.files?.[0] || null)} />
+      <input aria-label="Document title" value={form.title} onChange={event => setForm(current => ({ ...current, title: event.target.value }))} placeholder="Upload title" />
+      <input aria-label="Analyst note" value={form.description} onChange={event => setForm(current => ({ ...current, description: event.target.value }))} placeholder="Analyst note for upload" />
       <select value={form.source_reliability} onChange={event => setForm(current => ({ ...current, source_reliability: event.target.value }))}>
         <option value="unknown">Reliability unknown</option>
         <option value="low">Reliability low</option>

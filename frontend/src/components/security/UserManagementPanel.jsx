@@ -105,17 +105,20 @@ export default function UserManagementPanel() {
       {error && <div className="form-error">{error}</div>}
       <form className="inline-form user-form" onSubmit={submit}>
         <input
+          aria-label="Username"
           placeholder="Username"
           value={form.username}
           onChange={event => setForm({ ...form, username: event.target.value })}
           required
         />
         <input
+          aria-label="Display name"
           placeholder="Display name"
           value={form.display_name}
           onChange={event => setForm({ ...form, display_name: event.target.value })}
         />
         <input
+          aria-label="Temporary password"
           type="password"
           placeholder="Temporary password"
           value={form.password}
@@ -181,6 +184,7 @@ export default function UserManagementPanel() {
         <form className="inline-form reset-form" onSubmit={submitReset}>
           <strong>Reset password for {resetTarget.username}</strong>
           <input
+            aria-label="New password"
             type="password"
             placeholder="New password"
             value={resetPassword}

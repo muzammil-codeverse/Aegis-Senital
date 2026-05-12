@@ -134,6 +134,7 @@ export default function OpenVocabScanPanel({ onScanCamera, onScanImage, onScanIn
                 </select>
               ) : (
                 <input
+                  aria-label="Camera ID"
                   type="text"
                   value={cameraId}
                   onChange={e => setCameraId(e.target.value)}
@@ -155,6 +156,7 @@ export default function OpenVocabScanPanel({ onScanCamera, onScanImage, onScanIn
               <label style={{ display: 'block', fontSize: '0.6rem', color: '#4b5563', marginBottom: 3 }}>Image File (.jpg .jpeg .png, max 10 MB)</label>
               <input
                 ref={fileRef}
+                aria-label="Upload image for scan"
                 type="file"
                 accept=".jpg,.jpeg,.png"
                 style={{ color: '#e5e7eb', fontSize: '0.75rem' }}
@@ -172,6 +174,7 @@ export default function OpenVocabScanPanel({ onScanCamera, onScanImage, onScanIn
             <div style={{ flex: 1 }}>
               <label style={{ display: 'block', fontSize: '0.6rem', color: '#4b5563', marginBottom: 3 }}>Incident ID</label>
               <input
+                aria-label="Incident ID"
                 type="text"
                 value={incidentId}
                 onChange={e => setIncidentId(e.target.value)}

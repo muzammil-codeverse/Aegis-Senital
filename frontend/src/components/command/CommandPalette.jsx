@@ -20,6 +20,7 @@ export default function CommandPalette({
         <div className="command-palette__search">
           <Search size={16} />
           <input
+            aria-label="Search command palette"
             autoFocus
             value={query}
             onChange={event => onQueryChange(event.target.value)}

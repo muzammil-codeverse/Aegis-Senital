@@ -29,6 +29,7 @@ export default function CreateCaseFromVideoButton({ session, disabled = false, o
       </label>
       <div className="button-row">
         <input
+          aria-label="Case title override"
           value={title}
           onChange={event => setTitle(event.target.value)}
           placeholder="Optional case title override"

@@ -79,6 +79,7 @@ export default function PromptLibraryPanel({ prompts, onDisable, onUpdate, onCre
           <div style={{ flex: '2 1 200px' }}>
             <label style={{ display: 'block', fontSize: '0.6rem', color: '#4b5563', marginBottom: 3 }}>Prompt Text *</label>
             <input
+              aria-label="Prompt text"
               type="text"
               value={formState.text}
               onChange={e => setFormState(s => ({ ...s, text: e.target.value }))}
@@ -109,6 +110,7 @@ export default function PromptLibraryPanel({ prompts, onDisable, onUpdate, onCre
           <div style={{ flex: '0 1 80px' }}>
             <label style={{ display: 'block', fontSize: '0.6rem', color: '#4b5563', marginBottom: 3 }}>Threshold</label>
             <input
+              aria-label="Confidence threshold"
               type="number"
               step="0.01" min="0" max="1"
               value={formState.threshold}
@@ -176,6 +178,7 @@ export default function PromptLibraryPanel({ prompts, onDisable, onUpdate, onCre
                     <td style={{ padding: '6px 8px', textAlign: 'center', color: '#6b7280' }}>
                       {isEditing ? (
                         <input
+                          aria-label="Edit confidence threshold"
                           type="number"
                           step="0.01" min="0" max="1"
                           value={editState.threshold ?? String(p.threshold)}

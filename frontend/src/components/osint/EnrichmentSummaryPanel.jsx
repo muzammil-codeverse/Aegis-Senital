@@ -21,7 +21,7 @@ export default function EnrichmentSummaryPanel({ items = [], sourceCount = 0, bu
         <span>Source-grounded summary</span>
       </div>
       <form className="case-inline-form" onSubmit={submit}>
-        <input value={operatorInstructions} onChange={event => setOperatorInstructions(event.target.value)} placeholder="Optional summarization instructions" />
+        <input aria-label="Summarization instructions" value={operatorInstructions} onChange={event => setOperatorInstructions(event.target.value)} placeholder="Optional summarization instructions" />
         <button type="submit" className="text-button" disabled={busy || !canSummarize || sourceCount === 0}>
           Summarize Enrichment
         </button>

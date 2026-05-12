@@ -85,6 +85,7 @@ export default function EnrollmentPanel({
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
             ref={inputRef}
+            aria-label="Upload identity images"
             type="file"
             multiple
             accept=".jpg,.jpeg,.png"

@@ -57,6 +57,7 @@ export default function UploadedVideoDropzone({ onUpload, busy = false }) {
       {localError ? <p className="error-text">{localError}</p> : null}
       <input
         ref={inputRef}
+        aria-label="Upload video file"
         type="file"
         accept=".mp4,.avi,.mov,.mkv,video/mp4,video/x-msvideo,video/quicktime,video/x-matroska"
         hidden

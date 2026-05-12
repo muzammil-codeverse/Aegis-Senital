@@ -5,7 +5,6 @@ Checks for:
   - button elements with no text or aria-label
   - img elements with no alt or role="presentation"
   - input elements with no label or aria-label
-  - icon-only buttons (detects lucide Icon components with no aria-label on parent button)
 
 Run:
   python scripts/check_frontend_accessibility_static.py --warn-only
@@ -31,10 +30,56 @@ PATTERNS = [
     ),
     (
         "input-no-label",
-        re.compile(r'<input\b(?![^>]*\baria-label=)(?![^>]*\bid=)[^>]*/?>'),
+        # Matches <input ...> or <input .../> tags that stop at the first > (may be inside JSX handler)
+        re.compile(r'<input\b[^>]*/?>'),
         "input element may be missing aria-label or id for label association",
     ),
 ]
+
+_LABEL_OPEN = re.compile(r'<label\b')
+_LABEL_CLOSE = re.compile(r'</label\s*>')
+
+# Scan ahead up to this many characters to find the real end of an input tag
+# when the tag spans multiple lines or contains JSX arrow functions.
+_TAG_SCAN_LIMIT = 800
+
+
+def _get_full_tag(content, match_start):
+    """Return the full input tag text, handling multi-line and JSX arrow functions."""
+    # Start from match_start and scan for the closing />
+    scan = content[match_start: match_start + _TAG_SCAN_LIMIT]
+    # Find /> that closes the self-closing input tag
+    end = re.search(r'/>', scan)
+    if end:
+        return scan[: end.end()]
+    # Fallback: single > close
+    end = re.search(r'(?<!=)>(?!\s*<)', scan)
+    if end:
+        return scan[: end.end()]
+    return scan[:200]
+
+
+def _tag_has_label(tag_text):
+    """Return True if the tag text contains aria-label= or id=."""
+    return bool(re.search(r'\baria-label=', tag_text) or re.search(r'\bid=', tag_text))
+
+
+def _is_inside_label(content, match_start):
+    """Return True if the match position appears to be inside a <label> element.
+
+    Find the last <label> open position and last </label> close position that
+    both appear before the match.  If the last open is closer to the match
+    than the last close, the input is inside an open label.
+    """
+    preceding = content[:match_start]
+    opens = [m.start() for m in _LABEL_OPEN.finditer(preceding)]
+    closes = [m.start() for m in _LABEL_CLOSE.finditer(preceding)]
+    if not opens:
+        return False
+    last_open = opens[-1]
+    if not closes:
+        return True
+    return last_open > closes[-1]
 
 
 def check_file(filepath, findings, warn_only):
@@ -42,6 +87,15 @@ def check_file(filepath, findings, warn_only):
         content = fh.read()
     for check_id, pattern, message in PATTERNS:
         for match in pattern.finditer(content):
+            if check_id == "input-no-label":
+                # Get the full tag (across arrow functions / multi-line)
+                full_tag = _get_full_tag(content, match.start())
+                # Skip if the full tag already has aria-label= or id=
+                if _tag_has_label(full_tag):
+                    continue
+                # Skip if inside a <label> element
+                if _is_inside_label(content, match.start()):
+                    continue
             lineno = content[: match.start()].count("\n") + 1
             findings.append({
                 "file": filepath,
@@ -68,11 +122,10 @@ def main():
         print("[a11y-static] No accessibility issues found.")
         sys.exit(0)
 
-    # Group by check type for summary
     from collections import Counter
     counts = Counter(f["check"] for f in findings)
     print(f"[a11y-static] {len(findings)} potential accessibility issue(s) found:\n")
-    for f in findings[:40]:  # Cap output
+    for f in findings[:40]:
         print(f"  {f['file']}:{f['line']} [{f['check']}] {f['message']}")
         print(f"    snippet: {f['snippet']}")
     if len(findings) > 40:

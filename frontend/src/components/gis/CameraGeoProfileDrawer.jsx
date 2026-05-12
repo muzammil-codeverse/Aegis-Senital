@@ -17,21 +17,21 @@ export default function CameraGeoProfileDrawer({ open, profile, canWrite, onClos
       </div>
       <div className="drawer-grid" style={{ fontSize: '0.75rem' }}>
         <span>Latitude</span>
-        <input value={form.latitude ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))} />
+        <input aria-label="Latitude" value={form.latitude ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))} />
         <span>Longitude</span>
-        <input value={form.longitude ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))} />
+        <input aria-label="Longitude" value={form.longitude ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))} />
         <span>Altitude (m)</span>
-        <input value={form.altitude_meters ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, altitude_meters: e.target.value }))} />
+        <input aria-label="Altitude (m)" value={form.altitude_meters ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, altitude_meters: e.target.value }))} />
         <span>Heading °</span>
-        <input value={form.heading_degrees ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, heading_degrees: e.target.value }))} />
+        <input aria-label="Heading degrees" value={form.heading_degrees ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, heading_degrees: e.target.value }))} />
         <span>FOV °</span>
-        <input value={form.fov_degrees ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, fov_degrees: e.target.value }))} />
+        <input aria-label="Field of view degrees" value={form.fov_degrees ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, fov_degrees: e.target.value }))} />
         <span>Coverage radius (m)</span>
-        <input value={form.coverage_radius_meters ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, coverage_radius_meters: e.target.value }))} />
+        <input aria-label="Coverage radius (m)" value={form.coverage_radius_meters ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, coverage_radius_meters: e.target.value }))} />
         <span>Region</span>
-        <input value={form.region ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, region: e.target.value }))} />
+        <input aria-label="Region" value={form.region ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, region: e.target.value }))} />
         <span>Floor</span>
-        <input value={form.floor_level ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, floor_level: e.target.value }))} />
+        <input aria-label="Floor level" value={form.floor_level ?? ''} disabled={!canWrite} onChange={e => setForm(f => ({ ...f, floor_level: e.target.value }))} />
       </div>
       {canWrite ? (
         <div className="button-row" style={{ marginTop: 12 }}>

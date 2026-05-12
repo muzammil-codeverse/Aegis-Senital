@@ -34,7 +34,7 @@ export default function CaseNotesPanel({ items = [], onAddNote, busy }) {
         </div>
       )}
       <form className="case-inline-form" onSubmit={submit}>
-        <input value={note} onChange={event => setNote(event.target.value)} placeholder="Add operator note" />
+        <input aria-label="Add operator note" value={note} onChange={event => setNote(event.target.value)} placeholder="Add operator note" />
         <button type="submit" className="text-button" disabled={busy}>Add Note</button>
       </form>
     </section>

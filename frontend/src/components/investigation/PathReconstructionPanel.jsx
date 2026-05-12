@@ -33,12 +33,14 @@ export default function PathReconstructionPanel({
         <div className="font-semibold text-gray-700">Path Reconstruction</div>
         <div className="flex gap-2">
           <input
+            aria-label="Case ID"
             className="flex-1 rounded border px-2 py-1 text-xs"
             placeholder="Case ID (optional)"
             value={caseId}
             onChange={(e) => setCaseId(e.target.value)}
           />
           <input
+            aria-label="Event ID"
             className="flex-1 rounded border px-2 py-1 text-xs"
             placeholder="Event ID (optional)"
             value={eventId}

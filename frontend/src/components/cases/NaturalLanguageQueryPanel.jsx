@@ -21,6 +21,7 @@ export default function NaturalLanguageQueryPanel({ output, busy, onAsk, canGene
       </div>
       <form className="llm-query-form" onSubmit={submit}>
         <input
+          aria-label="Ask a grounded question about this case"
           value={question}
           onChange={event => setQuestion(event.target.value)}
           placeholder="Ask a grounded question about this case"

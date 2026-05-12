@@ -25,6 +25,7 @@ export default function ModelDriftPanel({ loadDrift }) {
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
         <input
+          aria-label="Model ID"
           className="text-input"
           value={modelId}
           onChange={(e) => setModelId(e.target.value)}

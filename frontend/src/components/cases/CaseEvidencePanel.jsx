@@ -158,9 +158,9 @@ export default function CaseEvidencePanel({
         </div>
       )}
       <form className="case-inline-form" onSubmit={submitUpload}>
-        <input type="file" accept=".mp4,.avi,.mov,.mkv,.jpg,.jpeg,.png,.pdf,.txt,.md,.json,.csv" onChange={event => setUploadForm(current => ({ ...current, file: event.target.files?.[0] || null }))} />
-        <input value={uploadForm.title} onChange={event => setUploadForm(current => ({ ...current, title: event.target.value }))} placeholder="Upload title" />
-        <input value={uploadForm.description} onChange={event => setUploadForm(current => ({ ...current, description: event.target.value }))} placeholder="Upload description" />
+        <input aria-label="Upload evidence file" type="file" accept=".mp4,.avi,.mov,.mkv,.jpg,.jpeg,.png,.pdf,.txt,.md,.json,.csv" onChange={event => setUploadForm(current => ({ ...current, file: event.target.files?.[0] || null }))} />
+        <input aria-label="Upload title" value={uploadForm.title} onChange={event => setUploadForm(current => ({ ...current, title: event.target.value }))} placeholder="Upload title" />
+        <input aria-label="Upload description" value={uploadForm.description} onChange={event => setUploadForm(current => ({ ...current, description: event.target.value }))} placeholder="Upload description" />
         <select value={uploadForm.evidence_type} onChange={event => setUploadForm(current => ({ ...current, evidence_type: event.target.value }))}>
           <option value="upload">Upload</option>
           <option value="image">Image</option>
@@ -176,9 +176,9 @@ export default function CaseEvidencePanel({
           <option value="system_report">System Report</option>
           <option value="external_link">External Link</option>
         </select>
-        <input value={form.title} onChange={event => setForm(current => ({ ...current, title: event.target.value }))} placeholder="Evidence title" />
-        <input value={form.source_event_id} onChange={event => setForm(current => ({ ...current, source_event_id: event.target.value }))} placeholder="Source event ID" />
-        <input value={form.storage_uri} onChange={event => setForm(current => ({ ...current, storage_uri: event.target.value }))} placeholder="Reference URI" />
+        <input aria-label="Evidence title" value={form.title} onChange={event => setForm(current => ({ ...current, title: event.target.value }))} placeholder="Evidence title" />
+        <input aria-label="Source event ID" value={form.source_event_id} onChange={event => setForm(current => ({ ...current, source_event_id: event.target.value }))} placeholder="Source event ID" />
+        <input aria-label="Reference URI" value={form.storage_uri} onChange={event => setForm(current => ({ ...current, storage_uri: event.target.value }))} placeholder="Reference URI" />
         <button type="submit" className="text-button" disabled={busy}>Attach</button>
       </form>
       {caseId && defaultCameraId && (

@@ -98,6 +98,7 @@ export default function IncidentReplayDrawer({ incident, open, onClose }) {
                     ◀
                   </button>
                   <input
+                    aria-label="Replay timeline position"
                     type="range"
                     min={0}
                     max={frames.length - 1}

@@ -37,6 +37,7 @@ export default function MapProviderCanvas({ provider, mapConfig, cameras, childr
     return <div ref={hostRef} style={{ width: '100%', height: '100%', minHeight: 420 }} />
   }
 
+  const missingToken = provider === 'mapbox' && !token
   const bbox = computeBboxFromCameras(cameras || [])
   return (
     <div
@@ -61,7 +62,9 @@ export default function MapProviderCanvas({ provider, mapConfig, cameras, childr
         <rect width="100%" height="100%" fill="url(#grid)" />
       </svg>
       <div style={{ position: 'absolute', left: 12, top: 10, fontSize: 11, color: '#8da3bf' }}>
-        Map provider: local_mock (no external tile key)
+        {missingToken
+          ? 'Mapbox provider: VITE_MAPBOX_TOKEN not set — using local mock'
+          : 'Map provider: local_mock (no external tile key)'}
       </div>
       {children?.({ bbox, project: (lat, lon) => projectLatLon(lat, lon, bbox) })}
     </div>

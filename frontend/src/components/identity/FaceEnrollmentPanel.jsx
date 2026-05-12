@@ -43,6 +43,7 @@ export default function FaceEnrollmentPanel({ identityId, enrollments, uploadFac
         </button>
         <input
           ref={inputRef}
+          aria-label="Upload face image"
           type="file"
           accept=".jpg,.jpeg,.png"
           onChange={handleUpload}

@@ -56,18 +56,21 @@ export default function IdentityTable({
       {showCreate && (
         <div style={{ padding: '12px', borderBottom: '1px solid #21262d', background: '#0d1117' }}>
           <input
+            aria-label="Display name"
             placeholder="Display name"
             value={form.display_name}
             onChange={(event) => setForm((current) => ({ ...current, display_name: event.target.value }))}
             style={{ width: '100%', padding: '6px 8px', marginBottom: '6px', background: '#21262d', border: '1px solid #30363d', borderRadius: '4px', color: '#e6edf3', fontSize: '12px', boxSizing: 'border-box' }}
           />
           <input
+            aria-label="Tags (comma-separated)"
             placeholder="Tags (comma-separated)"
             value={form.tags}
             onChange={(event) => setForm((current) => ({ ...current, tags: event.target.value }))}
             style={{ width: '100%', padding: '6px 8px', marginBottom: '6px', background: '#21262d', border: '1px solid #30363d', borderRadius: '4px', color: '#e6edf3', fontSize: '12px', boxSizing: 'border-box' }}
           />
           <input
+            aria-label="Notes"
             placeholder="Notes"
             value={form.notes}
             onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}

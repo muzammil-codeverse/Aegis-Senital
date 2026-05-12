@@ -16,6 +16,7 @@ export default function FusionReviewControls({ correlationId, reviewStatus, onRe
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <input
+        aria-label="Review notes"
         value={notes}
         onChange={e => setNotes(e.target.value)}
         placeholder="Review notes (optional)"
