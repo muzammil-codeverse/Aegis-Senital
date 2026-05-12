@@ -548,6 +548,46 @@ def validate_drone_simulation_configuration(profile: str) -> list[dict]:
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
 
+def validate_drone_mission_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[Drone Mission Planner]")
+    path = ROOT / "configs" / "runtime" / "drone_mission.yaml"
+    if not path.exists():
+        results.append(check("drone mission config", False, str(path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("drone mission config parseable", False, str(exc), required=True))
+        return results
+
+    mission_cfg = cfg.get("drone_mission", cfg)
+    enabled = bool(mission_cfg.get("enabled", True))
+    provider = str(mission_cfg.get("provider") or "cosys_airsim")
+    safety = dict(mission_cfg.get("safety") or {})
+    storage = dict(mission_cfg.get("storage") or {})
+
+    results.append(check("drone mission enabled", True, "enabled" if enabled else "disabled", required=False))
+    results.append(check("drone mission provider", provider == "cosys_airsim", provider, required=True))
+    results.append(check("drone mission simulated_only", bool(safety.get("simulated_only", True)), "simulated_only=true", required=True))
+    results.append(check("drone mission require_operator_start", bool(safety.get("require_operator_start", True)), "required", required=True))
+    results.append(check("drone mission prohibit_real_world_claims", bool(safety.get("prohibit_real_world_claims", True)), "prohibited", required=True))
+
+    if not enabled:
+        return results
+
+    root_dir = ROOT / str(storage.get("root_dir") or "storage/drone_missions")
+    tel_dir = ROOT / str(storage.get("telemetry_dir") or "storage/drone_missions/telemetry")
+    rep_dir = ROOT / str(storage.get("reports_dir") or "storage/drone_missions/reports")
+    for d in (root_dir, tel_dir, rep_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    results.append(check("storage/drone_missions", os.access(str(root_dir), os.W_OK), str(root_dir), required=profile == "production"))
+    results.append(check("storage/drone_missions/telemetry", os.access(str(tel_dir), os.W_OK), str(tel_dir), required=profile == "production"))
+    results.append(check("storage/drone_missions/reports", os.access(str(rep_dir), os.W_OK), str(rep_dir), required=profile == "production"))
+
+    return results
+
+
 def validate(profile: str) -> None:
     print("Aegis Sentinel — Runtime Validation")
     print("=" * 50)
@@ -579,6 +619,7 @@ def validate(profile: str) -> None:
         "configs/runtime/uploaded_video.yaml",
         "configs/runtime/gis.yaml",
         "configs/runtime/drone_simulation.yaml",
+        "configs/runtime/drone_mission.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -780,6 +821,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(drone_results)
+
+    drone_mission_results = validate_drone_mission_configuration(profile)
+    for r in drone_mission_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(drone_mission_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)

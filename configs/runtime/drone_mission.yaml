@@ -1,0 +1,47 @@
+drone_mission:
+  enabled: true
+
+  provider: "cosys_airsim"
+
+  mission:
+    max_waypoints: 50
+    min_waypoints: 2
+    default_altitude_meters: 40
+    default_velocity_mps: 5
+    waypoint_reach_tolerance_meters: 3
+    command_timeout_seconds: 15
+    pause_between_waypoints_seconds: 0.5
+    allow_loop_patrol: true
+    allow_return_to_home: true
+
+  safety:
+    simulated_only: true
+    require_operator_start: true
+    prohibit_real_world_claims: true
+    require_mission_audit: true
+    require_geofence_check: true
+
+  gis:
+    use_geofences: true
+    show_mission_route: true
+    show_completed_path: true
+    show_waypoint_markers: true
+
+  execution:
+    persist_telemetry: true
+    persist_mission_events: true
+    attach_observations_to_investigation: true
+    create_incidents_for_high_risk_events: true
+
+  storage:
+    dev_backend: "jsonl"
+    production_backend: "postgres"
+    root_dir: "storage/drone_missions"
+    telemetry_dir: "storage/drone_missions/telemetry"
+    reports_dir: "storage/drone_missions/reports"
+
+  replay:
+    enabled: true
+    generate_mission_summary: true
+    include_telemetry_path: true
+    include_detection_summary: true

@@ -102,6 +102,7 @@ rbac:
     - "investigation:write"
     - "drone:read"
     - "drone:control"
+    - "drone:mission"
   analyst:
     - "camera:read"
     - "analytics:read"
@@ -140,6 +141,7 @@ rbac:
     - "investigation:read"
     - "investigation:write"
     - "drone:read"
+    - "drone:mission"
   operator:
     - "camera:read"
     - "camera:control"
@@ -173,6 +175,7 @@ rbac:
     - "investigation:read"
     - "drone:read"
     - "drone:control"
+    - "drone:mission"
   viewer:
     - "camera:read"
     - "analytics:read"

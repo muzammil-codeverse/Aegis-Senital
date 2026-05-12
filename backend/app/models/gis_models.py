@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-GeoSourceType = Literal["live_stream", "uploaded_video", "drone_simulation"]
+GeoSourceType = Literal["live_stream", "uploaded_video", "drone_simulation", "drone_mission"]
 ZoneType = Literal["restricted", "patrol", "safe", "high_risk"]
 SeverityLevel = Literal["low", "medium", "high", "critical"]
 
@@ -207,6 +207,10 @@ class MapLayerResponse(BaseModel):
     heatmap_cells: list[RiskHeatmapCell] = Field(default_factory=list)
     geofences: list[GeoFenceZone] = Field(default_factory=list)
     drone_paths: list[DronePathOverlay] = Field(default_factory=list)
+    drone_mission_routes: list[dict[str, Any]] = Field(default_factory=list)
+    drone_mission_waypoints: list[dict[str, Any]] = Field(default_factory=list)
+    active_mission_paths: list[dict[str, Any]] = Field(default_factory=list)
+    completed_mission_paths: list[dict[str, Any]] = Field(default_factory=list)
     stream_status_by_camera: dict[str, Any] = Field(default_factory=dict)
     viewport: MapViewportRequest | None = None
 

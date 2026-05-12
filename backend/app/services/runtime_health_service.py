@@ -437,6 +437,36 @@ class RuntimeHealthService:
                 "last_error": str(exc)[:160],
             }
 
+    def _check_drone_mission(self) -> dict:
+        """Return health status for the drone patrol mission planner (Phase 45)."""
+        try:
+            from app.repositories.drone_mission_repository import get_drone_mission_repository
+            from app.models.drone_mission_models import DroneMissionStatus
+
+            repo = get_drone_mission_repository()
+            health = repo.health_check()
+            missions = repo.list_missions(limit=200)
+            active_sessions = sum(
+                1 for m in missions if m.status == DroneMissionStatus.EXECUTING
+            )
+            return {
+                "enabled": True,
+                "simulated_only": True,
+                "storage_backend": health.get("storage_backend", "jsonl"),
+                "status": health.get("status", "healthy"),
+                "mission_count": health.get("mission_count", 0),
+                "session_count": health.get("session_count", 0),
+                "active_sessions": active_sessions,
+                "last_error": None,
+            }
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "simulated_only": True,
+                "status": "degraded",
+                "last_error": str(exc)[:160],
+            }
+
     def _check_analytics(self) -> dict:
         production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
         try:
@@ -818,6 +848,7 @@ class RuntimeHealthService:
         gis = self._check_gis()
         investigation = self._check_investigation()
         drone_simulation = self._check_drone_simulation()
+        drone_mission = self._check_drone_mission()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -840,6 +871,7 @@ class RuntimeHealthService:
             "gis": gis,
             "investigation": investigation,
             "drone_simulation": drone_simulation,
+            "drone_mission": drone_mission,
         }
 
         if not include_sensitive:

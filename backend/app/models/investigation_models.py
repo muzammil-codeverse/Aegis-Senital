@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 SubjectRefType = Literal["track", "identity_candidate", "manual", "event"]
 ReviewStatus = Literal["pending", "accepted", "rejected", "inconclusive"]
 HypothesisStepMode = Literal["walk", "run", "vehicle", "unknown"]
-HypothesisStepType = Literal["fixed_camera", "drone_observation", "uploaded_video"]
+HypothesisStepType = Literal["fixed_camera", "drone_observation", "uploaded_video", "drone_mission_telemetry", "drone_mission_event", "drone_mission_waypoint"]
 
 
 class InvestigationSubjectRef(BaseModel):

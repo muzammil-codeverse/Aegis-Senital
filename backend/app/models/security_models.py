@@ -83,6 +83,18 @@ class AuditAction(Enum):
     DRONE_COMMAND_ISSUED = "drone_command_issued"
     DRONE_COMMAND_DENIED = "drone_command_denied"
     DRONE_FRAME_ACCESSED = "drone_frame_accessed"
+    # Phase 45 — Drone Patrol Mission Planner
+    DRONE_MISSION_CREATED = "drone_mission_created"
+    DRONE_MISSION_UPDATED = "drone_mission_updated"
+    DRONE_MISSION_DELETED = "drone_mission_deleted"
+    DRONE_MISSION_STARTED = "drone_mission_started"
+    DRONE_MISSION_PAUSED = "drone_mission_paused"
+    DRONE_MISSION_RESUMED = "drone_mission_resumed"
+    DRONE_MISSION_CANCELLED = "drone_mission_cancelled"
+    DRONE_MISSION_VIEWED = "drone_mission_viewed"
+    DRONE_MISSION_REPORT_VIEWED = "drone_mission_report_viewed"
+    DRONE_MISSION_TELEMETRY_VIEWED = "drone_mission_telemetry_viewed"
+    DRONE_MISSION_ACCESS_DENIED = "drone_mission_access_denied"
 
 
 SENSITIVE_AUDIT_KEYS = {

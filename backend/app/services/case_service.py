@@ -61,6 +61,10 @@ _EVIDENCE_TYPE_BY_EVENT = {
     "anomaly_event": "anomaly",
     "identity_match": "identity",
     "restricted_zone_intrusion": "event",
+    # Phase 45 — drone patrol mission evidence types (all simulated)
+    "drone_mission_report": "drone_mission_report",
+    "drone_mission_telemetry_manifest": "drone_mission_telemetry_manifest",
+    "drone_mission_event": "drone_mission_event",
 }
 _ALLOWED_STATUS_TRANSITIONS = {
     "open": {"investigating", "resolved", "dismissed", "archived"},

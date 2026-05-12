@@ -106,6 +106,46 @@ def _uploaded_video_replay_counts() -> dict[str, int]:
     }
 
 
+def _drone_mission_analytics_counts() -> dict[str, int]:
+    """Best-effort drone patrol mission stats from the JSONL repository."""
+    try:
+        from app.repositories.drone_mission_repository import get_drone_mission_repository
+        from app.models.drone_mission_models import DroneMissionStatus
+
+        repo = get_drone_mission_repository()
+        missions = repo.list_missions(limit=500)
+        today_count = 0
+        active_count = 0
+        failure_count = 0
+        observation_count = 0
+        today_str = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).date().isoformat()
+        for m in missions:
+            created = str(m.created_at or "")
+            if created.startswith(today_str):
+                today_count += 1
+            if m.status == DroneMissionStatus.EXECUTING:
+                active_count += 1
+            if m.status == DroneMissionStatus.FAILED:
+                failure_count += 1
+        # Count telemetry observations across all sessions
+        sessions = repo.list_sessions(limit=200)
+        for s in sessions:
+            observation_count += s.telemetry_count
+        return {
+            "drone_missions_today": today_count,
+            "active_simulated_patrols": active_count,
+            "drone_observations": observation_count,
+            "mission_failures": failure_count,
+        }
+    except Exception:
+        return {
+            "drone_missions_today": 0,
+            "active_simulated_patrols": 0,
+            "drone_observations": 0,
+            "mission_failures": 0,
+        }
+
+
 def _bucket_windows(start: datetime, end: datetime, bucket: str) -> list[tuple[datetime, datetime]]:
     delta = _bucket_duration(bucket)
     windows: list[tuple[datetime, datetime]] = []
@@ -196,6 +236,7 @@ class AnalyticsService:
                 uploaded_video_replay_clips_generated_total=int(replay_counts.get("uploaded_video_replay_clips_generated_total", 0)),
                 uploaded_video_events_with_clips=int(replay_counts.get("uploaded_video_events_with_clips", 0)),
                 uploaded_video_events_without_clips=int(replay_counts.get("uploaded_video_events_without_clips", 0)),
+                **_drone_mission_analytics_counts(),
             )
             top_risk = camera_risk[0] if camera_risk else None
             return DashboardOverview(
