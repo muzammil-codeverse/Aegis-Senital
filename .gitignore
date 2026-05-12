@@ -114,3 +114,21 @@ storage/osint_uploads/
 
 # Local machine-specific evaluation benchmark overrides
 configs/evaluation/evaluation.local.yaml
+
+# External drone/simulation artifacts
+AegisExternalTools/
+drone_sim/
+*.umap
+*.uasset
+*.pak
+*.uproject
+*.sln
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# Runtime drone outputs
+storage/drone_sim/
+storage/drone_frames/
+storage/drone_telemetry/
