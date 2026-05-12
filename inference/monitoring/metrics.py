@@ -208,6 +208,26 @@ class SystemMetrics:
         self.uploaded_video_replay_clip_latency_ms: float = 0.0
         self.anomaly_live_eval_runs_total: int = 0
         self.anomaly_live_eval_failures_total: int = 0
+        self.drone_sim_connection_attempts_total: int = 0
+        self.drone_sim_connection_failures_total: int = 0
+        self.drone_sim_frames_captured_total: int = 0
+        self.drone_sim_frames_processed_total: int = 0
+        self.drone_sim_telemetry_updates_total: int = 0
+        self.drone_sim_commands_total: int = 0
+        self.drone_sim_command_failures_total: int = 0
+        self.drone_sim_frame_latency_ms: float = 0.0
+        self.drone_sim_active_sessions: int = 0
+        # Phase 45 — drone patrol mission planner metrics (all simulated)
+        self.drone_missions_created_total: int = 0
+        self.drone_missions_started_total: int = 0
+        self.drone_missions_completed_total: int = 0
+        self.drone_missions_failed_total: int = 0
+        self.drone_mission_waypoints_reached_total: int = 0
+        self.drone_mission_telemetry_points_total: int = 0
+        self.drone_mission_events_total: int = 0
+        self.drone_mission_duration_seconds_sum: float = 0.0
+        self.drone_mission_duration_seconds_count: int = 0
+        self.drone_mission_active_sessions: int = 0
 
     # ── counter increments ────────────────────────────────────────────────────
 
@@ -493,6 +513,15 @@ class SystemMetrics:
                 "uploaded_video_replay_clip_latency_ms": self.uploaded_video_replay_clip_latency_ms,
                 "anomaly_live_eval_runs_total": self.anomaly_live_eval_runs_total,
                 "anomaly_live_eval_failures_total": self.anomaly_live_eval_failures_total,
+                "drone_sim_connection_attempts_total": self.drone_sim_connection_attempts_total,
+                "drone_sim_connection_failures_total": self.drone_sim_connection_failures_total,
+                "drone_sim_frames_captured_total": self.drone_sim_frames_captured_total,
+                "drone_sim_frames_processed_total": self.drone_sim_frames_processed_total,
+                "drone_sim_telemetry_updates_total": self.drone_sim_telemetry_updates_total,
+                "drone_sim_commands_total": self.drone_sim_commands_total,
+                "drone_sim_command_failures_total": self.drone_sim_command_failures_total,
+                "drone_sim_frame_latency_ms": self.drone_sim_frame_latency_ms,
+                "drone_sim_active_sessions": self.drone_sim_active_sessions,
             }
 
 

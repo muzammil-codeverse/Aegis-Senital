@@ -162,6 +162,15 @@ class SystemMetrics:
         self.uploaded_video_events_generated_total = 0
         self.uploaded_video_processing_latency_ms = 0.0
         self.uploaded_video_active_sessions = 0
+        self.drone_sim_connection_attempts_total = 0
+        self.drone_sim_connection_failures_total = 0
+        self.drone_sim_frames_captured_total = 0
+        self.drone_sim_frames_processed_total = 0
+        self.drone_sim_telemetry_updates_total = 0
+        self.drone_sim_commands_total = 0
+        self.drone_sim_command_failures_total = 0
+        self.drone_sim_frame_latency_ms = 0.0
+        self.drone_sim_active_sessions = 0
 
     def increment(self, counter: str, n: int = 1):
         if n < 0:

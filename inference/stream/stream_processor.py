@@ -217,8 +217,13 @@ class StreamProcessor:
         self.stream_id = stream_id
         self.source = source
         self.camera_id = stream_id[4:] if stream_id.startswith("cam_") else stream_id
-        self.source_type = "rtsp" if str(source).lower().startswith("rtsp://") else (
-            "file" if str(source).lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v")) else "webcam"
+        source_text = str(source).lower()
+        self.source_type = (
+            "drone_simulation"
+            if source_text.startswith("cosys_airsim://")
+            else ("rtsp" if source_text.startswith("rtsp://") else (
+                "file" if source_text.endswith((".mp4", ".avi", ".mov", ".mkv", ".webm", ".m4v")) else "webcam"
+            ))
         )
         self._streaming_config = load_streaming_runtime_config()
         processing_cfg = self._streaming_config.get("streaming", {}).get("processing", {})

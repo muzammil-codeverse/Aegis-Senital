@@ -222,12 +222,19 @@ class IdentityDB:
         try:
             payload = record["metadata"].get("payload") or {}
             source_camera_id = str(payload.get("camera_id") or (camera_ids[0] if camera_ids else "") or "").strip() or None
+            payload_metadata = dict(payload.get("metadata") or {})
+            source_type = str(
+                payload.get("source_type")
+                or payload_metadata.get("source_type")
+                or "live_stream"
+            ).strip().lower()
             get_incident_repository().append_event(
                 IncidentEventRecord(
                     incident_id=str(payload.get("incident_id") or record["event_id"]),
                     event_id=str(record["event_id"]),
-                    source_type="live_stream",
+                    source_type=source_type,  # type: ignore[arg-type]
                     camera_id=source_camera_id,
+                    session_id=str(payload.get("session_id") or payload_metadata.get("session_id") or "") or None,
                     case_id=str(payload.get("case_id") or "") or None,
                     event_type=str(record["event_type"]).lower(),
                     severity=str(record["severity"]).lower(),
@@ -238,7 +245,12 @@ class IdentityDB:
                     track_ids=[str(item) for item in record["metadata"].get("track_ids", []) if str(item)],
                     object_refs=[str(item) for item in track_ref_ids if str(item)],
                     identity_ids=[str(item) for item in record["metadata"].get("identity_ids", []) if str(item)],
-                    summary=str(payload.get("summary") or payload.get("description") or record["event_type"]),
+                    summary=str(
+                        payload_metadata.get("safe_label")
+                        or payload.get("summary")
+                        or payload.get("description")
+                        or record["event_type"]
+                    ),
                     metadata={
                         "confidence": float(record["confidence"]),
                         "camera_ids": camera_ids,

@@ -280,7 +280,7 @@ class EventEngine:
             time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
             confidence_distribution={"person_count": len(people), "weapon_events": len(weapons)},
             timestamp=packet.timestamp,
-            metadata={"person_count": len(people), "source_event_id": primary.event_id},
+            metadata=self._event_metadata(packet, {"person_count": len(people), "source_event_id": primary.event_id}),
         )
         return [event]
 
@@ -372,12 +372,12 @@ class EventEngine:
                 confidence_score=track.confidence,
                 time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
                 timestamp=packet.timestamp,
-                metadata={
+                metadata=self._event_metadata(packet, {
                     "duration_seconds": round(duration_secs, 1),
                     "loiter_score": round(loiter_score, 4),
                     "normalized_motion_variance": round(normalized_variance, 4),
                     "threshold_seconds": self._loitering_threshold_seconds,
-                },
+                }),
             ))
         return events
 
@@ -462,12 +462,12 @@ class EventEngine:
                 confidence_score=track.confidence,
                 time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
                 timestamp=packet.timestamp,
-                metadata={
+                metadata=self._event_metadata(packet, {
                     "object_class": track.class_name,
                     "owner_track_id": owner_id,
                     "unattended_frames": count,
                     "threshold_frames": self._unattended_frame_threshold,
-                },
+                }),
             ))
 
         # Purge stale entries for tracks no longer in the active set.
@@ -558,13 +558,13 @@ class EventEngine:
                     confidence_score=track.confidence,
                     time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
                     timestamp=packet.timestamp,
-                    metadata={
+                    metadata=self._event_metadata(packet, {
                         "zone_index": zone_idx,
                         "object_class": track.class_name,
                         "center_px": [round(cx, 1), round(cy, 1)],
                         "allowed_objects": allowed_objects,
                         "active_hours": active_hours,
-                    },
+                    }),
                 ))
                 break  # one violation per track per frame (first matching zone)
 
@@ -732,8 +732,23 @@ class EventEngine:
             time_window=(packet.frame_id / 30.0, packet.frame_id / 30.0),
             confidence_distribution={track.class_name: track.confidence},
             timestamp=packet.timestamp,
-            metadata=components,
+            metadata=EventEngine._event_metadata(packet, components),
         )
+
+    @staticmethod
+    def _event_metadata(packet: FramePacket, extra: dict | None = None) -> dict:
+        packet_meta = dict(packet.metadata or {})
+        source_type = str(packet_meta.get("source_type") or "live_stream")
+        payload = {
+            **dict(extra or {}),
+            "source_type": source_type,
+            "simulated": bool(packet_meta.get("simulated", False)),
+        }
+        if packet_meta.get("drone_id"):
+            payload["drone_id"] = packet_meta.get("drone_id")
+        if source_type == "drone_simulation":
+            payload.setdefault("safe_label", "Simulated aerial observation")
+        return payload
 
 
 def _event_engine_config() -> dict:
