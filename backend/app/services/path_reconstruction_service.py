@@ -242,7 +242,11 @@ def _collect_observations(
         user=user,
         start_time=t_start.isoformat(),
         end_time=t_end.isoformat(),
+        severity=None,
+        event_type=None,
+        camera_id=None,
         case_id=request.case_id,
+        source_type=None,
     )
     import uuid as _uuid
 
@@ -258,8 +262,14 @@ def _collect_observations(
             case_id=marker.case_id or request.case_id,
             latitude=marker.latitude,
             longitude=marker.longitude,
+            altitude_meters=getattr(marker, "altitude_meters", None),
             confidence=float(marker.risk_score or 0.5),
             source_type=marker.source_type,
+            safe_label=getattr(marker, "title", None),
+            metadata={
+                "source_type": marker.source_type,
+                "safe_label": getattr(marker, "title", None),
+            },
         )
         observations.append(obs)
 
@@ -290,6 +300,11 @@ def _generate_hypotheses(
         node = node_map.get(obs.camera_id)
         lat = obs.latitude or (node.latitude if node else None)
         lon = obs.longitude or (node.longitude if node else None)
+        step_type = "fixed_camera"
+        if obs.source_type == "drone_simulation":
+            step_type = "drone_observation"
+        elif obs.source_type == "uploaded_video":
+            step_type = "uploaded_video"
 
         travel_s: float | None = None
         low_conf_transition = False
@@ -305,17 +320,27 @@ def _generate_hypotheses(
         steps.append(
             PathHypothesisStep(
                 step_index=idx,
+                step_type=step_type,  # type: ignore[arg-type]
+                source_id=obs.camera_id,
+                source_type=obs.source_type,
                 camera_id=obs.camera_id,
                 camera_name=node.name if node else obs.camera_id,
                 latitude=lat,
                 longitude=lon,
+                altitude_meters=obs.altitude_meters,
                 timestamp=obs.timestamp,
                 event_id=obs.event_id,
                 observation_id=obs.observation_id,
                 step_confidence=obs.confidence,
-                travel_mode="walk",
+                travel_mode="unknown" if step_type != "fixed_camera" else "walk",
                 travel_seconds_from_prev=travel_s,
                 low_confidence_transition=low_conf_transition,
+                safe_label=(
+                    "Simulated aerial observation"
+                    if step_type == "drone_observation"
+                    else (obs.safe_label or None)
+                ),
+                evidence_refs=[f"event:{obs.event_id}"] if obs.event_id else [],
             )
         )
 

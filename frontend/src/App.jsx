@@ -22,12 +22,13 @@ import ModelsPage from './pages/ModelsPage'
 import ModelGovernancePage from './pages/ModelGovernancePage'
 import MapOperationsPage from './pages/MapOperationsPage'
 import InvestigationWorkspacePage from './pages/InvestigationWorkspacePage'
+import DroneSimulationPage from './pages/DroneSimulationPage'
 import SystemHealthPage from './pages/SystemHealthPage'
 import UploadedVideoAnalysisPage from './pages/UploadedVideoAnalysisPage'
 
 const VALID_PAGES = new Set([
   'dashboard', 'alerts', 'incidents', 'cases', 'system', 'forensics',
-  'identities', 'watchlist', 'models', 'audit', 'analytics', 'security', 'uploaded-video-analysis', 'model-governance', 'map-operations', 'investigation', 'login',
+  'identities', 'watchlist', 'models', 'audit', 'analytics', 'security', 'uploaded-video-analysis', 'model-governance', 'map-operations', 'investigation', 'drone-simulation', 'login',
 ])
 
 const PAGE_PERMISSIONS = {
@@ -47,6 +48,7 @@ const PAGE_PERMISSIONS = {
   'model-governance': 'model:read',
   'map-operations': 'gis:read',
   'investigation': 'investigation:read',
+  'drone-simulation': 'drone:read',
 }
 
 export default function App() {
@@ -141,6 +143,7 @@ function renderPage(page, props) {
   if (page === 'model-governance') return <ModelGovernancePage />
   if (page === 'map-operations') return <MapOperationsPage />
   if (page === 'investigation') return <InvestigationWorkspacePage />
+  if (page === 'drone-simulation') return <DroneSimulationPage />
   return <Dashboard {...props} />
 }
 

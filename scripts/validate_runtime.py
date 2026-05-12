@@ -505,6 +505,45 @@ def validate_gis_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_drone_simulation_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[Drone Simulation]")
+    path = ROOT / "configs" / "runtime" / "drone_simulation.yaml"
+    if not path.exists():
+        results.append(check("drone simulation config", False, str(path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("drone simulation config parseable", False, str(exc), required=True))
+        return results
+
+    drone_cfg = cfg.get("drone_simulation", cfg)
+    enabled = bool(drone_cfg.get("enabled", True))
+    provider = str(drone_cfg.get("provider") or "cosys_airsim")
+    connection = dict(drone_cfg.get("connection") or {})
+    storage = dict(drone_cfg.get("storage") or {})
+    results.append(check("drone simulation enabled", True, "enabled" if enabled else "disabled", required=False))
+    results.append(check("drone simulation provider", provider == "cosys_airsim", provider, required=True))
+    if not enabled:
+        return results
+
+    telemetry_dir = ROOT / str(storage.get("telemetry_dir") or "storage/drone_telemetry")
+    frame_dir = ROOT / str(storage.get("frame_debug_dir") or "storage/drone_frames")
+    telemetry_dir.mkdir(parents=True, exist_ok=True)
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    results.append(check("drone telemetry dir", os.access(str(telemetry_dir), os.W_OK), str(telemetry_dir), required=profile == "production"))
+    results.append(check("drone frame dir", os.access(str(frame_dir), os.W_OK), str(frame_dir), required=profile == "production"))
+
+    cosys_ok = _try_import("cosysairsim") or _try_import("airsim")
+    required = profile == "production" and bool(connection.get("require_runtime_in_production", False))
+    results.append(check("cosysairsim client", cosys_ok, "available" if cosys_ok else "missing", required=required))
+
+    runtime_script = ROOT / "scripts" / "verify_drone_sim_runtime.py"
+    results.append(check("verify_drone_sim_runtime.py", runtime_script.exists(), str(runtime_script), required=True))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -539,6 +578,7 @@ def validate(profile: str) -> None:
         "configs/runtime/model_governance.yaml",
         "configs/runtime/uploaded_video.yaml",
         "configs/runtime/gis.yaml",
+        "configs/runtime/drone_simulation.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -734,6 +774,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(gis_results)
+
+    drone_results = validate_drone_simulation_configuration(profile)
+    for r in drone_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(drone_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)

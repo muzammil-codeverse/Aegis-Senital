@@ -260,6 +260,11 @@ def permission_for_request(method: str, path: str) -> str | None:
             return "gis:write"
         return "gis:read"
 
+    if path.startswith("/api/drone-simulation"):
+        if method == "GET":
+            return "drone:read"
+        return "drone:control"
+
     if path.startswith("/api/map/"):
         return "map:read"
     if path.startswith("/api/handoffs/"):

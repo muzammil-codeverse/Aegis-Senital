@@ -110,6 +110,12 @@ async def startup():
     except Exception as exc:
         logger.warning("Camera registry init failed: %s", exc)
     try:
+        from app.services.drone.drone_simulation_service import get_drone_simulation_service
+
+        get_drone_simulation_service()
+    except Exception as exc:
+        logger.warning("Drone simulation init failed: %s", exc)
+    try:
         get_case_service()
     except Exception as exc:
         logger.warning("Case service init failed: %s", exc)

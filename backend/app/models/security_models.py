@@ -78,6 +78,11 @@ class AuditAction(Enum):
     INVESTIGATION_HYPOTHESIS_REVIEWED = "investigation_hypothesis_reviewed"
     INVESTIGATION_HYPOTHESIS_REJECTED = "investigation_hypothesis_rejected"
     INVESTIGATION_HYPOTHESIS_ACCESS_DENIED = "investigation_hypothesis_access_denied"
+    DRONE_SIMULATION_STARTED = "drone_simulation_started"
+    DRONE_SIMULATION_STOPPED = "drone_simulation_stopped"
+    DRONE_COMMAND_ISSUED = "drone_command_issued"
+    DRONE_COMMAND_DENIED = "drone_command_denied"
+    DRONE_FRAME_ACCESSED = "drone_frame_accessed"
 
 
 SENSITIVE_AUDIT_KEYS = {

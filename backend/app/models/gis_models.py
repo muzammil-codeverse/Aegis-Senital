@@ -83,10 +83,12 @@ class EventGeoMarker(BaseModel):
     severity: str = "medium"
     latitude: float
     longitude: float
+    altitude_meters: float | None = None
     timestamp: str
     risk_score: float | None = None
     operator_review_required: bool = True
     title: str | None = Field(default=None, description="Safe wording for UI")
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("latitude")
     @classmethod
@@ -185,6 +187,16 @@ class MapViewportRequest(BaseModel):
     zoom: float | None = None
 
 
+class DronePathOverlay(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    drone_id: str
+    source_type: str = "drone_simulation"
+    simulated: bool = True
+    points: list[GeoPoint] = Field(default_factory=list)
+    latest_timestamp: str | None = None
+
+
 class MapLayerResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -194,6 +206,7 @@ class MapLayerResponse(BaseModel):
     case_markers: list[CaseGeoMarker] = Field(default_factory=list)
     heatmap_cells: list[RiskHeatmapCell] = Field(default_factory=list)
     geofences: list[GeoFenceZone] = Field(default_factory=list)
+    drone_paths: list[DronePathOverlay] = Field(default_factory=list)
     stream_status_by_camera: dict[str, Any] = Field(default_factory=dict)
     viewport: MapViewportRequest | None = None
 

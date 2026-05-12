@@ -65,6 +65,8 @@ def test_sensitive_routes_have_explicit_permission_mapping():
         ("POST", "/api/model-governance/promote"): "model:approve",
         ("GET", "/api/gis/config"): "gis:read",
         ("POST", "/api/gis/geofences"): "gis:write",
+        ("GET", "/api/drone-simulation/status"): "drone:read",
+        ("POST", "/api/drone-simulation/start"): "drone:control",
     }
     for route_key, permission in expected.items():
         method, path = route_key

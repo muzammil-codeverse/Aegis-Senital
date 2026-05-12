@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 SubjectRefType = Literal["track", "identity_candidate", "manual", "event"]
 ReviewStatus = Literal["pending", "accepted", "rejected", "inconclusive"]
 HypothesisStepMode = Literal["walk", "run", "vehicle", "unknown"]
+HypothesisStepType = Literal["fixed_camera", "drone_observation", "uploaded_video"]
 
 
 class InvestigationSubjectRef(BaseModel):
@@ -29,8 +30,10 @@ class InvestigationObservation(BaseModel):
     identity_candidate_id: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    altitude_meters: float | None = None
     confidence: float = 1.0
     source_type: str = "live_stream"
+    safe_label: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -39,12 +42,15 @@ class CameraGraphNode(BaseModel):
 
     camera_id: str
     name: str = ""
+    source_type: str = "live_stream"
+    simulated: bool = False
     latitude: float
     longitude: float
     heading_degrees: float = 0.0
     fov_degrees: float = 75.0
     coverage_radius_meters: float = 80.0
     region: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CameraGraphEdge(BaseModel):
@@ -76,10 +82,14 @@ class PathHypothesisStep(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     step_index: int
+    step_type: HypothesisStepType = "fixed_camera"
+    source_id: str | None = None
+    source_type: str = "live_stream"
     camera_id: str
     camera_name: str = ""
     latitude: float | None = None
     longitude: float | None = None
+    altitude_meters: float | None = None
     timestamp: str
     event_id: str | None = None
     observation_id: str | None = None
@@ -87,6 +97,8 @@ class PathHypothesisStep(BaseModel):
     travel_mode: HypothesisStepMode = "unknown"
     travel_seconds_from_prev: float | None = None
     low_confidence_transition: bool = False
+    safe_label: str | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class PathHypothesis(BaseModel):

@@ -395,6 +395,48 @@ class RuntimeHealthService:
         except Exception as exc:
             return {"enabled": True, "status": "degraded", "stored_hypotheses": 0, "last_error": str(exc)[:160]}
 
+    def _check_drone_simulation(self) -> dict:
+        try:
+            from app.services.drone.drone_simulation_session_manager import get_drone_simulation_session_manager
+            from app.services.drone.drone_simulation_service import get_drone_simulation_service
+
+            service = get_drone_simulation_service()
+            manager = get_drone_simulation_session_manager()
+            session = manager.get_session_status()
+            health = service.get_health(active_session=bool(session.active))
+            return {
+                "enabled": bool(service.config.get("enabled", True)),
+                "provider": str(service.config.get("provider") or "cosys_airsim"),
+                "status": health.status,
+                "simulator_connected": bool(health.simulator_connected),
+                "telemetry_available": bool(health.telemetry_available),
+                "frame_available": bool(health.frame_available),
+                "active_session": bool(health.active_session),
+                "last_error": health.last_error,
+            }
+        except FileNotFoundError:
+            return {
+                "enabled": False,
+                "provider": "cosys_airsim",
+                "status": "disabled",
+                "simulator_connected": False,
+                "telemetry_available": False,
+                "frame_available": False,
+                "active_session": False,
+                "last_error": None,
+            }
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "provider": "cosys_airsim",
+                "status": "degraded",
+                "simulator_connected": False,
+                "telemetry_available": False,
+                "frame_available": False,
+                "active_session": False,
+                "last_error": str(exc)[:160],
+            }
+
     def _check_analytics(self) -> dict:
         production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
         try:
@@ -775,6 +817,7 @@ class RuntimeHealthService:
         persistence = self._check_persistence()
         gis = self._check_gis()
         investigation = self._check_investigation()
+        drone_simulation = self._check_drone_simulation()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -796,6 +839,7 @@ class RuntimeHealthService:
             "persistence": persistence,
             "gis": gis,
             "investigation": investigation,
+            "drone_simulation": drone_simulation,
         }
 
         if not include_sensitive:
@@ -819,7 +863,7 @@ class RuntimeHealthService:
         statuses = [c["status"] for c in checks.values()]
         if "error" in statuses or "failed" in statuses:
             overall = "error"
-        elif "degraded" in statuses or "unavailable" in statuses:
+        elif "degraded" in statuses or "unavailable" in statuses or "disconnected" in statuses:
             overall = "degraded"
         else:
             overall = "ok"
@@ -837,6 +881,7 @@ class RuntimeHealthService:
             "persistence": persistence,
             "gis": gis,
             "investigation": investigation,
+            "drone_simulation": drone_simulation,
         }
 
     def is_alive(self) -> bool:
@@ -947,6 +992,16 @@ class RuntimeHealthService:
             failures.append(
                 f"uploaded_video: {uploaded_video.get('last_error') or uploaded_video.get('status')}"
             )
+        drone = self._check_drone_simulation()
+        try:
+            from inference.config_runtime import load_runtime_config
+
+            drone_cfg = dict((load_runtime_config("drone_simulation").get("drone_simulation") or {}))
+        except Exception:
+            drone_cfg = {}
+        require_runtime = bool((drone_cfg.get("connection") or {}).get("require_runtime_in_production", False))
+        if self._production_mode() and require_runtime and drone.get("enabled") and drone.get("status") in {"degraded", "disconnected"}:
+            failures.append(f"drone_simulation: {drone.get('last_error') or drone.get('status')}")
 
         gis_check = self._check_gis()
         if self._production_mode() and gis_check.get("enabled") and gis_check.get("status") == "failed":

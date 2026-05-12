@@ -71,6 +71,8 @@ def _infer_source_type(source: Any) -> str:
     if isinstance(source, int):
         return "webcam"
     text = str(source or "").strip().lower()
+    if text.startswith("cosys_airsim://"):
+        return "drone_simulation"
     if text.startswith("rtsp://"):
         return "rtsp"
     if text.endswith(_VIDEO_FILE_SUFFIXES):

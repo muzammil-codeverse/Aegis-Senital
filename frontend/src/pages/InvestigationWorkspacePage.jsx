@@ -1,10 +1,12 @@
-import { useEffect } from 'react';
-import { useInvestigation } from '../hooks/useInvestigation';
-import PathReconstructionPanel from '../components/investigation/PathReconstructionPanel';
-import CameraGraphPanel from '../components/investigation/CameraGraphPanel';
-import InvestigationSafetyBadge from '../components/investigation/InvestigationSafetyBadge';
+import { useEffect } from 'react'
+import CameraGraphPanel from '../components/investigation/CameraGraphPanel'
+import InvestigationSafetyBadge from '../components/investigation/InvestigationSafetyBadge'
+import PathReconstructionPanel from '../components/investigation/PathReconstructionPanel'
+import { useAuth } from '../hooks/useAuth'
+import { useInvestigation } from '../hooks/useInvestigation'
 
 export default function InvestigationWorkspacePage() {
+  const auth = useAuth()
   const {
     hypotheses,
     cameraGraph,
@@ -15,18 +17,36 @@ export default function InvestigationWorkspacePage() {
     loadHypotheses,
     reviewHypothesis,
     loadCameraGraph,
-  } = useInvestigation();
+  } = useInvestigation()
 
   useEffect(() => {
-    loadHypotheses();
-    loadCameraGraph();
-  }, [loadHypotheses, loadCameraGraph]);
+    loadHypotheses()
+    loadCameraGraph()
+  }, [loadHypotheses, loadCameraGraph])
 
   return (
     <div className="flex h-full flex-col bg-gray-50">
       <div className="flex items-center justify-between border-b bg-white px-4 py-3">
-        <h1 className="text-lg font-semibold text-gray-900">Investigation Workspace</h1>
-        <InvestigationSafetyBadge className="max-w-lg" />
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900">Investigation Workspace</h1>
+          <p className="text-xs text-gray-500">
+            Candidate paths may include fixed cameras, uploaded video, and simulated aerial observations.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {auth.hasPermission('drone:read') ? (
+            <button
+              type="button"
+              className="rounded border px-3 py-2 text-xs text-gray-700"
+              onClick={() => {
+                window.location.hash = 'drone-simulation'
+              }}
+            >
+              Open Drone Source
+            </button>
+          ) : null}
+          <InvestigationSafetyBadge className="max-w-lg" />
+        </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
@@ -50,9 +70,9 @@ export default function InvestigationWorkspacePage() {
         </main>
       </div>
 
-      {loading && (
-        <div className="border-t bg-white px-4 py-2 text-xs text-gray-400">Loading…</div>
-      )}
+      {loading ? (
+        <div className="border-t bg-white px-4 py-2 text-xs text-gray-400">Loading...</div>
+      ) : null}
     </div>
-  );
+  )
 }

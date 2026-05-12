@@ -100,6 +100,8 @@ rbac:
     - "uploaded_video:case"
     - "investigation:read"
     - "investigation:write"
+    - "drone:read"
+    - "drone:control"
   analyst:
     - "camera:read"
     - "analytics:read"
@@ -137,12 +139,14 @@ rbac:
     - "uploaded_video:case"
     - "investigation:read"
     - "investigation:write"
+    - "drone:read"
   operator:
     - "camera:read"
     - "camera:control"
     - "analytics:read"
     - "event:read"
     - "stream:read"
+    - "stream:write"
     - "stream:replay"
     - "alert:read"
     - "alert:write"
@@ -167,6 +171,8 @@ rbac:
     - "uploaded_video:process"
     - "uploaded_video:case"
     - "investigation:read"
+    - "drone:read"
+    - "drone:control"
   viewer:
     - "camera:read"
     - "analytics:read"
@@ -182,3 +188,4 @@ rbac:
     - "osint:read"
     - "uploaded_video:read"
     - "investigation:read"
+    - "drone:read"

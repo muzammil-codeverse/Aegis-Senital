@@ -15,9 +15,11 @@ import { useMapState } from '../hooks/useMapState'
 import { getStreams } from '../api/camerasApi'
 import { compareSeverity } from '../utils/severity'
 import { DASHBOARD_POLL_MS } from '../config'
+import { useDroneSimulation } from '../hooks/useDroneSimulation'
 
 export default function Dashboard({ alertState, incidentState, caseState, metricsState, websocketState, health }) {
   const auth = useAuth()
+  const drone = useDroneSimulation({ enabled: auth.hasPermission('drone:read'), pollMs: DASHBOARD_POLL_MS })
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
@@ -178,6 +180,11 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
                 View on Map
               </button>
             ) : null}
+            {auth.hasPermission('drone:read') ? (
+              <button type="button" className="text-button" onClick={() => { window.location.hash = 'drone-simulation' }}>
+                Drone Simulation
+              </button>
+            ) : null}
           </div>
         </div>
         {analyticsPreviewError ? <p className="muted">{analyticsPreviewError}</p> : null}
@@ -187,6 +194,14 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
           <article className="metric-tile"><span>Cases requiring review</span><strong>{analyticsPreview?.summary?.cases_requiring_review ?? 0}</strong></article>
           <article className="metric-tile"><span>Degraded streams</span><strong>{analyticsPreview?.summary?.degraded_streams ?? 0}</strong></article>
         </div>
+        {auth.hasPermission('drone:read') ? (
+          <div className="metric-strip" style={{ marginTop: 12 }}>
+            <article className="metric-tile"><span>Drone status</span><strong>{drone.status?.health?.status || 'unknown'}</strong></article>
+            <article className="metric-tile"><span>Last telemetry</span><strong>{drone.telemetry?.timestamp || 'n/a'}</strong></article>
+            <article className="metric-tile"><span>Frame processing</span><strong>{drone.stats.framesProcessed}</strong></article>
+            <article className="metric-tile"><span>Drone events</span><strong>{drone.stats.events}</strong></article>
+          </div>
+        ) : null}
       </section>
       <CommandOverview
         // Camera props

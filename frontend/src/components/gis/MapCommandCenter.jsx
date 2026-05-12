@@ -3,6 +3,7 @@ import CameraFovLayer from './CameraFovLayer'
 import CameraGeoProfileDrawer from './CameraGeoProfileDrawer'
 import CameraMarkerLayer from './CameraMarkerLayer'
 import CaseMarkerLayer from './CaseMarkerLayer'
+import DronePathLayer from './DronePathLayer'
 import EventMapDrawer from './EventMapDrawer'
 import EventMarkerLayer from './EventMarkerLayer'
 import GeofenceLayer from './GeofenceLayer'
@@ -24,13 +25,14 @@ export default function MapCommandCenter({
 
   const provider = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_MAP_PROVIDER) || gisConfig?.provider || 'local_mock'
   const cameras = layers?.cameras || []
-  const refLat = cameras[0]?.latitude ?? gisConfig?.map?.default_center?.latitude ?? 30.1575
-  const refLon = cameras[0]?.longitude ?? gisConfig?.map?.default_center?.longitude ?? 71.5249
 
   const profileForDrawer = useMemo(() => {
     if (!selectedCamera) return null
     return cameras.find(c => c.camera_id === selectedCamera) || null
   }, [cameras, selectedCamera])
+
+  const refLat = profileForDrawer?.latitude ?? cameras[0]?.latitude ?? gisConfig?.map?.default_center?.latitude ?? 30.1575
+  const refLon = profileForDrawer?.longitude ?? cameras[0]?.longitude ?? gisConfig?.map?.default_center?.longitude ?? 71.5249
 
   useEffect(() => {
     const id = window.sessionStorage.getItem('aegis.map.camera_id')
@@ -56,6 +58,7 @@ export default function MapCommandCenter({
                 <RiskHeatmapLayer cells={layers?.heatmap_cells} project={ctx.project} />
                 <GeofenceLayer geofences={layers?.geofences} project={ctx.project} />
                 <CameraFovLayer fovs={layers?.camera_fovs} project={ctx.project} />
+                <DronePathLayer paths={layers?.drone_paths} project={ctx.project} />
                 <EventMarkerLayer
                   markers={layers?.event_markers}
                   project={ctx.project}
@@ -83,7 +86,7 @@ export default function MapCommandCenter({
           <ul style={{ paddingLeft: 16 }}>
             {cameras.slice(0, 8).map(c => (
               <li key={c.camera_id}>
-                {c.camera_id}: {layers?.stream_status_by_camera?.[c.camera_id]?.state || 'unknown'}
+                {c.camera_id}: {layers?.stream_status_by_camera?.[c.camera_id]?.state || layers?.stream_status_by_camera?.[c.camera_id]?.status || 'unknown'}
               </li>
             ))}
           </ul>

@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { id: 'analytics', label: 'Analytics', permission: 'analytics:read' },
   { id: 'map-operations', label: 'Map', permission: 'gis:read' },
   { id: 'investigation', label: 'Investigation', permission: 'investigation:read' },
+  { id: 'drone-simulation', label: 'Drone Sim', permission: 'drone:read' },
   { id: 'alerts', label: 'Alerts', permission: 'alert:read' },
   { id: 'incidents', label: 'Incidents', permission: 'incident:read' },
   { id: 'cases', label: 'Cases', permission: 'case:read' },

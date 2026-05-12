@@ -3,9 +3,11 @@ import AnalyticsCommandCenter from '../components/analytics/AnalyticsCommandCent
 import { getGeofences, getGisHeatmap } from '../api/gisApi'
 import { useAuth } from '../hooks/useAuth'
 import { useAnalytics } from '../hooks/useAnalytics'
+import { useDroneSimulation } from '../hooks/useDroneSimulation'
 
 export default function AnalyticsPage() {
   const auth = useAuth()
+  const drone = useDroneSimulation({ enabled: auth.hasPermission('drone:read'), pollMs: 10000 })
   const [gisSnap, setGisSnap] = useState(null)
   const [initialCameraId] = useState(() => {
     const value = window.sessionStorage.getItem('aegis.analytics.camera') || ''
@@ -45,6 +47,11 @@ export default function AnalyticsPage() {
           <button type="button" className="text-button" onClick={() => { window.location.hash = 'model-governance' }}>
             Model governance
           </button>
+          {auth.hasPermission('drone:read') ? (
+            <button type="button" className="text-button" onClick={() => { window.location.hash = 'drone-simulation' }}>
+              Drone simulation
+            </button>
+          ) : null}
           {auth.hasPermission('gis:read') ? (
             <button type="button" className="text-button" onClick={() => { window.location.hash = 'map-operations' }}>
               Map / GIS
@@ -54,6 +61,11 @@ export default function AnalyticsPage() {
         {gisSnap ? (
           <p className="muted" style={{ marginTop: 8 }}>
             GIS snapshot: heatmap cells {gisSnap.heatmapCells}, geofences {gisSnap.geofences}. Open Map for highest-risk area and camera coverage context.
+          </p>
+        ) : null}
+        {auth.hasPermission('drone:read') ? (
+          <p className="muted" style={{ marginTop: 8 }}>
+            Drone simulation status: {drone.status?.health?.status || 'unknown'} with {drone.stats.framesProcessed} processed frames and {drone.stats.events} detected events from the simulated aerial source.
           </p>
         ) : null}
         <p className="muted">

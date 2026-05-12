@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING, Any
 from geopy.distance import geodesic
 from shapely.geometry import Point, Polygon
 
+from app.api.object_authorization import can_access_camera
 from app.models.gis_models import (
     CameraFieldOfView,
     CameraGeoProfile,
+    DronePathOverlay,
     GeoFenceZone,
     GeoPoint,
     GisPublicConfig,
@@ -208,6 +210,47 @@ def public_gis_config() -> GisPublicConfig:
     )
 
 
+def _fallback_drone_profile(user: UserAccount | None) -> CameraGeoProfile | None:
+    try:
+        from app.services.drone.drone_simulation_service import get_drone_simulation_service
+
+        service = get_drone_simulation_service()
+    except Exception:
+        return None
+    if user is not None and not can_access_camera(user, service.drone_id):
+        return None
+    telemetry = service.latest_telemetry()
+    default_home = dict((service.config.get("gis") or {}).get("default_home") or {})
+    latitude = telemetry.latitude if telemetry and telemetry.latitude is not None else default_home.get("latitude")
+    longitude = telemetry.longitude if telemetry and telemetry.longitude is not None else default_home.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+    altitude = (
+        telemetry.altitude_meters
+        if telemetry and telemetry.altitude_meters is not None
+        else default_home.get("altitude_meters")
+    )
+    yaw = telemetry.orientation.yaw if telemetry and telemetry.orientation is not None else 0.0
+    return CameraGeoProfile(
+        camera_id=service.drone_id,
+        name="Simulated Drone Feed",
+        latitude=float(latitude),
+        longitude=float(longitude),
+        altitude_meters=float(altitude) if altitude is not None else None,
+        heading_degrees=float(yaw or 0.0),
+        fov_degrees=70.0,
+        coverage_radius_meters=150.0,
+        region="simulated_airspace",
+        metadata={
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "provider": "cosys_airsim",
+            "camera_name": telemetry.camera_name if telemetry is not None else "front_center",
+            "safety_badge": "Simulated drone feed",
+        },
+    )
+
+
 def build_map_layers(
     repo: GisRepository,
     user: UserAccount | None,
@@ -234,6 +277,9 @@ def build_map_layers(
         except ValueError:
             if not require_loc:
                 cameras.append(p)
+    fallback_drone = _fallback_drone_profile(user)
+    if fallback_drone is not None and all(camera.camera_id != fallback_drone.camera_id for camera in cameras):
+        cameras.append(fallback_drone)
 
     fovs: list[CameraFieldOfView] = []
     if include_fov and bool(cameras_cfg.get("show_field_of_view_cones", True)):
@@ -281,11 +327,48 @@ def build_map_layers(
             source_type,
         )
     geofences = repo.list_geofences(user)
+    drone_paths: list[DronePathOverlay] = []
+    try:
+        from app.services.drone.drone_simulation_session_manager import get_drone_simulation_session_manager
+
+        manager = get_drone_simulation_session_manager()
+        camera_ids = {cam.camera_id for cam in cameras}
+        points = []
+        for point in manager.get_flight_path():
+            if point.camera_id not in camera_ids:
+                continue
+            points.append(
+                GeoPoint(
+                    latitude=point.latitude,
+                    longitude=point.longitude,
+                    altitude_meters=point.altitude_meters,
+                )
+            )
+        latest_telemetry = manager.get_latest_telemetry()
+        if points:
+            drone_paths.append(
+                DronePathOverlay(
+                    drone_id="drone_sim_01",
+                    source_type="drone_simulation",
+                    simulated=True,
+                    points=points,
+                    latest_timestamp=latest_telemetry.timestamp if latest_telemetry is not None else None,
+                )
+            )
+    except Exception:
+        drone_paths = []
     stream_status: dict[str, Any] = {}
     try:
         from app.services.stream_session_manager import get_stream_session_manager
+        from app.services.drone.drone_simulation_session_manager import get_drone_simulation_session_manager
 
         for cam in cameras:
+            if cam.metadata.get("source_type") == "drone_simulation" or cam.camera_id == "drone_sim_01":
+                try:
+                    stream_status[cam.camera_id] = get_drone_simulation_session_manager().get_session_status().model_dump(mode="json")
+                except Exception:
+                    stream_status[cam.camera_id] = {"status": "unknown"}
+                continue
             try:
                 stream_status[cam.camera_id] = get_stream_session_manager().get_stream_state(cam.camera_id)
             except Exception:
@@ -300,6 +383,7 @@ def build_map_layers(
         case_markers=cases,
         heatmap_cells=heatmap_cells,
         geofences=geofences,
+        drone_paths=drone_paths,
         stream_status_by_camera=stream_status,
         viewport=viewport,
     )

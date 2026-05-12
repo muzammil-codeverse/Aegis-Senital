@@ -27,6 +27,7 @@ from app.api.object_authorization import (
 from app.security.config import PROJECT_ROOT
 from app.services.case_service import get_case_service
 from app.services.uploaded_video_service import get_uploaded_video_service
+from app.repositories.incident_repository import get_incident_repository
 from inference.config_runtime import load_runtime_config
 
 
@@ -177,13 +178,13 @@ class GisRepository:
         self,
         *,
         user: UserAccount | None,
-        start_time: str | None,
-        end_time: str | None,
-        severity: str | None,
-        event_type: str | None,
-        camera_id: str | None,
-        case_id: str | None,
-        source_type: str | None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+        severity: str | None = None,
+        event_type: str | None = None,
+        camera_id: str | None = None,
+        case_id: str | None = None,
+        source_type: str | None = None,
     ) -> list[EventGeoMarker]:
         cfg = load_runtime_config("gis").get("gis") or {}
         ev_cfg = cfg.get("events") or {}
@@ -316,6 +317,60 @@ class GisRepository:
                         risk_score=None,
                         operator_review_required=True,
                         title="Uploaded video analysis — operator review required",
+                    )
+                )
+
+        if source_type in {None, "drone_simulation"}:
+            try:
+                records = get_incident_repository().list_events(
+                    {
+                        "source_type": "drone_simulation",
+                        "camera_id": camera_id,
+                        "case_id": case_id,
+                        "event_type": event_type,
+                        "severity": severity,
+                        "limit": 500,
+                    }
+                )
+            except Exception:
+                records = []
+            for record in records:
+                payload = dict(record.metadata or {})
+                lat = payload.get("latitude")
+                lon = payload.get("longitude")
+                if lat is None or lon is None:
+                    prof = profiles.get(record.camera_id or "")
+                    if prof is None:
+                        continue
+                    lat = prof.latitude
+                    lon = prof.longitude
+                access_payload = {
+                    "source_type": "drone_simulation",
+                    "camera_id": record.camera_id,
+                    "camera_ids": [record.camera_id] if record.camera_id else [],
+                    "incident_id": record.event_id,
+                }
+                if not can_access_event_payload(user, access_payload):
+                    continue
+                ts = _parse_time(record.timestamp) or _now_ts()
+                if ts < t0 or ts > t1:
+                    continue
+                markers.append(
+                    EventGeoMarker(
+                        event_id=record.event_id,
+                        source_type="drone_simulation",
+                        camera_id=record.camera_id,
+                        case_id=record.case_id,
+                        event_type=record.event_type,
+                        severity=record.severity,
+                        latitude=float(lat),
+                        longitude=float(lon),
+                        altitude_meters=payload.get("altitude_meters"),
+                        timestamp=record.timestamp,
+                        risk_score=float(record.risk_score or 0.0),
+                        operator_review_required=True,
+                        title=str(payload.get("safe_label") or "Simulated aerial observation"),
+                        metadata=payload,
                     )
                 )
 

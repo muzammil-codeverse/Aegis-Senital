@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 StreamStatus = Literal["healthy", "degraded", "reconnecting", "failed", "stopped"]
-StreamSourceType = Literal["rtsp", "file", "webcam"]
+StreamSourceType = Literal["rtsp", "file", "webcam", "drone_simulation"]
 PreviewType = Literal["webrtc", "hls", "mjpeg"]
 
 

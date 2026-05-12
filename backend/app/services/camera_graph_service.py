@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
+from app.api.object_authorization import can_access_camera
+from app.models.gis_models import CameraGeoProfile
 from app.models.investigation_models import CameraGraphEdge, CameraGraphNode
 from inference.config_runtime import load_runtime_config
 
@@ -34,19 +36,25 @@ def build_camera_graph(
     run_mps = float(cfg.get("running_speed_mps", 3.5))
     vehicle_mps = float(cfg.get("vehicle_speed_mps", 8.0))
 
-    profiles = gis_repo.list_camera_geo_profiles(user)
+    profiles = list(gis_repo.list_camera_geo_profiles(user))
+    drone_profile = _drone_profile_for_user(user)
+    if drone_profile is not None and all(profile.camera_id != drone_profile.camera_id for profile in profiles):
+        profiles.append(drone_profile)
     nodes: list[CameraGraphNode] = []
     for p in profiles:
         nodes.append(
             CameraGraphNode(
                 camera_id=p.camera_id,
                 name=p.name,
+                source_type=str((p.metadata or {}).get("source_type") or "live_stream"),
+                simulated=bool((p.metadata or {}).get("simulated", False)),
                 latitude=p.latitude,
                 longitude=p.longitude,
                 heading_degrees=p.heading_degrees,
                 fov_degrees=p.fov_degrees,
                 coverage_radius_meters=p.coverage_radius_meters,
                 region=p.region,
+                metadata=dict(p.metadata or {}),
             )
         )
 
@@ -88,6 +96,47 @@ def build_camera_graph(
             )
 
     return nodes, edges
+
+
+def _drone_profile_for_user(user: UserAccount | None) -> CameraGeoProfile | None:
+    try:
+        from app.services.drone.drone_simulation_service import get_drone_simulation_service
+
+        service = get_drone_simulation_service()
+    except Exception:
+        return None
+    if user is not None and not can_access_camera(user, service.drone_id):
+        return None
+
+    telemetry = service.latest_telemetry()
+    default_home = dict((service.config.get("gis") or {}).get("default_home") or {})
+    latitude = telemetry.latitude if telemetry and telemetry.latitude is not None else default_home.get("latitude")
+    longitude = telemetry.longitude if telemetry and telemetry.longitude is not None else default_home.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+    altitude = (
+        telemetry.altitude_meters
+        if telemetry and telemetry.altitude_meters is not None
+        else default_home.get("altitude_meters")
+    )
+    heading = telemetry.orientation.yaw if telemetry and telemetry.orientation is not None else 0.0
+    return CameraGeoProfile(
+        camera_id=service.drone_id,
+        name="Simulated Drone Feed",
+        latitude=float(latitude),
+        longitude=float(longitude),
+        altitude_meters=float(altitude) if altitude is not None else None,
+        heading_degrees=float(heading or 0.0),
+        fov_degrees=70.0,
+        coverage_radius_meters=150.0,
+        region="simulated_airspace",
+        metadata={
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "provider": "cosys_airsim",
+            "camera_name": telemetry.camera_name if telemetry is not None else "front_center",
+        },
+    )
 
 
 def _fov_overlap(a: CameraGraphNode, b: CameraGraphNode) -> bool:

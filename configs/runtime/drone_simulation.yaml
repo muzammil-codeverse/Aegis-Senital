@@ -1,0 +1,55 @@
+drone_simulation:
+  enabled: true
+  provider: "cosys_airsim"
+
+  connection:
+    host: "127.0.0.1"
+    port: 41451
+    vehicle_name: "Drone1"
+    camera_name: "front_center"
+    timeout_seconds: 5
+    require_runtime_in_production: false
+
+  capture:
+    enabled: true
+    target_fps: 10
+    image_type: "scene"
+    width: 1280
+    height: 720
+    save_debug_frames: false
+
+  telemetry:
+    enabled: true
+    poll_hz: 5
+    include_gps: true
+    include_kinematics: true
+    include_orientation: true
+
+  stream:
+    source_type: "drone_simulation"
+    pseudo_camera_id: "drone_sim_01"
+    feed_name: "Simulated Drone Feed"
+    process_through_stream_processor: true
+
+  gis:
+    enabled: true
+    show_drone_marker: true
+    show_flight_path: true
+    show_camera_fov: true
+    default_home:
+      latitude: 30.1575
+      longitude: 71.5249
+      altitude_meters: 40
+
+  investigation:
+    add_drone_node_to_camera_graph: true
+    add_telemetry_observations: true
+    max_observation_age_seconds: 120
+
+  safety:
+    label_as_simulated: true
+    prohibit_real_world_claims: true
+
+  storage:
+    telemetry_dir: "storage/drone_telemetry"
+    frame_debug_dir: "storage/drone_frames"

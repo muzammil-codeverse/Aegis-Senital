@@ -83,6 +83,11 @@ export default function PathReconstructionPanel({
               <p className="mt-1 text-xs text-gray-600">{h.safe_summary}</p>
               {selected === h.hypothesis_id && selectedHyp && (
                 <div className="mt-2 space-y-2 border-t pt-2">
+                  {selectedHyp.steps?.some(step => step.step_type === 'drone_observation') ? (
+                    <div className="rounded bg-amber-50 px-2 py-2 text-xs text-amber-900">
+                      This candidate path includes simulated aerial observations. Operator review is required.
+                    </div>
+                  ) : null}
                   <PathConfidenceBreakdown breakdown={h.confidence_breakdown} confidence={h.confidence} />
                   <PathHypothesisTimeline steps={h.steps} />
                   {h.evidence_refs?.length > 0 && (

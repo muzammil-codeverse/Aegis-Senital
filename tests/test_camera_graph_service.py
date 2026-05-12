@@ -82,7 +82,8 @@ def test_build_camera_graph_edges_bidirectional():
         _make_profile("cam_02", 30.151, 71.521),
     ]
     nodes, edges = build_camera_graph(repo, user)
-    assert len(nodes) == 2
+    camera_ids = {n.camera_id for n in nodes}
+    assert {"cam_01", "cam_02"}.issubset(camera_ids)
     froms = {e.from_camera_id for e in edges}
     tos = {e.to_camera_id for e in edges}
     assert "cam_01" in froms

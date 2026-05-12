@@ -27,6 +27,7 @@ export default function MapFilterPanel({ value, onChange }) {
           <option value="">Any</option>
           <option value="live_stream">live_stream</option>
           <option value="uploaded_video">uploaded_video</option>
+          <option value="drone_simulation">drone_simulation</option>
         </select>
       </div>
     </div>
