@@ -1,49 +1,48 @@
 # Drone Simulation Setup
 
-This document records the dependency preparation for future Phase 44 (Drone Simulation Foundation) and subsequent phases.
+This document outlines the state of the Drone Simulation environment for Phase 44.
 
-## What was installed
+## 1. Dependency layer status
+- The `cosysairsim` Python client is fully installed in `.venv`.
+- `msgpackrpc`, `pymavlink`, `mavsdk`, and geospatial packages are all installed and validated.
+- **Note:** `cosysairsim` installed means the *Python client* is ready. It does *not* mean the simulator runtime is actually running.
 
-### Python Dependencies
-The following core packages were installed in `.venv`:
-- `cosysairsim` (active Python client)
-- `msgpack-rpc-python`
-- `pymavlink`
-- `mavsdk`
-- Geospatial libraries: `geopy`, `pyproj`, `shapely`, `networkx`
-- Utilities: `opencv-python`, `numpy`, `pandas`, `pyyaml`
+## 2. Runtime simulator status
+- The prebuilt **Blocks** simulator environment for Windows is downloaded and extracted at `C:\AegisExternalTools\drone_sim\runtime\environments\Blocks`.
+- `settings.json` is configured in `~/Documents/AirSim/` with a default Multirotor and a `front_center` camera.
+- The runtime has been tested and successfully communicates with the Python client over RPC.
 
-*Note: The old `airsim` PyPI package failed to build on Python 3.12 due to NumPy compatibility issues. The newer, maintained `cosysairsim` PyPI package was installed instead, preserving environment integrity.*
+## 3. How to launch simulator
+To start the simulator locally:
+1. Open PowerShell or Command Prompt.
+2. Navigate to the simulator executable:
+   ```powershell
+   cd C:\AegisExternalTools\drone_sim\runtime\environments\Blocks\Blocks_packaged_Windows_55_33\Windows
+   .\Blocks.exe -windowed -ResX=640 -ResY=480
+   ```
 
-### External Tools Directory
-External tools are stored outside the main repository to prevent ballooning the repo size.
-Directory: `C:\AegisExternalTools\drone_sim`
+## 4. How to verify RPC
+Once the simulator is open, verify the RPC port is listening:
+```powershell
+netstat -ano | findstr 41451
+```
+You should see `LISTENING` on `0.0.0.0:41451`.
 
-### Cosys-AirSim
-A clone of Cosys-AirSim has been configured to reside at:
-`C:\AegisExternalTools\drone_sim\cosys_airsim\Cosys-AirSim`
-This provides the active Unreal Engine simulation APIs.
+## 5. How to capture one frame
+Run the included smoke script from the repository root:
+```powershell
+python scripts\smoke_cosys_airsim_runtime.py
+```
+This will print the multirotor state and save `storage/drone_sim/smoke_frame.png` if successful.
 
-### Frontend Dependencies
-Map and 3D packages were added (if not already present):
-- `mapbox-gl`
-- `three`
-- `@react-three/fiber`
-- `@react-three/drei`
-- `gsap`
+## 6. How Phase 44 will use this
+Phase 44 will:
+- Connect the Aegis Sentinel backend to this running simulation.
+- Capture camera streams using the `front_center` camera.
+- Combine drone telemetry (GPS, orientation, velocity) to map it in the 3D web frontend.
+- Utilize MAVSDK and `cosysairsim` commands to script drone patrols.
 
-## What is optional and manual
-
-- **Microsoft AirSim**: We defaulted to Cosys-AirSim as it's an actively maintained fork.
-- **Unreal Engine**: Building the Unreal project has been postponed to a later phase to save time and bandwidth.
-- **PX4/Gazebo & QGroundControl**: Install via manual download as necessary. PX4/Gazebo environment is heavy and skipped for this preparation step.
-
-## Expected Ports
-- AirSim Host: `127.0.0.1`
-- AirSim Port: `41451`
-
-## Future Phase 44 Usage
-Phase 44 will utilize these tools to:
-- Connect the Aegis Sentinel backend to a running simulation via `cosysairsim` client.
-- Control virtual drones using the MAVSDK/pymavlink libraries.
-- Combine drone telemetry with the geospatial frontend features using Mapbox and React Three Fiber.
+## 7. What remains optional
+- **QGroundControl**: Manual installation required. (See `https://qgroundcontrol.com/downloads/`). Not required for basic SimpleFlight visual simulation.
+- **PX4/Gazebo**: Heavy software-in-the-loop dependencies not strictly needed for this visual pass.
+- **Unreal Source Build**: We are using a prebuilt executable environment. Building the Unreal source from `C:\AegisExternalTools\drone_sim\cosys_airsim\Cosys-AirSim` is not required unless you need custom 3D map environments.
