@@ -8,67 +8,330 @@
     "metadata": "models/phone/metadata.yaml"
   },
   "weapon_detector": {
+    "active_version": "v2",
     "v1": {
+      "model_id": "weapon_yolo11n_v1_legacy",
       "model_name": "weapon_detector",
       "version": "v1",
       "path": "models/weapon/legacy_current_backup.pt",
+      "task": "weapon_detection",
+      "provider": "ultralytics_yolo",
+      "status": "deprecated",
+      "approval_status": "deprecated",
+      "validation_status": "superseded",
+      "training_dataset": "weapon_run_v1/20260503_131745",
+      "evaluation_dataset": "weapon_eval_holdout_v1",
+      "metrics": {
+        "mAP50": 0.6907,
+        "mAP50_95": 0.3938,
+        "precision": null,
+        "recall": null
+      },
+      "latency": {
+        "p95_latency_ms": null
+      },
+      "known_limitations": [
+        "Superseded by YOLO11s v2; kept for rollback reference only",
+        "Legacy 5-class head — class taxonomy differs from v2"
+      ],
       "classes": ["pistol", "rifle", "knife", "grenade", "shotgun"],
       "nc": 5,
-      "mAP50": 0.6907,
-      "mAP50_95": 0.3938,
       "epochs_trained": 50,
-      "training_dataset": "weapon_run_v1/20260503_131745",
       "created_at": "2026-05-03T13:17:45+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null,
       "framework": "YOLOv8",
       "architecture": "YOLOv8n",
       "notes": "Legacy YOLOv8n 5-class model. Superseded by v2."
     },
     "v2": {
+      "model_id": "weapon_yolo11s_v2_current",
       "model_name": "weapon_detector",
       "version": "v2",
       "path": "models/weapon/current.pt",
+      "task": "weapon_detection",
+      "provider": "ultralytics_yolo",
+      "status": "active",
+      "approval_status": "demo_approved",
+      "validation_status": "benchmarked_offline",
+      "training_dataset": "weapon_v2",
+      "evaluation_dataset": "weapon_eval_1586_images",
+      "metrics": {
+        "mAP50": 0.7367,
+        "mAP50_95": 0.4908,
+        "precision": 0.7659,
+        "recall": 0.7677,
+        "f1": 0.7668,
+        "per_class_ap50": {
+          "knife": 0.484,
+          "shotgun": 0.431,
+          "grenade": null
+        }
+      },
+      "latency": {
+        "p95_latency_ms": 25.673
+      },
+      "known_limitations": [
+        "Knife class AP is weak relative to pistol/rifle",
+        "Shotgun class AP is weak in low-light crops",
+        "Grenade class is unvalidated — no dedicated test instances in offline eval",
+        "Domain shift across camera heights not exhaustively benchmarked"
+      ],
       "classes": ["pistol", "rifle", "knife", "shotgun", "grenade", "machete", "sickle", "axe", "sword"],
       "nc": 9,
-      "mAP50": 0.7367,
-      "mAP50_95": 0.4908,
-      "precision": 0.7659,
-      "recall": 0.7677,
-      "f1": 0.7668,
-      "p95_latency_ms": 25.673,
       "stopped_epoch": 30,
-      "training_dataset": "weapon_v2",
       "created_at": "2026-05-10T15:10:00+00:00",
+      "promotion_date": null,
+      "owner": "Aegis Sentinel",
+      "rollback_of": null,
       "framework": "Ultralytics",
       "architecture": "YOLO11s",
-      "notes": "YOLO11s 9-class model. Stopped at epoch 30 by Phase 29.5 quality gate. Test mAP50=0.737 on 1586 test images. Weak classes: knife (0.484), shotgun (0.431)."
+      "notes": "YOLO11s 9-class model. Stopped at epoch 30 by Phase 29.5 quality gate."
     }
   },
   "phone_detector": {
+    "active_version": "v1",
     "v1": {
+      "model_id": "phone_yolov8_v1_current",
       "model_name": "phone_detector",
       "version": "v1",
       "path": "models/phone/current.pt",
+      "task": "phone_detection",
+      "provider": "ultralytics_yolo",
+      "status": "active",
+      "approval_status": "production_pending",
+      "validation_status": "pending_full_benchmark",
+      "training_dataset": "mobile-phone-detection-v84ha",
+      "evaluation_dataset": "pending_operator_validation",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Offline precision/recall targets in governance policy are not yet populated from an independent benchmark",
+        "Roboflow-sourced weights — domain shift to site-specific cameras unverified",
+        "Dual class ids both map to phone — label noise risk"
+      ],
       "classes": ["phone"],
       "nc": 2,
       "class_id_map": {"0": "phone", "1": "phone"},
-      "mAP50": null,
-      "training_dataset": "mobile-phone-detection-v84ha",
       "created_at": "2026-05-03T12:53:00+00:00",
+      "promotion_date": null,
+      "owner": "Aegis Sentinel",
+      "rollback_of": null,
       "framework": "YOLOv8",
       "source": "roboflow",
       "roboflow_project": "college-ai4bu/mobile-phone-detection-v84ha",
-      "notes": "Trained model from phone_model_bundle. Classes 0 and 1 both map to 'phone'."
+      "notes": "Trained model from phone_model_bundle."
     }
   },
   "face_recognition": {
+    "active_version": "buffalo_l",
     "buffalo_l": {
+      "model_id": "face_insightface_buffalo_l",
       "model_name": "face_recognition",
       "version": "buffalo_l",
       "path": "models/buffalo_l",
+      "task": "face_embedding",
+      "provider": "insightface",
+      "status": "active",
+      "approval_status": "demo_approved",
+      "validation_status": "bundle_present",
+      "training_dataset": "insightface_distribution",
+      "evaluation_dataset": "site_calibration_required",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Production face-match thresholds require calibration dataset and scripts output — see identity governance",
+        "Cross-site appearance shift not captured by default bundle alone"
+      ],
       "classes": ["face_embedding"],
       "created_at": "2026-05-03T09:20:53+00:00",
+      "promotion_date": null,
+      "owner": "Aegis Sentinel",
+      "rollback_of": null,
       "framework": "InsightFace",
       "notes": "Required InsightFace model bundle for cross-camera identity fusion."
+    }
+  },
+  "anomaly_pipeline": {
+    "active_version": "current",
+    "current": {
+      "model_id": "anomaly_videomae_pipeline_current",
+      "model_name": "anomaly_pipeline",
+      "version": "current",
+      "path": "models/anomaly/current",
+      "task": "anomaly_detection",
+      "provider": "videomae_hf",
+      "status": "active",
+      "approval_status": "demo_approved",
+      "validation_status": "offline_pipeline_only",
+      "training_dataset": "videomae_ucf_family",
+      "evaluation_dataset": "offline_clip_validation",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Offline perfect-looking scores were pipeline validation only — not a claim of live-site accuracy",
+        "Live evaluation is limited by available representative site videos and labeling",
+        "Violence-specific YOLO checkpoint (models/anomaly/violence_yolo11.pt) is tracked separately when deployed"
+      ],
+      "logical_only": false,
+      "created_at": "2026-05-10T12:00:00+00:00",
+      "promotion_date": null,
+      "owner": "Aegis Sentinel",
+      "rollback_of": null,
+      "notes": "Primary anomaly bundle directory (VideoMAE export)."
+    },
+    "violence_yolo11": {
+      "model_id": "anomaly_violence_yolo11_aux",
+      "model_name": "anomaly_violence_yolo",
+      "version": "violence_yolo11",
+      "path": "models/anomaly/violence_yolo11.pt",
+      "task": "violence_object_aux",
+      "provider": "ultralytics_yolo",
+      "status": "standby",
+      "approval_status": "production_pending",
+      "validation_status": "not_deployed_by_default",
+      "training_dataset": "site_specific_when_trained",
+      "evaluation_dataset": "pending_when_weights_present",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Weights path may be absent on fresh clones — enable only after verified local drop",
+        "Must not be promoted without live-eval report under governance policy"
+      ],
+      "optional_path": true,
+      "created_at": "2026-05-11T00:00:00+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null
+    }
+  },
+  "segmentation_sam2": {
+    "active_version": "sam2_t",
+    "sam2_t": {
+      "model_id": "sam2_segmentation_sam2_t",
+      "model_name": "segmentation_sam2",
+      "version": "sam2_t",
+      "path": "sam2_t.pt",
+      "task": "segmentation",
+      "provider": "sam2",
+      "status": "active",
+      "approval_status": "production_pending",
+      "validation_status": "checkpoint_optional_in_dev",
+      "training_dataset": "sam2_official_or_mirror",
+      "evaluation_dataset": "bbox_dependent_eval",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Segmentation quality depends on upstream bbox / detector quality",
+        "Checkpoint may be absent until operators mirror sam2_t.pt into project root"
+      ],
+      "optional_path": true,
+      "created_at": "2026-05-11T00:00:00+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null
+    }
+  },
+  "reid_osnet": {
+    "active_version": "torchreid",
+    "torchreid": {
+      "model_id": "reid_osnet_torchreid",
+      "model_name": "reid_osnet",
+      "version": "torchreid",
+      "path": "configs/runtime/identity.yaml",
+      "task": "person_reid",
+      "provider": "torchreid_osnet",
+      "status": "active",
+      "approval_status": "demo_approved",
+      "validation_status": "library_managed",
+      "training_dataset": "torchreid_pretrained",
+      "evaluation_dataset": "reid_benchmark_required_for_production",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Weights are managed inside torchreid / cache — not a single portable .pt in this repo",
+        "Production Re-ID promotion requires recorded benchmark from scripts/evaluate_reid_models.py output"
+      ],
+      "logical_only": true,
+      "created_at": "2026-05-11T00:00:00+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null
+    }
+  },
+  "open_vocab": {
+    "active_version": "grounding_dino",
+    "grounding_dino": {
+      "model_id": "open_vocab_grounding_dino_bundle",
+      "model_name": "open_vocab",
+      "version": "grounding_dino",
+      "path": "models/open_vocab/grounding_dino",
+      "task": "open_vocabulary_detection",
+      "provider": "grounding_dino",
+      "status": "active",
+      "approval_status": "demo_approved",
+      "validation_status": "bundle_partial",
+      "training_dataset": "upstream_grounding_dino",
+      "evaluation_dataset": "operator_prompt_matrix",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Prompt sensitivity and domain-shift risk — open-vocab outputs are advisory",
+        "Large safetensors/binaries may be absent until downloaded per deployment policy"
+      ],
+      "optional_path": true,
+      "created_at": "2026-05-11T00:00:00+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null
+    }
+  },
+  "llm_provider": {
+    "active_version": "config",
+    "config": {
+      "model_id": "llm_runtime_config_provider",
+      "model_name": "llm_provider",
+      "version": "config",
+      "path": "configs/runtime/llm.yaml",
+      "task": "llm",
+      "provider": "config_router",
+      "status": "active",
+      "approval_status": "demo_approved",
+      "validation_status": "configuration_only",
+      "training_dataset": "n/a",
+      "evaluation_dataset": "n/a",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Provider choice and keys are environment-dependent — governance tracks configuration not vendor weights",
+        "OpenAI-backed flows inherit third-party availability and data-handling posture"
+      ],
+      "logical_only": true,
+      "created_at": "2026-05-11T00:00:00+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null
+    }
+  },
+  "liveness_provider": {
+    "active_version": "none",
+    "none": {
+      "model_id": "liveness_provider_none",
+      "model_name": "liveness_provider",
+      "version": "none",
+      "path": "configs/runtime/identity.yaml",
+      "task": "identity_liveness",
+      "provider": "none",
+      "status": "disabled",
+      "approval_status": "production_pending",
+      "validation_status": "provider_not_integrated",
+      "training_dataset": "n/a",
+      "evaluation_dataset": "n/a",
+      "metrics": {},
+      "latency": {},
+      "known_limitations": [
+        "Liveness is disabled unless a real provider is integrated and benchmarked",
+        "Enabling liveness without an integrated provider is a production governance blocker when fail_if_enabled_without_provider is true"
+      ],
+      "logical_only": true,
+      "created_at": "2026-05-11T00:00:00+00:00",
+      "owner": "Aegis Sentinel",
+      "rollback_of": null
     }
   }
 }

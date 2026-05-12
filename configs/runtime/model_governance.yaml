@@ -1,0 +1,104 @@
+model_governance:
+  enabled: true
+
+  registry:
+    backend: "file"
+    file_path: "models/registry.json"
+    require_registry_entry_for_runtime_models: true
+    prohibit_dual_writes: true
+
+  approval:
+    require_metrics_for_promotion: true
+    require_known_limitations: true
+    require_owner: true
+    require_validation_status: true
+
+  drift:
+    enabled: true
+    storage_dir: "storage/model_drift"
+    windows:
+      short_hours: 24
+      medium_days: 7
+      long_days: 30
+    confidence_distribution_bins: 10
+    class_frequency_monitoring: true
+    latency_monitoring: true
+
+  promotion_policy:
+    phone:
+      min_precision: 0.85
+      min_recall: 0.85
+      max_p95_latency_ms: 50
+    weapon:
+      min_map50: 0.70
+      min_recall: 0.65
+      max_p95_latency_ms: 60
+      weak_classes_warn_below_ap50: 0.50
+    anomaly:
+      require_live_eval_report: true
+      require_offline_live_separation: true
+    identity:
+      require_face_calibration_for_production: true
+      require_reid_benchmark_for_production: true
+      require_liveness_decision: true
+
+  rollback:
+    enabled: true
+    keep_previous_versions: true
+    require_audit_reason: true
+
+  anomaly_live_eval:
+    report_path: "storage/anomaly_live_eval/live_eval_summary.json"
+
+  runtime_model_bindings:
+    - governance_id: weapon_yolo11s_v2_current
+      registry_model_key: weapon_detector
+      version_selector: latest
+      task_label: weapon_detection
+    - governance_id: phone_detector_current
+      registry_model_key: phone_detector
+      version_selector: latest
+      task_label: phone_detection
+    - governance_id: anomaly_videomae_current
+      registry_model_key: anomaly_pipeline
+      version_selector: latest
+      task_label: anomaly_detection
+      optional_path: true
+    - governance_id: sam2_segmentation
+      registry_model_key: segmentation_sam2
+      version_selector: latest
+      task_label: segmentation
+      optional_path: true
+    - governance_id: face_insightface_buffalo_l
+      registry_model_key: face_recognition
+      version_selector: latest
+      task_label: face_embedding
+    - governance_id: reid_osnet_provider
+      registry_model_key: reid_osnet
+      version_selector: latest
+      task_label: person_reid
+      optional_path: true
+    - governance_id: open_vocab_grounding
+      registry_model_key: open_vocab
+      version_selector: latest
+      task_label: open_vocabulary
+      optional_path: true
+    - governance_id: llm_runtime_provider
+      registry_model_key: llm_provider
+      version_selector: latest
+      task_label: llm
+      logical_only: true
+    - governance_id: liveness_provider_gate
+      registry_model_key: liveness_provider
+      version_selector: latest
+      task_label: identity_liveness
+      logical_only: true
+
+  liveness_provider:
+    status: disabled
+    provider: none
+    production_blocker_if_enabled_without_provider: true
+    roadmap_required: true
+
+  development_overrides:
+    allow_deprecated_active: false

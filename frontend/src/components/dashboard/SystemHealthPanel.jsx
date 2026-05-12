@@ -94,7 +94,7 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
   // Subsystem order for display
   const CHECK_ORDER = [
     'security', 'database', 'redis', 'storage', 'gpu',
-    'model_registry', 'event_bus', 'open_vocab', 'segmentation',
+    'model_registry', 'model_governance', 'event_bus', 'open_vocab', 'segmentation',
   ]
   const segmentationCheck = checks.segmentation || {}
 
@@ -108,6 +108,9 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
             Analytics
+          </button>
+          <button type="button" className="text-button" onClick={() => { window.location.hash = 'model-governance' }}>
+            Model governance
           </button>
           <span className={`health-pill health-${status}`}>{status}</span>
           {subsystemStatus && subsystemStatus !== status && (

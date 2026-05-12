@@ -145,6 +145,25 @@ class RuntimeHealthService:
         except Exception as e:
             return {"status": "degraded", "detail": str(e)[:120]}
 
+    def _check_model_governance(self) -> dict:
+        try:
+            from app.services.model_governance_service import evaluate_runtime_model_governance
+
+            profile = "production" if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} else "development"
+            report = evaluate_runtime_model_governance(profile=profile)
+            st = str(report.get("status") or "unknown")
+            mapped = "error" if st == "failed" else ("degraded" if st == "degraded" else "ok")
+            return {
+                "status": mapped,
+                "governance_status": st,
+                "active_models": report.get("active_models") or [],
+                "missing_registry_entries": report.get("missing_registry_entries") or [],
+                "missing_metrics": report.get("missing_metrics") or [],
+                "production_blockers": report.get("production_blockers") or [],
+            }
+        except Exception as exc:
+            return {"status": "degraded", "detail": str(exc)[:160], "production_blockers": [str(exc)]}
+
     def _check_event_bus(self) -> dict:
         try:
             from core.event_bus.distributed_event_bus import DistributedEventBus  # noqa: F401
@@ -723,6 +742,7 @@ class RuntimeHealthService:
             "segmentation": self._check_segmentation(),
             "storage": self._check_storage(),
             "model_registry": self._check_model_registry(),
+            "model_governance": self._check_model_governance(),
             "event_bus": self._check_event_bus(),
             "security": self._check_security(),
             "case_management": case_management,

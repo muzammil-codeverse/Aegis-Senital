@@ -171,6 +171,9 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
             <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
               Analyze Video
             </button>
+            <button type="button" className="text-button" onClick={() => { window.location.hash = 'model-governance' }}>
+              Model governance
+            </button>
           </div>
         </div>
         {analyticsPreviewError ? <p className="muted">{analyticsPreviewError}</p> : null}

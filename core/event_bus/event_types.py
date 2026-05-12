@@ -18,6 +18,7 @@ class EventType(str, Enum):
     HANDOFF_EXPIRED = "HANDOFF_EXPIRED"
     # Phase 20 — identity intelligence
     WATCHLIST_HIT = "watchlist_hit"
+    IDENTITY_CANDIDATE_CREATED = "identity_candidate_created"
     # Phase 23 — open-vocabulary threat scanner
     OPEN_VOCAB_SCAN_COMPLETED = "open_vocab_scan_completed"
     OPEN_VOCAB_THREAT_FOUND = "open_vocab_threat_found"

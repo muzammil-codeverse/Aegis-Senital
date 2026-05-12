@@ -117,6 +117,12 @@ async def startup():
         get_llm_service()
     except Exception as exc:
         logger.warning("LLM service init failed: %s", exc)
+    try:
+        from app.services.identity_candidate_service import register_identity_candidate_event_consumer
+
+        register_identity_candidate_event_consumer()
+    except Exception as exc:
+        logger.warning("Identity candidate bus consumer init failed: %s", exc)
     logger.info("Aegis Sentinel startup complete.")
 
 

@@ -260,6 +260,13 @@ def permission_for_request(method: str, path: str) -> str | None:
     if path.startswith("/api/handoffs/"):
         return "map:read"
 
+    if path.startswith("/api/model-governance"):
+        if path.endswith("/rollback"):
+            return "model:rollback"
+        if path.endswith("/promote"):
+            return "model:approve"
+        return "model:read"
+
     if path.startswith("/api/models"):
         return "model:read" if method == "GET" else "model:write"
 

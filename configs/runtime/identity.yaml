@@ -58,6 +58,7 @@ identity:
     auto_confirm_identity: false
     allow_reject_candidate: true
     allow_merge_after_review: true
+    candidate_emit_min_fusion_score: 0.55
 
   privacy:
     store_raw_faces: false

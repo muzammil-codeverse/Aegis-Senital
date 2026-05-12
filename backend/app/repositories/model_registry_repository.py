@@ -31,6 +31,9 @@ except Exception:  # pragma: no cover - optional dependency in some environments
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MODEL_REGISTRY_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "model_registry.yaml"
+_DEFAULT_RESERVED_REGISTRY_KEYS = frozenset({"active_version", "active_rollout"})
+
+
 DEFAULT_MODEL_REGISTRY_CONFIG: dict[str, Any] = {
     "model_registry": {
         "backend": "file",
@@ -38,6 +41,7 @@ DEFAULT_MODEL_REGISTRY_CONFIG: dict[str, Any] = {
         "allow_file_to_db_migration": True,
         "prohibit_dual_writes": True,
         "enable_postgres_writes": False,
+        "enable_file_writes": False,
     }
 }
 _MODEL_REGISTRY_REPOSITORY: "ModelRegistryRepository | None" = None
@@ -139,7 +143,13 @@ def flatten_registry_snapshot(snapshot: dict[str, Any]) -> list[ModelRegistryEnt
         if "path" in payload:
             items.append(_normalize_direct_entry(str(model_key), payload))
             continue
-        versioned = [item for item in payload.items() if isinstance(item[1], dict) and "path" in item[1]]
+        versioned = [
+            item
+            for item in payload.items()
+            if isinstance(item[1], dict)
+            and "path" in item[1]
+            and str(item[0]) not in _DEFAULT_RESERVED_REGISTRY_KEYS
+        ]
         if not versioned:
             continue
         for version, meta in versioned:
@@ -196,6 +206,15 @@ class ModelRegistryRepository(ABC):
     def allow_writes(self) -> bool:
         return self._allow_writes
 
+    def read_snapshot(self) -> dict[str, Any]:
+        """Raw registry document (file JSON or reconstructed). Used for governance / active_version."""
+        return {}
+
+    def write_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Replace registry document atomically (file backend only in standard deployments)."""
+        self._raise_if_writes_disabled()
+        raise RuntimeError("write_snapshot is not implemented for this registry backend")
+
     @abstractmethod
     def is_available(self) -> bool:
         raise NotImplementedError
@@ -240,8 +259,8 @@ class ModelRegistryRepository(ABC):
 
 
 class FileModelRegistryRepository(ModelRegistryRepository):
-    def __init__(self, file_path: str) -> None:
-        super().__init__(allow_writes=False)
+    def __init__(self, file_path: str, *, allow_writes: bool = False) -> None:
+        super().__init__(allow_writes=allow_writes)
         self._file_path = (PROJECT_ROOT / file_path).resolve()
 
     @property
@@ -261,9 +280,27 @@ class FileModelRegistryRepository(ModelRegistryRepository):
         payload = json.loads(self._file_path.read_text(encoding="utf-8"))
         return flatten_registry_snapshot(payload if isinstance(payload, dict) else {})
 
+    def read_snapshot(self) -> dict[str, Any]:
+        if not self._file_path.exists():
+            return {}
+        try:
+            payload = json.loads(self._file_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def write_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Atomically replace registry JSON (governance rollback / promotion metadata only)."""
+        self._raise_if_writes_disabled()
+        self._file_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._file_path.with_suffix(self._file_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+        tmp.replace(self._file_path)
+        self._set_error(None)
+
     def upsert_entries(self, entries: list[ModelRegistryEntry]) -> int:
         self._raise_if_writes_disabled()
-        raise RuntimeError("File registry updates are intentionally disabled")
+        raise RuntimeError("File registry row upserts are not supported; use write_snapshot via governance service")
 
 
 class PostgresModelRegistryRepository(ModelRegistryRepository):
@@ -279,6 +316,20 @@ class PostgresModelRegistryRepository(ModelRegistryRepository):
 
     def is_available(self) -> bool:
         return self._available
+
+    def read_snapshot(self) -> dict[str, Any]:
+        entries = self.list_entries()
+        snapshot: dict[str, Any] = {}
+        for entry in entries:
+            grouped = snapshot.setdefault(entry.model_key, {})
+            if isinstance(grouped, dict):
+                grouped[str(entry.version)] = {
+                    "model_name": entry.model_name,
+                    "version": entry.version,
+                    "path": entry.path,
+                    **dict(entry.metadata),
+                }
+        return snapshot
 
     def list_entries(self) -> list[ModelRegistryEntry]:
         rows = self._fetchall(
@@ -378,7 +429,11 @@ def build_model_registry_repository(config: dict[str, Any] | None = None) -> Mod
     allow_writes = bool(settings.get("enable_postgres_writes", False))
     if backend == "postgres":
         return PostgresModelRegistryRepository(allow_writes=allow_writes)
-    return FileModelRegistryRepository(str(settings.get("file_path") or "models/registry.json"))
+    file_writes = bool(settings.get("enable_file_writes", False))
+    return FileModelRegistryRepository(
+        str(settings.get("file_path") or "models/registry.json"),
+        allow_writes=file_writes,
+    )
 
 
 def get_model_registry_repository(config: dict[str, Any] | None = None) -> ModelRegistryRepository:

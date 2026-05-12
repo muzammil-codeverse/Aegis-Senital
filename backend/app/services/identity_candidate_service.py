@@ -120,6 +120,20 @@ class IdentityCandidateService:
             review_notes=review_notes,
         )
 
+    def should_suppress_candidate_for_identity(self, global_identity_id: str) -> bool:
+        for row in self._repo.list_all():
+            if str(row.get("global_identity_id") or "") != str(global_identity_id):
+                continue
+            if row.get("exclude_from_high_confidence_surfacing"):
+                return True
+        return False
+
+    def upsert_from_fusion_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create/update a candidate row from fusion or bus payload (never sets auto-confirm)."""
+        if bool((self._config.get("review") or {}).get("auto_confirm_identity", False)):
+            logger.error("auto_confirm_identity must remain disabled")
+        return self._repo.upsert(payload)
+
     def seed_demo_candidate(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Test / demo helper — not used for production analytics."""
         payload = payload or {}
@@ -160,3 +174,35 @@ def get_identity_candidate_service() -> IdentityCandidateService:
 def reset_identity_candidate_service_for_tests() -> None:
     global _service
     _service = None
+
+
+def reset_identity_candidate_bus_for_tests() -> None:
+    global _identity_candidate_bus_registered
+    _identity_candidate_bus_registered = False
+
+
+_identity_candidate_bus_registered = False
+
+
+def register_identity_candidate_event_consumer() -> None:
+    """Subscribe once so inference can emit candidates without importing the backend from inference."""
+    global _identity_candidate_bus_registered
+    if _identity_candidate_bus_registered:
+        return
+    _identity_candidate_bus_registered = True
+
+    def _handler(record: Any) -> None:
+        try:
+            payload = getattr(record, "payload", None)
+            if not isinstance(payload, dict):
+                return
+            get_identity_candidate_service().upsert_from_fusion_payload(payload)
+        except Exception as exc:
+            logger.warning("identity_candidate_event_consume_failed: %s", exc)
+
+    try:
+        from core.event_bus import EventType, get_event_bus
+
+        get_event_bus().subscribe(EventType.IDENTITY_CANDIDATE_CREATED, _handler)
+    except Exception as exc:
+        logger.warning("identity_candidate_bus_subscribe_failed: %s", exc)

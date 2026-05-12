@@ -24,6 +24,7 @@ from app.api.object_authorization import (
 from app.api.analytics_routes import router as analytics_router
 from app.api.case_routes import router as case_router
 from app.api.llm_routes import router as llm_router
+from app.api.model_governance_routes import router as model_governance_router
 from app.api.osint_routes import router as osint_router
 from app.api.streaming_routes import router as streaming_router
 from app.api.uploaded_video_routes import router as uploaded_video_router
@@ -57,6 +58,7 @@ router = APIRouter()
 router.include_router(analytics_router)
 router.include_router(case_router)
 router.include_router(llm_router)
+router.include_router(model_governance_router)
 router.include_router(osint_router)
 router.include_router(streaming_router)
 router.include_router(uploaded_video_router)

@@ -4,3 +4,4 @@ model_registry:
   allow_file_to_db_migration: true
   prohibit_dual_writes: true
   enable_postgres_writes: false
+  enable_file_writes: false

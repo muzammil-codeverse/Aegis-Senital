@@ -198,6 +198,7 @@ class IdentityFusionEngine:
         )
         self._track_identity_map: dict[str, str] = {}
         self._track_history: dict[str, deque[tuple[str, float]]] = {}
+        self._candidate_emit_last: dict[str, float] = {}
         self._last_error: str | None = self._face.last_error or self._appearance.last_error
 
     @property
@@ -388,6 +389,50 @@ class IdentityFusionEngine:
             "identity_registry_active_count",
             get_global_registry().total_identities,
         )
+
+        try:
+            review = dict(self._cfg.get("review") or {})
+            emit_threshold = float(review.get("candidate_emit_min_fusion_score", 0.55))
+        except (TypeError, ValueError):
+            emit_threshold = 0.55
+        emit_key = f"{smoothed_id}|{packet.camera_id}|{track.track_uuid}"
+        now_emit = time.time()
+        if (
+            not smoothed_id.startswith(_TEMP_PREFIX)
+            and match_type == "possible_identity_match"
+            and final_conf >= emit_threshold
+            and now_emit - float(self._candidate_emit_last.get(emit_key, 0.0)) > 30.0
+        ):
+            self._candidate_emit_last[emit_key] = now_emit
+            try:
+                from core.event_bus import EventType, get_event_bus
+
+                live_cfg = dict(self._cfg.get("liveness") or {})
+                payload = {
+                    "global_identity_id": smoothed_id,
+                    "camera_id": packet.camera_id,
+                    "source_event_id": None,
+                    "face_score": best_sources.get("face"),
+                    "reid_score": best_sources.get("reid"),
+                    "fusion_score": final_conf,
+                    "track_continuity_score": best_sources.get("track"),
+                    "quality_score": float(quality.get("quality_score") or 0.0) if quality else None,
+                    "liveness_enabled_snapshot": bool(live_cfg.get("enabled", False)),
+                    "liveness_status": str(live_cfg.get("provider") or "none"),
+                    "camera_observations": [{"camera_id": packet.camera_id, "track_id": track.track_id}],
+                    "first_seen": now_emit,
+                    "last_seen": now_emit,
+                    "evidence_refs": [{"type": "track_ref", "ref": f"{packet.camera_id}:{track.track_uuid}"}],
+                    "review_status": "pending",
+                }
+                get_event_bus().publish(
+                    EventType.IDENTITY_CANDIDATE_CREATED,
+                    payload,
+                    source=packet.camera_id,
+                    priority=4,
+                )
+            except Exception:
+                pass
 
         return IdentityResolution(
             identity_id=smoothed_id,

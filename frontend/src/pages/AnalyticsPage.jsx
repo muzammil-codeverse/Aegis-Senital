@@ -26,6 +26,9 @@ export default function AnalyticsPage() {
           <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
             Open Uploaded Video Analysis
           </button>
+          <button type="button" className="text-button" onClick={() => { window.location.hash = 'model-governance' }}>
+            Model governance
+          </button>
         </div>
         <p className="muted">
           Use the uploaded-video workflow to replay evidence through the same analytics pipeline, then compare event counts and case output from this dashboard.

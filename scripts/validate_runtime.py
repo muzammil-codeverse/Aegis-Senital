@@ -502,6 +502,7 @@ def validate(profile: str) -> None:
         "configs/runtime/streaming.yaml",
         "configs/runtime/persistence.yaml",
         "configs/runtime/model_registry.yaml",
+        "configs/runtime/model_governance.yaml",
         "configs/runtime/uploaded_video.yaml",
     ]:
         exists = (ROOT / cfg).exists()
@@ -561,6 +562,27 @@ def validate(profile: str) -> None:
             _record(check("model registry parseable", False, str(exc), required=True))
     except Exception as exc:
         _record(check("model registry repository", False, str(exc), required=True))
+
+    # Model governance gate
+    print("\n[Model Governance]")
+    try:
+        from app.services.model_governance_service import evaluate_runtime_model_governance
+
+        gov = evaluate_runtime_model_governance(profile=profile)
+        gov_ok = gov.get("status") != "failed"
+        detail = gov.get("status", "")
+        if gov.get("production_blockers"):
+            detail = f"{detail} | " + "; ".join(str(b) for b in gov.get("production_blockers") or [])[:400]
+        _record(
+            check(
+                "model governance gate",
+                gov_ok,
+                detail[:500] if detail else "",
+                required=profile == "production",
+            )
+        )
+    except Exception as exc:
+        _record(check("model governance gate", False, str(exc), required=profile == "production"))
 
     # JWT Secret
     print("\n[Security]")

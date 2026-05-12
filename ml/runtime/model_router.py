@@ -49,6 +49,15 @@ class ModelRouter:
 
         if version == "latest":
             selected_version = self._latest_version(versions)
+            try:
+                raw = self._repository.read_snapshot()
+                parent = raw.get(model_key) if isinstance(raw, dict) else None
+                if isinstance(parent, dict):
+                    forced = str(parent.get("active_version") or "").strip()
+                    if forced and forced in versions:
+                        selected_version = forced
+            except Exception:
+                pass
         elif version == "ab":
             selected_version = self._ab_version(versions, route_key=route_key)
         else:

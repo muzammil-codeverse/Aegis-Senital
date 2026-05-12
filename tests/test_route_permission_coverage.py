@@ -60,6 +60,9 @@ def test_sensitive_routes_have_explicit_permission_mapping():
         ("GET", "/api/uploaded-videos/uvs_01/clips/evt_01/download"): "uploaded_video:read",
         ("GET", "/api/identity/candidates"): "identity:read",
         ("POST", "/api/identity/candidates/c1/accept"): "identity:write",
+        ("GET", "/api/model-governance/registry"): "model:read",
+        ("POST", "/api/model-governance/rollback"): "model:rollback",
+        ("POST", "/api/model-governance/promote"): "model:approve",
     }
     for route_key, permission in expected.items():
         method, path = route_key
