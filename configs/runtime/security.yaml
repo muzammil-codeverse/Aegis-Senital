@@ -98,6 +98,8 @@ rbac:
     - "uploaded_video:write"
     - "uploaded_video:process"
     - "uploaded_video:case"
+    - "investigation:read"
+    - "investigation:write"
   analyst:
     - "camera:read"
     - "analytics:read"
@@ -133,6 +135,8 @@ rbac:
     - "uploaded_video:write"
     - "uploaded_video:process"
     - "uploaded_video:case"
+    - "investigation:read"
+    - "investigation:write"
   operator:
     - "camera:read"
     - "camera:control"
@@ -162,6 +166,7 @@ rbac:
     - "uploaded_video:write"
     - "uploaded_video:process"
     - "uploaded_video:case"
+    - "investigation:read"
   viewer:
     - "camera:read"
     - "analytics:read"
@@ -176,3 +181,4 @@ rbac:
     - "llm:read"
     - "osint:read"
     - "uploaded_video:read"
+    - "investigation:read"

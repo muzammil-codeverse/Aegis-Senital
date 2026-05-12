@@ -380,6 +380,26 @@ class LlmService:
             self._increment_metric("llm_generated_reports_total")
         return output
 
+    def _load_investigation_hypotheses(self, case_id: str) -> list[dict[str, Any]]:
+        try:
+            from app.repositories.investigation_repository import get_investigation_repository
+            repo = get_investigation_repository()
+            hypotheses = repo.list_hypotheses(case_id=case_id)
+            return [
+                {
+                    "hypothesis_id": h.hypothesis_id,
+                    "confidence": h.confidence,
+                    "review_status": h.review_status,
+                    "safe_summary": h.safe_summary,
+                    "step_count": len(h.steps),
+                    "evidence_refs": h.evidence_refs,
+                    "operator_review_required": h.operator_review_required,
+                }
+                for h in hypotheses
+            ]
+        except Exception:
+            return []
+
     def _build_case_context(self, case_id: str, evidence_ids: list[str] | None = None) -> dict[str, Any]:
         case = self._case_service.get_case(case_id)
         if case is None:
@@ -493,6 +513,7 @@ class LlmService:
             }
             for item in enrichment_summaries
         ]
+        investigation_hypotheses_payload = self._load_investigation_hypotheses(case_id)
         return {
             "case": case_payload,
             "evidence": evidence_payload,
@@ -500,6 +521,12 @@ class LlmService:
             "notes": notes_payload,
             "enrichment_sources": enrichment_sources_payload,
             "enrichment_summaries": enrichment_summaries_payload,
+            "investigation_hypotheses": investigation_hypotheses_payload,
+            "investigation_safety_notice": (
+                "Path hypotheses are investigative aids, not confirmed facts. "
+                "Do not state guilt, identity confirmation, or criminality. "
+                "Always use safe wording: 'possible movement path', 'investigative hypothesis', 'operator review required'."
+            ),
             "sources": self._build_sources(
                 case_payload,
                 evidence_payload,

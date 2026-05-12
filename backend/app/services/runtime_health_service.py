@@ -382,6 +382,19 @@ class RuntimeHealthService:
                 "last_error": str(exc)[:160],
             }
 
+    def _check_investigation(self) -> dict:
+        try:
+            from inference.config_runtime import load_runtime_config
+            cfg = (load_runtime_config("investigation").get("investigation") or {})
+            enabled = bool(cfg.get("enabled", True))
+            if not enabled:
+                return {"enabled": False, "status": "disabled", "stored_hypotheses": 0, "last_error": None}
+            from app.repositories.investigation_repository import get_investigation_repository
+            health = get_investigation_repository().health_check()
+            return {"enabled": True, **health}
+        except Exception as exc:
+            return {"enabled": True, "status": "degraded", "stored_hypotheses": 0, "last_error": str(exc)[:160]}
+
     def _check_analytics(self) -> dict:
         production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
         try:
@@ -761,6 +774,7 @@ class RuntimeHealthService:
         uploaded_video = self._check_uploaded_video()
         persistence = self._check_persistence()
         gis = self._check_gis()
+        investigation = self._check_investigation()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -781,6 +795,7 @@ class RuntimeHealthService:
             "uploaded_video": uploaded_video,
             "persistence": persistence,
             "gis": gis,
+            "investigation": investigation,
         }
 
         if not include_sensitive:
@@ -821,6 +836,7 @@ class RuntimeHealthService:
             "uploaded_video": uploaded_video,
             "persistence": persistence,
             "gis": gis,
+            "investigation": investigation,
         }
 
     def is_alive(self) -> bool:
@@ -935,6 +951,10 @@ class RuntimeHealthService:
         gis_check = self._check_gis()
         if self._production_mode() and gis_check.get("enabled") and gis_check.get("status") == "failed":
             failures.append(f"gis: {gis_check.get('last_error') or 'map provider not ready'}")
+
+        inv_check = self._check_investigation()
+        if inv_check.get("enabled") and inv_check.get("status") == "failed":
+            failures.append(f"investigation: {inv_check.get('last_error') or 'investigation storage failed'}")
 
         persistence = self._check_persistence()
         if persistence.get("enabled", False) and persistence.get("status") == "failed":

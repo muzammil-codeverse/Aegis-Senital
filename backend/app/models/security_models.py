@@ -74,6 +74,10 @@ class AuditAction(Enum):
     GIS_GEOFENCE_CREATED = "gis_geofence_created"
     GIS_GEOFENCE_UPDATED = "gis_geofence_updated"
     GIS_GEOFENCE_DELETED = "gis_geofence_deleted"
+    INVESTIGATION_PATH_RECONSTRUCTED = "investigation_path_reconstructed"
+    INVESTIGATION_HYPOTHESIS_REVIEWED = "investigation_hypothesis_reviewed"
+    INVESTIGATION_HYPOTHESIS_REJECTED = "investigation_hypothesis_rejected"
+    INVESTIGATION_HYPOTHESIS_ACCESS_DENIED = "investigation_hypothesis_access_denied"
 
 
 SENSITIVE_AUDIT_KEYS = {

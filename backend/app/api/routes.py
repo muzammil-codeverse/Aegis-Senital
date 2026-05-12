@@ -22,6 +22,7 @@ from app.api.object_authorization import (
     ensure_watchlist_access,
 )
 from app.api.gis_routes import router as gis_router
+from app.api.investigation_routes import router as investigation_router
 from app.api.analytics_routes import router as analytics_router
 from app.api.case_routes import router as case_router
 from app.api.llm_routes import router as llm_router
@@ -57,6 +58,7 @@ from inference.monitoring.metrics import get_metrics
 
 router = APIRouter()
 router.include_router(gis_router)
+router.include_router(investigation_router)
 router.include_router(analytics_router)
 router.include_router(case_router)
 router.include_router(llm_router)

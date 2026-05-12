@@ -1,0 +1,38 @@
+investigation:
+  enabled: true
+
+  path_reconstruction:
+    enabled: true
+    max_time_window_minutes: 60
+    default_backward_minutes: 20
+    default_forward_minutes: 30
+    max_candidate_paths: 10
+    min_confidence: 0.25
+
+  camera_graph:
+    max_edge_distance_meters: 500
+    walking_speed_mps: 1.4
+    running_speed_mps: 3.5
+    vehicle_speed_mps: 8.0
+    use_fov_overlap: true
+    use_geofence_penalty: true
+
+  evidence:
+    require_source_refs: true
+    include_event_refs: true
+    include_case_refs: true
+    include_identity_candidate_refs: true
+
+  safety:
+    operator_review_required: true
+    prohibit_identity_confirmation: true
+    prohibit_guilt_language: true
+
+  storage:
+    dev_backend: "jsonl"
+    production_backend: "postgres"
+    path: "storage/investigations"
+
+  frontend:
+    show_uncertainty_badges: true
+    show_confidence_breakdown: true
