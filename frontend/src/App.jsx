@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import SessionExpiredBanner from './components/auth/SessionExpiredBanner'
 import CommandCenterShell from './components/layout/CommandCenterShell'
+import CommandErrorBoundary from './components/layout/CommandErrorBoundary'
+import PageLoadingFallback from './components/layout/PageLoadingFallback'
 import { useAlerts } from './hooks/useAlerts'
 import { useAuth } from './hooks/useAuth'
 import { useCases } from './hooks/useCases'
@@ -12,23 +14,25 @@ import { useSystemHealth } from './hooks/useSystemHealth'
 import { useWebSocketAlerts } from './hooks/useWebSocketAlerts'
 import AlertsPage from './pages/AlertsPage'
 import AuditLogPage from './pages/AuditLogPage'
-import AnalyticsPage from './pages/AnalyticsPage'
 import CasesPage from './pages/CasesPage'
 import Dashboard from './pages/Dashboard'
-import DroneFusionPage from './pages/DroneFusionPage'
-import DroneOperationsHub from './pages/DroneOperationsHub'
 import ForensicsPage from './pages/ForensicsPage'
 import IdentityPage from './pages/IdentityPage'
 import IncidentsPage from './pages/IncidentsPage'
 import LoginPage from './pages/LoginPage'
 import ModelsPage from './pages/ModelsPage'
-import ModelGovernancePage from './pages/ModelGovernancePage'
-import MapOperationsPage from './pages/MapOperationsPage'
-import InvestigationWorkspacePage from './pages/InvestigationWorkspacePage'
-import DroneSimulationPage from './pages/DroneSimulationPage'
-import DroneMissionPlannerPage from './pages/DroneMissionPlannerPage'
 import SystemHealthPage from './pages/SystemHealthPage'
-import UploadedVideoAnalysisPage from './pages/UploadedVideoAnalysisPage'
+import {
+  LazyAnalyticsPage,
+  LazyDroneFusionPage,
+  LazyDroneMissionPlannerPage,
+  LazyDroneOperationsHub,
+  LazyDroneSimulationPage,
+  LazyInvestigationWorkspacePage,
+  LazyMapOperationsPage,
+  LazyModelGovernancePage,
+  LazyUploadedVideoAnalysisPage,
+} from './routes/lazyRoutes'
 
 const VALID_PAGES = new Set([
   ...commandRouteIds,
@@ -126,19 +130,21 @@ function AuthenticatedApp() {
       lastMessageAt={websocketState.lastMessageAt}
       reconnectCount={websocketState.reconnectCount}
     >
-      <ProtectedRoute permission={PAGE_PERMISSIONS[currentPage]}>
-        {renderPage(currentPage, sharedProps)}
-      </ProtectedRoute>
+      <CommandErrorBoundary>
+        <ProtectedRoute permission={PAGE_PERMISSIONS[currentPage]}>
+          {renderPage(currentPage, sharedProps)}
+        </ProtectedRoute>
+      </CommandErrorBoundary>
     </CommandCenterShell>
   )
 }
 
 function renderPage(page, props) {
+  // Non-heavy pages rendered directly — no lazy loading required.
   if (page === 'alerts') return <AlertsPage {...props} />
   if (page === 'incidents') return <IncidentsPage {...props} />
   if (page === 'cases') return <CasesPage caseState={props.caseState} />
   if (page === 'osint-enrichment') return <CasesPage caseState={props.caseState} />
-  if (page === 'analytics') return <AnalyticsPage />
   if (page === 'system') return <SystemHealthPage {...props} />
   if (page === 'forensics') return <ForensicsPage {...props} />
   if (page === 'identities') return <IdentityPage />
@@ -146,15 +152,65 @@ function renderPage(page, props) {
   if (page === 'models') return <ModelsPage />
   if (page === 'audit') return <AuditLogPage />
   if (page === 'security') return <AuditLogPage mode="users" />
-  if (page === 'uploaded-video-analysis') return <UploadedVideoAnalysisPage />
-  if (page === 'model-governance') return <ModelGovernancePage />
-  if (page === 'map-operations') return <MapOperationsPage />
-  if (page === 'investigation') return <InvestigationWorkspacePage />
-  if (page === 'drone-operations') return <DroneOperationsHub />
-  if (page === 'drone-simulation') return <DroneSimulationPage />
-  if (page === 'drone-mission-planner') return <DroneMissionPlannerPage />
-  if (page === 'drone-fusion') return <DroneFusionPage />
   if (page === 'live-streams') return <Dashboard {...props} />
+
+  // Heavy pages — code-split via React.lazy.  Each is wrapped in Suspense so
+  // the shell stays interactive while the chunk streams in.
+  if (page === 'analytics')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Analytics..." />}>
+        <LazyAnalyticsPage />
+      </Suspense>
+    )
+  if (page === 'uploaded-video-analysis')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Video Analysis..." />}>
+        <LazyUploadedVideoAnalysisPage />
+      </Suspense>
+    )
+  if (page === 'model-governance')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Model Governance..." />}>
+        <LazyModelGovernancePage />
+      </Suspense>
+    )
+  if (page === 'map-operations')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Map Operations..." />}>
+        <LazyMapOperationsPage />
+      </Suspense>
+    )
+  if (page === 'investigation')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Investigation Workspace..." />}>
+        <LazyInvestigationWorkspacePage />
+      </Suspense>
+    )
+  if (page === 'drone-operations')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Drone Operations..." />}>
+        <LazyDroneOperationsHub />
+      </Suspense>
+    )
+  if (page === 'drone-simulation')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Drone Simulation..." />}>
+        <LazyDroneSimulationPage />
+      </Suspense>
+    )
+  if (page === 'drone-mission-planner')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Mission Planner..." />}>
+        <LazyDroneMissionPlannerPage />
+      </Suspense>
+    )
+  if (page === 'drone-fusion')
+    return (
+      <Suspense fallback={<PageLoadingFallback label="Loading Drone Fusion..." />}>
+        <LazyDroneFusionPage />
+      </Suspense>
+    )
+
   return <Dashboard {...props} />
 }
 
