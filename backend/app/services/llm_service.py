@@ -34,6 +34,19 @@ PROHIBITED_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\bconfirmed attacker\b", re.IGNORECASE), "person associated with this event"),
     (re.compile(r"\bterrorist\b", re.IGNORECASE), "person associated with this event"),
     (re.compile(r"\bguilty\b", re.IGNORECASE), "operator review required"),
+    # Phase 46 fusion safety rewrites
+    (re.compile(r"\bthe suspect moved from camera\b", re.IGNORECASE), "a possible movement path was generated from camera"),
+    (re.compile(r"\btarget confirmed\b", re.IGNORECASE), "candidate subject requiring operator review"),
+    (re.compile(r"\breal drone pursuit\b", re.IGNORECASE), "simulated aerial observation"),
+)
+
+# Phase 46: fusion correlation context injected into LLM system prompt
+LLM_FUSION_SAFETY_CONTEXT = (
+    "Fusion correlations are candidate relationships between observations, not confirmed identity or guilt. "
+    "When describing drone observations, always use 'simulated aerial observation' not 'drone pursuit'. "
+    "When describing movement between camera and drone, always use 'a possible movement path was generated' "
+    "not 'the suspect moved'. "
+    "Never claim identity confirmation, guilt, or criminality from fusion results."
 )
 
 _LLM_SERVICE: "LlmService | None" = None

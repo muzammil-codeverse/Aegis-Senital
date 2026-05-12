@@ -175,6 +175,58 @@ class CaseTimelineService:
             )
             seq += 1
 
+        # Phase 46: inject fusion correlation timeline entries
+        try:
+            from app.repositories.drone_fusion_repository import get_drone_fusion_repository
+            fusion_repo = get_drone_fusion_repository()
+            fusion_corrs = fusion_repo.list_correlations(case_id=case_id, limit=200)
+            for corr in fusion_corrs:
+                items.append(
+                    CaseTimelineItem(
+                        timeline_id=_stable_timeline_id(case_id, "fusion_correlation", corr.correlation_id, corr.created_at),
+                        case_id=case_id,
+                        timestamp=corr.created_at,
+                        type="fusion_correlation_created",
+                        title="Candidate cross-source correlation",
+                        description=corr.safe_summary,
+                        severity=None,
+                        source_id=corr.correlation_id,
+                        sequence=seq,
+                        metadata={
+                            "source_pair": corr.source_pair,
+                            "confidence": corr.confidence,
+                            "review_status": corr.review_status,
+                            "operator_review_required": corr.operator_review_required,
+                        },
+                    )
+                )
+                seq += 1
+            fusion_handoffs = fusion_repo.list_handoffs(case_id=case_id, limit=100)
+            for h in fusion_handoffs:
+                items.append(
+                    CaseTimelineItem(
+                        timeline_id=_stable_timeline_id(case_id, "fusion_handoff", h.handoff_id, h.timestamp),
+                        case_id=case_id,
+                        timestamp=h.timestamp,
+                        type="fusion_handoff_suggested",
+                        title="Candidate source handoff suggestion",
+                        description=h.safe_summary,
+                        severity=None,
+                        source_id=h.handoff_id,
+                        sequence=seq,
+                        metadata={
+                            "from_source_type": h.from_source_type,
+                            "from_source_id": h.from_source_id,
+                            "to_source_type": h.to_source_type,
+                            "to_source_id": h.to_source_id,
+                            "confidence": h.confidence,
+                        },
+                    )
+                )
+                seq += 1
+        except Exception:
+            pass
+
         items.sort(key=lambda item: (_sort_key(item.timestamp), item.sequence))
         return items
 

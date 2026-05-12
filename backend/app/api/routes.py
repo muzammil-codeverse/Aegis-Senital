@@ -32,6 +32,7 @@ from app.api.streaming_routes import router as streaming_router
 from app.api.uploaded_video_routes import router as uploaded_video_router
 from app.api.drone_routes import router as drone_router
 from app.api.drone_mission_routes import router as drone_mission_router
+from app.api.drone_fusion_routes import router as drone_fusion_router
 from app.api.security_dependencies import (
     get_current_user_from_request,
     issue_csrf_token,
@@ -70,6 +71,7 @@ router.include_router(streaming_router)
 router.include_router(uploaded_video_router)
 router.include_router(drone_router)
 router.include_router(drone_mission_router)
+router.include_router(drone_fusion_router)
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
 

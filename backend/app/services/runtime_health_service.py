@@ -467,6 +467,31 @@ class RuntimeHealthService:
                 "last_error": str(exc)[:160],
             }
 
+    def _check_drone_fusion(self) -> dict:
+        """Return health status for the drone + fixed camera fusion subsystem (Phase 46)."""
+        try:
+            from app.repositories.drone_fusion_repository import get_drone_fusion_repository
+            repo = get_drone_fusion_repository()
+            health = repo.health_check()
+            return {
+                "enabled": True,
+                "status": health.get("status", "healthy"),
+                "backend": health.get("backend", "jsonl"),
+                "observations": health.get("observations", 0),
+                "correlations": health.get("correlations", 0),
+                "pending_reviews": health.get("pending_reviews", 0),
+                "last_error": health.get("last_error"),
+            }
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "status": "degraded",
+                "observations": 0,
+                "correlations": 0,
+                "pending_reviews": 0,
+                "last_error": str(exc)[:160],
+            }
+
     def _check_analytics(self) -> dict:
         production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
         try:
@@ -849,6 +874,7 @@ class RuntimeHealthService:
         investigation = self._check_investigation()
         drone_simulation = self._check_drone_simulation()
         drone_mission = self._check_drone_mission()
+        drone_fusion = self._check_drone_fusion()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -872,6 +898,7 @@ class RuntimeHealthService:
             "investigation": investigation,
             "drone_simulation": drone_simulation,
             "drone_mission": drone_mission,
+            "drone_fusion": drone_fusion,
         }
 
         if not include_sensitive:
@@ -914,6 +941,8 @@ class RuntimeHealthService:
             "gis": gis,
             "investigation": investigation,
             "drone_simulation": drone_simulation,
+            "drone_mission": drone_mission,
+            "drone_fusion": drone_fusion,
         }
 
     def is_alive(self) -> bool:

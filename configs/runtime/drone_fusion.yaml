@@ -1,0 +1,67 @@
+drone_fusion:
+  enabled: true
+
+  sources:
+    fixed_cameras: true
+    drone_simulation: true
+    drone_missions: true
+    uploaded_video: true
+
+  correlation:
+    max_time_delta_seconds: 20
+    max_spatial_distance_meters: 120
+    max_camera_graph_hops: 2
+    min_fusion_confidence: 0.35
+
+  scoring:
+    time_weight: 0.30
+    geo_weight: 0.25
+    appearance_weight: 0.20
+    event_type_weight: 0.15
+    mission_context_weight: 0.10
+
+  identity:
+    use_identity_candidates: true
+    use_reid_score: true
+    use_face_score: false
+    require_operator_review: true
+    prohibit_auto_confirmation: true
+
+  investigation:
+    emit_fusion_observations: true
+    attach_to_path_hypotheses: true
+    label_drone_steps_as_simulated: true
+
+  case_integration:
+    attach_fusion_summary: true
+    include_source_refs: true
+    require_chain_of_custody_refs: true
+
+  storage:
+    dev_backend: "jsonl"
+    production_backend: "postgres"
+    path: "storage/drone_fusion"
+    production_required: false
+
+  safety:
+    safe_wording_required: true
+    prohibit_guilt_language: true
+    prohibit_identity_confirmation: true
+
+  websocket:
+    endpoint: "/ws/drone-fusion"
+    require_auth: true
+    prohibit_query_token_in_production: true
+
+  analytics:
+    track_correlations_total: true
+    track_correlations_pending: true
+    track_correlations_accepted: true
+    track_correlations_rejected: true
+    track_handoffs_total: true
+    track_average_confidence: true
+
+  health:
+    report_observations: true
+    report_correlations: true
+    report_pending_reviews: true

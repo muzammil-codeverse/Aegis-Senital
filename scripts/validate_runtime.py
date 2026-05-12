@@ -588,6 +588,71 @@ def validate_drone_mission_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_drone_fusion_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[Drone Fusion (Phase 46)]")
+    path = ROOT / "configs" / "runtime" / "drone_fusion.yaml"
+    if not path.exists():
+        results.append(check("drone fusion config", False, str(path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("drone fusion config parseable", False, str(exc), required=True))
+        return results
+
+    fusion_cfg = cfg.get("drone_fusion", cfg)
+    enabled = bool(fusion_cfg.get("enabled", True))
+    safety = dict(fusion_cfg.get("safety") or {})
+    storage = dict(fusion_cfg.get("storage") or {})
+    identity = dict(fusion_cfg.get("identity") or {})
+
+    results.append(check("drone fusion config parseable", True, required=True))
+    results.append(check("drone fusion safety.safe_wording_required",
+                          bool(safety.get("safe_wording_required", True)), required=True))
+    results.append(check("drone fusion safety.prohibit_guilt_language",
+                          bool(safety.get("prohibit_guilt_language", True)), required=True))
+    results.append(check("drone fusion safety.prohibit_identity_confirmation",
+                          bool(safety.get("prohibit_identity_confirmation", True)), required=True))
+    results.append(check("drone fusion identity.prohibit_auto_confirmation",
+                          bool(identity.get("prohibit_auto_confirmation", True)), required=True))
+
+    if not enabled:
+        return results
+
+    dev_backend = str(storage.get("dev_backend") or "jsonl").lower()
+    prod_backend = str(storage.get("production_backend") or "postgres").lower()
+    storage_path = ROOT / str(storage.get("path") or "storage/drone_fusion")
+    storage_path.mkdir(parents=True, exist_ok=True)
+    results.append(check("storage/drone_fusion writable", os.access(str(storage_path), os.W_OK),
+                          str(storage_path), required=profile == "development"))
+    results.append(check("drone fusion dev backend=jsonl", dev_backend == "jsonl", dev_backend, required=False))
+    results.append(check("drone fusion production backend=postgres", prod_backend == "postgres", prod_backend, required=False))
+
+    production_required = bool(storage.get("production_required", False))
+    if profile == "production" and prod_backend == "postgres" and production_required:
+        dsn = os.environ.get("POSTGRES_DSN") or os.environ.get("AEGIS_POSTGRES_DSN") or os.environ.get("DB_URL")
+        results.append(check("drone fusion POSTGRES_DSN", bool(dsn),
+                              "configured" if dsn else "missing POSTGRES_DSN", required=True))
+
+    # Health check via repository
+    try:
+        import sys as _sys
+        for _p in (ROOT, ROOT / "backend"):
+            if str(_p) not in _sys.path:
+                _sys.path.insert(0, str(_p))
+        from app.repositories.drone_fusion_repository import DroneFusionRepository
+        repo = DroneFusionRepository(root_dir=storage_path)
+        health = repo.health_check()
+        results.append(check("drone fusion repository health", health.get("status") == "healthy",
+                              f"backend={health.get('backend')} observations={health.get('observations')}",
+                              required=False))
+    except Exception as exc:
+        results.append(check("drone fusion repository health", False, str(exc)[:120], required=False))
+
+    return results
+
+
 def validate(profile: str) -> None:
     print("Aegis Sentinel — Runtime Validation")
     print("=" * 50)
@@ -827,6 +892,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(drone_mission_results)
+
+    drone_fusion_results = validate_drone_fusion_configuration(profile)
+    for r in drone_fusion_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(drone_fusion_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)
