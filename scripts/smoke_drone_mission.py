@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Smoke test for the Drone Patrol Mission Planner (Phase 45).
+"""Strict smoke test for the simulated drone mission planner/runtime.
 
 Verifies:
-  1. Mission config is loadable
-  2. A 3-waypoint mission plan can be created and validated
-  3. Route estimation runs correctly
-  4. A mission session can be started (gracefully fails if simulator not running)
-  5. Mission status can be queried
+  1. Mission config is loadable and safety flags are intact
+  2. Mission models validate correctly
+  3. Geo/NED conversion works
+  4. Repository health is clean
+  5. Planning service creates and persists a mission
+  6. Live mission execution issues real simulator commands, records telemetry,
+     records waypoint events, and completes as a simulated mission
 
 Usage:
   python scripts/smoke_drone_mission.py
@@ -33,24 +35,18 @@ def _fail(msg: str, strict: bool) -> None:
     if strict:
         print(f"  [FAIL] {msg}")
         sys.exit(1)
-    print(f"  [WARN] {msg} (non-strict — continuing)")
-
-
-def _skip(msg: str) -> None:
-    print(f"  [SKIP] {msg}")
+    print(f"  [WARN] {msg} (non-strict - continuing)")
 
 
 def main(strict: bool = False, device: str = "cpu") -> None:
-    print("=== Drone Patrol Mission Planner — Smoke Test ===")
+    print("=== Drone Patrol Mission Planner - Smoke Test ===")
     print(f"  strict={strict}  device={device}")
     print()
 
-    # ------------------------------------------------------------------
-    # 1. Config
-    # ------------------------------------------------------------------
     print("[1] Drone mission config")
     try:
         import yaml
+
         cfg_path = ROOT / "configs" / "runtime" / "drone_mission.yaml"
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
         mission_cfg = cfg.get("drone_mission", {})
@@ -64,23 +60,17 @@ def main(strict: bool = False, device: str = "cpu") -> None:
     except Exception as exc:
         _fail(f"Config error: {exc}", strict)
 
-    # ------------------------------------------------------------------
-    # 2. Models
-    # ------------------------------------------------------------------
     print("\n[2] Pydantic models")
     try:
-        from app.models.drone_mission_models import (
-            DroneMissionCreateRequest,
-            DroneMissionPlan,
-            DroneMissionStatus,
-            DroneWaypoint,
-        )
-        wp1 = DroneWaypoint(latitude=30.1575, longitude=71.5249, altitude_meters=40, velocity_mps=5, label="Home")
-        wp2 = DroneWaypoint(latitude=30.1585, longitude=71.5260, altitude_meters=45, velocity_mps=5, label="East")
-        wp3 = DroneWaypoint(latitude=30.1590, longitude=71.5245, altitude_meters=42, velocity_mps=4, label="North")
+        from app.models.drone_mission_models import DroneMissionCreateRequest, DroneWaypoint
+
         request = DroneMissionCreateRequest(
             name="Smoke Test Simulated Patrol",
-            waypoints=[wp1, wp2, wp3],
+            waypoints=[
+                DroneWaypoint(latitude=30.1575, longitude=71.5249, altitude_meters=5, velocity_mps=3, label="Home"),
+                DroneWaypoint(latitude=30.15752, longitude=71.52492, altitude_meters=6, velocity_mps=3, label="East"),
+                DroneWaypoint(latitude=30.15755, longitude=71.52495, altitude_meters=5, velocity_mps=3, label="North"),
+            ],
         )
         assert len(request.waypoints) == 3
         _pass("Models instantiated correctly")
@@ -88,27 +78,24 @@ def main(strict: bool = False, device: str = "cpu") -> None:
         _fail(f"Model error: {exc}", strict)
         return
 
-    # ------------------------------------------------------------------
-    # 3. Coordinate mapper
-    # ------------------------------------------------------------------
     print("\n[3] Coordinate mapper")
     try:
         from app.services.drone.drone_coordinate_mapper import geo_to_ned, ned_to_geo
-        ned = geo_to_ned(30.1585, 71.5260, 45)
-        assert abs(ned.x) < 2000, "NED x should be within 2 km"
+
+        ned = geo_to_ned(30.15752, 71.52492, 6)
+        assert abs(ned.x) < 20, "NED x should stay within local mission radius"
         geo = ned_to_geo(ned.x, ned.y, ned.z)
-        assert abs(geo.latitude - 30.1585) < 0.001
-        _pass(f"geo_to_ned and ned_to_geo round-trip OK (x={ned.x:.2f}, y={ned.y:.2f})")
+        assert abs(geo.latitude - 30.15752) < 0.001
+        _pass(f"geo_to_ned and ned_to_geo round-trip OK (x={ned.x:.2f}, y={ned.y:.2f}, z={ned.z:.2f})")
     except Exception as exc:
         _fail(f"Coordinate mapper error: {exc}", strict)
 
-    # ------------------------------------------------------------------
-    # 4. Repository
-    # ------------------------------------------------------------------
     print("\n[4] Repository")
     try:
         import tempfile
+
         from app.repositories.drone_mission_repository import DroneMissionRepository
+
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = DroneMissionRepository(root_dir=tmpdir)
             health = repo.health_check()
@@ -117,26 +104,23 @@ def main(strict: bool = False, device: str = "cpu") -> None:
     except Exception as exc:
         _fail(f"Repository error: {exc}", strict)
 
-    # ------------------------------------------------------------------
-    # 5. Mission service — create + validate + estimate
-    # ------------------------------------------------------------------
     print("\n[5] Mission service")
     try:
         import tempfile
+
+        from app.models.drone_mission_models import DroneMissionCreateRequest, DroneWaypoint
         from app.repositories.drone_mission_repository import DroneMissionRepository
         from app.services.drone.drone_mission_service import DroneMissionService
-        from app.models.drone_mission_models import DroneMissionCreateRequest, DroneWaypoint
 
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = DroneMissionRepository(root_dir=tmpdir)
             svc = DroneMissionService(repository=repo)
-
             req = DroneMissionCreateRequest(
                 name="Smoke Test Patrol",
                 waypoints=[
-                    DroneWaypoint(latitude=30.1575, longitude=71.5249, altitude_meters=40, velocity_mps=5),
-                    DroneWaypoint(latitude=30.1585, longitude=71.5260, altitude_meters=45, velocity_mps=5),
-                    DroneWaypoint(latitude=30.1590, longitude=71.5245, altitude_meters=42, velocity_mps=4),
+                    DroneWaypoint(latitude=30.1575, longitude=71.5249, altitude_meters=5, velocity_mps=3),
+                    DroneWaypoint(latitude=30.15752, longitude=71.52492, altitude_meters=6, velocity_mps=3),
+                    DroneWaypoint(latitude=30.15755, longitude=71.52495, altitude_meters=5, velocity_mps=3),
                 ],
             )
             mission = svc.create_mission(req, created_by="smoke_test")
@@ -146,30 +130,26 @@ def main(strict: bool = False, device: str = "cpu") -> None:
             assert mission.estimated_distance_meters > 0
             _pass(f"Mission created: {mission.mission_id}, distance={mission.estimated_distance_meters:.1f}m")
 
-            # Verify it's persisted
             fetched = svc.get_mission(mission.mission_id)
             assert fetched is not None
             _pass("Mission persisted and retrievable")
-
     except Exception as exc:
         _fail(f"Mission service error: {exc}", strict)
         return
 
-    # ------------------------------------------------------------------
-    # 6. Execution service — start (simulator may not be running)
-    # ------------------------------------------------------------------
-    print("\n[6] Execution service — start mission")
+    print("\n[6] Execution service - live mission run")
     try:
         import tempfile
-        from app.repositories.drone_mission_repository import DroneMissionRepository
-        from app.services.drone.drone_mission_service import DroneMissionService
-        from app.services.drone.drone_mission_execution_service import DroneMissionExecutionService
+
         from app.models.drone_mission_models import (
             DroneMissionCreateRequest,
             DroneMissionSession,
             DroneMissionStatus,
             DroneWaypoint,
         )
+        from app.repositories.drone_mission_repository import DroneMissionRepository
+        from app.services.drone.drone_mission_execution_service import DroneMissionExecutionService
+        from app.services.drone.drone_mission_service import DroneMissionService
 
         with tempfile.TemporaryDirectory() as tmpdir:
             repo = DroneMissionRepository(root_dir=tmpdir)
@@ -179,8 +159,9 @@ def main(strict: bool = False, device: str = "cpu") -> None:
             req = DroneMissionCreateRequest(
                 name="Smoke Exec Patrol",
                 waypoints=[
-                    DroneWaypoint(latitude=30.1575, longitude=71.5249, altitude_meters=40, velocity_mps=5),
-                    DroneWaypoint(latitude=30.1585, longitude=71.5260, altitude_meters=45, velocity_mps=5),
+                    DroneWaypoint(latitude=30.1575, longitude=71.5249, altitude_meters=5, velocity_mps=3),
+                    DroneWaypoint(latitude=30.15752, longitude=71.52492, altitude_meters=6, velocity_mps=3),
+                    DroneWaypoint(latitude=30.15755, longitude=71.52495, altitude_meters=5, velocity_mps=3),
                 ],
             )
             mission = plan_svc.create_mission(req, created_by="smoke_test")
@@ -190,38 +171,51 @@ def main(strict: bool = False, device: str = "cpu") -> None:
                 total_waypoints=len(mission.waypoints),
             )
             repo.start_session(session)
-            result_session = exec_svc.start_mission(mission, session, started_by="smoke_test")
 
-            # Simulator probably not connected — should fail gracefully, not raise
-            assert result_session.status in (
-                DroneMissionStatus.EXECUTING,
-                DroneMissionStatus.FAILED,
-            ), f"Unexpected status: {result_session.status}"
+            started_session = exec_svc.start_mission(mission, session, started_by="smoke_test")
+            assert started_session.status == DroneMissionStatus.EXECUTING, (
+                f"Mission should enter executing state, got {started_session.status}"
+            )
+            _pass("Mission session started against the live simulator")
 
-            if result_session.status == DroneMissionStatus.FAILED:
-                _skip("Simulator not connected — mission gracefully failed (expected in CI)")
-            else:
-                _pass("Mission started; simulator connected")
+            final_session = exec_svc.execute_mission_sync(mission, started_session.session_id)
+            assert final_session is not None, "Mission execution returned no session"
+            assert final_session.status == DroneMissionStatus.COMPLETED, (
+                f"Mission should complete, got {final_session.status}"
+            )
+            assert final_session.simulated is True
+            _pass("Simulator commands issued and mission completed")
 
-            # Status query should always work
-            status = exec_svc.get_mission_status(session.session_id)
-            assert status["session_id"] == session.session_id
-            _pass("get_mission_status returns valid data")
+            telemetry_points = repo.list_telemetry(final_session.session_id, limit=500)
+            assert telemetry_points, "Telemetry points were not recorded"
+            assert any(point.ned_x is not None for point in telemetry_points)
+            _pass(f"Telemetry collected ({len(telemetry_points)} points)")
 
+            events = repo.list_events(session_id=final_session.session_id, limit=200)
+            event_types = [event.event_type.value for event in events]
+            assert "mission_started" in event_types
+            assert "waypoint_reached" in event_types
+            assert "mission_completed" in event_types
+            _pass(f"Mission events recorded ({len(events)} events)")
+
+            status = exec_svc.get_mission_status(final_session.session_id)
+            assert status["session_id"] == final_session.session_id
+            assert status["status"] == DroneMissionStatus.COMPLETED.value
+            assert status["telemetry_count"] >= 1
+            assert status["waypoints_reached"] == len(mission.waypoints)
+            assert status["simulated"] is True
+            _pass("Mission status reflects waypoint progress and completion")
     except Exception as exc:
         _fail(f"Execution service error: {exc}", strict)
 
-    # ------------------------------------------------------------------
-    # Summary
-    # ------------------------------------------------------------------
     print()
     print("=== Smoke test complete ===")
-    print("All Phase 45 drone patrol mission planner checks passed (or skipped for offline simulator).")
+    print("All simulated drone mission planner checks passed.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--strict", action="store_true", help="Fail hard on any error")
-    parser.add_argument("--device", default="cpu", help="Device hint (cpu/cuda) — informational only")
+    parser.add_argument("--device", default="cpu", help="Device hint (cpu/cuda) - informational only")
     args = parser.parse_args()
     main(strict=args.strict, device=args.device)

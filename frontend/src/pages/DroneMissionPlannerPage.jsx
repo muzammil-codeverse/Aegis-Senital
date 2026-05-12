@@ -20,6 +20,7 @@ import MissionSafetyBadge from '../components/drone-mission/MissionSafetyBadge'
 import MissionStatusPanel from '../components/drone-mission/MissionStatusPanel'
 import MissionTelemetryTimeline from '../components/drone-mission/MissionTelemetryTimeline'
 import WaypointEditor from '../components/drone-mission/WaypointEditor'
+import CommandPageHeader from '../components/layout/CommandPageHeader'
 import { useDroneMissions } from '../hooks/useDroneMissions'
 
 export default function DroneMissionPlannerPage() {
@@ -100,16 +101,13 @@ export default function DroneMissionPlannerPage() {
 
   return (
     <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Drone Patrol Mission Planner</h2>
-          <p style={{ margin: '4px 0 0', color: '#888', fontSize: 12 }}>
-            Plan and monitor simulated aerial patrol missions via Cosys-AirSim
-          </p>
-        </div>
-        <MissionSafetyBadge />
-      </div>
+      <CommandPageHeader
+        eyebrow="Drone Operations"
+        title="Drone Mission Planner"
+        description="Plan and monitor simulated aerial patrol missions via Cosys-AirSim. Mission outputs remain simulated and operator-reviewed."
+        badges={['Simulated mission workflow', 'Operator review required']}
+        actions={<MissionSafetyBadge />}
+      />
 
       {error && <div className="alert alert-danger" style={{ fontSize: 12 }}>{error}</div>}
 

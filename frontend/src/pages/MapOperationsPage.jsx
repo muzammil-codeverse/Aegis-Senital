@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import MapCommandCenter from '../components/gis/MapCommandCenter'
+import CommandPageHeader from '../components/layout/CommandPageHeader'
 import { useAuth } from '../hooks/useAuth'
 import { useCameraGeoProfiles } from '../hooks/useCameraGeoProfiles'
 import { useGisMap } from '../hooks/useGisMap'
@@ -45,6 +46,12 @@ export default function MapOperationsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <CommandPageHeader
+        eyebrow="Geospatial"
+        title="Map Operations"
+        description="GIS command surface for cameras, events, routes, geofences, and fusion overlays. Data visibility remains RBAC-scoped."
+        badges={['Layer toggles', 'Operational overlays', 'Degraded provider handling']}
+      />
       {gisMap.error && <p className="error-text">{gisMap.error}</p>}
       <MapCommandCenter
         gisConfig={gisMap.config}

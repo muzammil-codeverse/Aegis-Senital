@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Phase 46 — Drone + Fixed Camera Fusion Smoke Test (Task 19).
+"""Phase 46/47 drone + fixed camera fusion smoke test.
 
-Deterministic smoke: seeds demo observations, runs fusion correlation,
-verifies confidence > threshold, verifies safe wording, verifies map
-overlay contract.
-
-Usage:
-  python scripts/smoke_drone_fixed_camera_fusion.py
-  python scripts/smoke_drone_fixed_camera_fusion.py --live --device cuda
+Deterministic mode seeds known observations and validates the fusion service.
+Live mode pulls real telemetry/frame data from the prepared Cosys-AirSim runtime,
+then correlates that live simulated drone observation with a nearby fixed-camera
+anchor observation using the same safe wording guarantees as production code.
 """
 from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +22,7 @@ for p in (ROOT, ROOT / "backend"):
 
 def _check(name: str, ok: bool, detail: str = "", required: bool = True) -> bool:
     status = "PASS" if ok else ("FAIL" if required else "WARN")
-    print(f"  [{status}] {name}" + (f" — {detail}" if detail else ""))
+    print(f"  [{status}] {name}" + (f" - {detail}" if detail else ""))
     return ok
 
 
@@ -36,23 +34,16 @@ def run_deterministic_smoke() -> bool:
     print("[Deterministic Fusion Smoke]")
     results = []
 
-    # ------------------------------------------------------------------
-    # 1. Import models and repository
-    # ------------------------------------------------------------------
     try:
-        from app.models.drone_fusion_models import (
-            FusionObservation, FusionSourceRef, FORBIDDEN_PHRASES
-        )
+        from app.models.drone_fusion_models import FORBIDDEN_PHRASES, FusionObservation, FusionSourceRef
         from app.repositories.drone_fusion_repository import DroneFusionRepository
         from app.services.drone_fusion.fusion_service import CrossSourceFusionService
+
         results.append(_check("imports OK", True))
     except Exception as exc:
         results.append(_check("imports OK", False, str(exc)))
         return False
 
-    # ------------------------------------------------------------------
-    # 2. Seed observations
-    # ------------------------------------------------------------------
     repo = DroneFusionRepository(root_dir="storage/drone_fusion_smoke_test")
     ts = _now_iso()
 
@@ -103,129 +94,202 @@ def run_deterministic_smoke() -> bool:
     repo.save_observation(drone_obs)
     results.append(_check("2 observations seeded", True))
 
-    # ------------------------------------------------------------------
-    # 3. Run fusion correlation
-    # ------------------------------------------------------------------
     class _DummyUser:
         username = "smoke_test"
         role = "admin"
         user_id = "smoke_user"
 
-    user = _DummyUser()
-
     svc = CrossSourceFusionService(repo)
-    correlations = svc.correlate([fixed_cam_obs, drone_obs], user=user,
-                                  case_id="case_smoke_001", event_id="evt_smoke_001")
+    correlations = svc.correlate(
+        [fixed_cam_obs, drone_obs],
+        user=_DummyUser(),
+        case_id="case_smoke_001",
+        event_id="evt_smoke_001",
+    )
 
-    results.append(_check("correlations generated", len(correlations) > 0,
-                           f"count={len(correlations)}"))
-
+    results.append(_check("correlations generated", len(correlations) > 0, f"count={len(correlations)}"))
     if not correlations:
         return False
 
     corr = correlations[0]
-    results.append(_check("confidence >= min threshold", corr.confidence >= 0.35,
-                           f"confidence={corr.confidence:.4f}"))
+    results.append(_check("confidence >= min threshold", corr.confidence >= 0.35, f"confidence={corr.confidence:.4f}"))
 
-    # ------------------------------------------------------------------
-    # 4. Verify safe wording
-    # ------------------------------------------------------------------
     summary_lower = corr.safe_summary.lower()
     has_forbidden = any(phrase in summary_lower for phrase in FORBIDDEN_PHRASES)
-    results.append(_check("safe_summary free of forbidden phrases", not has_forbidden,
-                           corr.safe_summary[:80]))
+    results.append(_check("safe_summary free of forbidden phrases", not has_forbidden, corr.safe_summary[:80]))
     results.append(_check("operator_review_required=True", corr.operator_review_required is True))
     results.append(_check("review_status=pending", corr.review_status == "pending"))
 
-    # ------------------------------------------------------------------
-    # 5. Verify source pair
-    # ------------------------------------------------------------------
-    has_fixed = "fixed_camera" in corr.source_pair
-    has_drone = "drone_simulation" in corr.source_pair
-    results.append(_check("source_pair includes fixed_camera", has_fixed))
-    results.append(_check("source_pair includes drone_simulation", has_drone))
+    results.append(_check("source_pair includes fixed_camera", "fixed_camera" in corr.source_pair))
+    results.append(_check("source_pair includes drone_simulation", "drone_simulation" in corr.source_pair))
 
-    # ------------------------------------------------------------------
-    # 6. Verify map overlay contract
-    # ------------------------------------------------------------------
     obs_a = repo.get_observation(corr.primary_observation_id)
     obs_b = repo.get_observation(corr.matched_observation_id)
     both_have_geo = (
-        obs_a and not obs_a.geo_missing and obs_a.latitude is not None and
-        obs_b and not obs_b.geo_missing and obs_b.latitude is not None
+        obs_a is not None
+        and obs_b is not None
+        and not obs_a.geo_missing
+        and not obs_b.geo_missing
+        and obs_a.latitude is not None
+        and obs_b.latitude is not None
     )
     results.append(_check("map overlay: both observations have geo", both_have_geo))
 
-    # ------------------------------------------------------------------
-    # 7. Verify confidence breakdown
-    # ------------------------------------------------------------------
-    bd = corr.confidence_breakdown
-    results.append(_check("confidence_breakdown present", bd is not None))
-    results.append(_check("time_score in breakdown", bd is not None and bd.time_score >= 0))
+    breakdown = corr.confidence_breakdown
+    results.append(_check("confidence_breakdown present", breakdown is not None))
+    results.append(_check("time_score in breakdown", breakdown is not None and breakdown.time_score >= 0))
 
-    # ------------------------------------------------------------------
-    # 8. Health check
-    # ------------------------------------------------------------------
     health = repo.health_check()
     results.append(_check("health_check returns healthy", health.get("status") == "healthy"))
-    results.append(_check("health shows correlations > 0", health.get("correlations", 0) > 0,
-                           f"correlations={health.get('correlations')}"))
+    results.append(_check("health shows correlations > 0", health.get("correlations", 0) > 0, f"correlations={health.get('correlations')}"))
 
-    # ------------------------------------------------------------------
-    # 9. Timeline
-    # ------------------------------------------------------------------
     timeline = repo.build_fusion_timeline(case_id="case_smoke_001")
-    results.append(_check("fusion timeline has entries", len(timeline.entries) > 0,
-                           f"entries={len(timeline.entries)}"))
+    results.append(_check("fusion timeline has entries", len(timeline.entries) > 0, f"entries={len(timeline.entries)}"))
 
-    # ------------------------------------------------------------------
-    # 10. Drone observation is simulated
-    # ------------------------------------------------------------------
     drone_in_repo = repo.get_observation(drone_obs.observation_id)
-    results.append(_check("drone observation simulated=True", drone_in_repo and drone_in_repo.simulated is True))
+    results.append(_check("drone observation simulated=True", drone_in_repo is not None and drone_in_repo.simulated is True))
 
     return all(results)
 
 
 def run_live_smoke(device: str = "cpu") -> bool:
-    print(f"\n[Live Smoke — device={device}]")
+    print(f"\n[Live Smoke - device={device}]")
     results = []
-    try:
-        from scripts.smoke_drone_simulation_pipeline import main as pipeline_main
-        results.append(_check("drone simulation pipeline import OK", True))
-    except ImportError as exc:
-        results.append(_check("drone simulation pipeline import", False, str(exc), required=False))
 
     try:
-        from app.services.drone.cosys_airsim_client import CosysAirSimClient
-        client = CosysAirSimClient()
-        client.connect()
-        results.append(_check("AirSim connection", True))
+        from app.models.drone_fusion_models import FORBIDDEN_PHRASES, FusionObservation, FusionSourceRef
+        from app.repositories.drone_fusion_repository import DroneFusionRepository
+        from app.services.drone.drone_simulation_service import DroneSimulationService
+        from app.services.drone_fusion.fusion_service import CrossSourceFusionService
+
+        service = DroneSimulationService()
+        status = service.connect()
+        results.append(_check("AirSim connection", status.connected, status.last_error or "connected"))
+        if not status.connected:
+            return False
+
+        telemetry = service.get_telemetry()
+        frame = service.get_frame()
+        results.append(_check("live telemetry available", telemetry.status == "connected", telemetry.last_error or "connected"))
+        results.append(_check("live frame available", frame.frame_available, frame.last_error or "frame captured"))
+        if telemetry.status != "connected" or not frame.frame_available:
+            service.disconnect()
+            return False
+
+        lat = telemetry.latitude
+        lon = telemetry.longitude
+        geo_ok = lat is not None and lon is not None
+        results.append(_check("live telemetry includes geo", geo_ok))
+        if not geo_ok:
+            service.disconnect()
+            return False
+
+        class _DummyUser:
+            username = "smoke_test"
+            role = "admin"
+            user_id = "smoke_user"
+
+        ts = frame.timestamp or telemetry.timestamp or _now_iso()
+        lat = float(lat)
+        lon = float(lon)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = DroneFusionRepository(root_dir=tmpdir)
+            svc = CrossSourceFusionService(repo)
+
+            fixed_cam_obs = FusionObservation(
+                source_type="fixed_camera",
+                source_id="cam_live_anchor",
+                event_id="evt_live_fixed_001",
+                case_id="case_live_001",
+                timestamp=ts,
+                latitude=lat + 0.00001,
+                longitude=lon + 0.00001,
+                geo_missing=False,
+                event_type="drone_detection",
+                severity="medium",
+                simulated=False,
+                evidence_refs=["evt_live_fixed_001"],
+                source_ref=FusionSourceRef(
+                    source_type="fixed_camera",
+                    source_id="cam_live_anchor",
+                    event_id="evt_live_fixed_001",
+                    simulated=False,
+                ),
+            )
+
+            drone_obs = FusionObservation(
+                source_type="drone_simulation",
+                source_id=telemetry.drone_id,
+                event_id=f"evt_live_drone_{frame.frame_index}",
+                case_id="case_live_001",
+                timestamp=ts,
+                latitude=lat,
+                longitude=lon,
+                altitude_meters=telemetry.altitude_meters,
+                geo_missing=False,
+                event_type="drone_detection",
+                severity="medium",
+                simulated=True,
+                evidence_refs=[f"frame_{frame.frame_index}"],
+                source_ref=FusionSourceRef(
+                    source_type="drone_simulation",
+                    source_id=telemetry.drone_id,
+                    event_id=f"evt_live_drone_{frame.frame_index}",
+                    simulated=True,
+                ),
+                metadata={
+                    "camera_name": telemetry.camera_name,
+                    "frame_index": frame.frame_index,
+                    "source_type": "drone_simulation",
+                    "simulated": True,
+                },
+            )
+
+            repo.save_observation(fixed_cam_obs)
+            repo.save_observation(drone_obs)
+
+            correlations = svc.correlate(
+                [fixed_cam_obs, drone_obs],
+                user=_DummyUser(),
+                case_id="case_live_001",
+                event_id="evt_live_fixed_001",
+            )
+            results.append(_check("live correlations generated", len(correlations) > 0, f"count={len(correlations)}"))
+            if correlations:
+                corr = correlations[0]
+                results.append(_check("live confidence >= threshold", corr.confidence >= 0.35, f"confidence={corr.confidence:.4f}"))
+                summary_lower = corr.safe_summary.lower()
+                has_forbidden = any(phrase in summary_lower for phrase in FORBIDDEN_PHRASES)
+                results.append(_check("live safe wording enforced", not has_forbidden, corr.safe_summary[:80]))
+                results.append(_check("live source_pair includes drone_simulation", "drone_simulation" in corr.source_pair))
+                results.append(_check("live source_pair includes fixed_camera", "fixed_camera" in corr.source_pair))
+                results.append(_check("live review status pending", corr.review_status == "pending"))
+                results.append(_check("live correlation requires review", corr.operator_review_required is True))
+
+        service.disconnect()
     except Exception as exc:
-        results.append(_check("AirSim connection", False, str(exc)[:80], required=False))
+        results.append(_check("live fusion smoke", False, str(exc)[:120]))
 
-    return all(r for r in results) if results else True
+    return all(results) if results else True
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Phase 46 Fusion Smoke Test")
+    parser = argparse.ArgumentParser(description="Drone + Fixed Camera Fusion Smoke Test")
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
     ok = run_deterministic_smoke()
-
     if args.live:
-        ok_live = run_live_smoke(args.device)
-        ok = ok and ok_live
+        ok = run_live_smoke(args.device) and ok
 
     print()
     if ok:
         print("[PASS] Fusion smoke test complete.")
         sys.exit(0)
-    else:
-        print("[FAIL] Fusion smoke test failed.")
-        sys.exit(1)
+    print("[FAIL] Fusion smoke test failed.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

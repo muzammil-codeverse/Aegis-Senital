@@ -1,7 +1,39 @@
-import sys
 import os
-import subprocess
 import argparse
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+def latest_crash_summary(ext_dir: str) -> str | None:
+    crash_root = Path(ext_dir) / "environments" / "Blocks" / "Blocks_packaged_Windows_55_33" / "Windows" / "Blocks" / "Saved" / "Crashes"
+    if not crash_root.exists():
+        return None
+
+    latest = max((path for path in crash_root.iterdir() if path.is_dir()), key=lambda path: path.stat().st_mtime, default=None)
+    if latest is None:
+        return None
+
+    context_file = latest / "CrashContext.runtime-xml"
+    if not context_file.exists():
+        return f"Latest crash folder: {latest}"
+
+    try:
+        root = ET.fromstring(context_file.read_text(encoding="utf-8", errors="replace"))
+    except ET.ParseError:
+        return f"Latest crash folder: {latest}"
+
+    def read_tag(tag: str) -> str:
+        node = root.find(f".//{tag}")
+        return node.text.strip() if node is not None and node.text else "unknown"
+
+    return (
+        f"type={read_tag('CrashType')}; "
+        f"gpu={read_tag('Misc.PrimaryGPUBrand')}; "
+        f"error={read_tag('ErrorMessage')}; "
+        f"command={read_tag('CommandLine')}"
+    )
 
 def check_cmd(cmd):
     try:
@@ -53,6 +85,11 @@ def main():
 
     print(f"RPC port 41451: {port_status}")
     if port_status == "WARN":
+        print("Hint: launch the simulator with:")
+        print(r"  python scripts\launch_blocks_runtime.py")
+        crash_summary = latest_crash_summary(ext_dir)
+        if crash_summary:
+            print(f"Latest crash summary: {crash_summary}")
         if args.strict: 
             print("Simulator not running. Strict mode failed.")
             sys.exit(1)
@@ -85,6 +122,11 @@ def main():
 
     except Exception as e:
         print(f"RPC connection: WARN ({e})")
+        print("Hint: launch the simulator with:")
+        print(r"  python scripts\launch_blocks_runtime.py")
+        crash_summary = latest_crash_summary(ext_dir)
+        if crash_summary:
+            print(f"Latest crash summary: {crash_summary}")
         if args.strict:
             print("Failed to connect to simulator in strict mode.")
             sys.exit(1)

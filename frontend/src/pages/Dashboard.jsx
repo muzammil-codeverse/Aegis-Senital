@@ -4,7 +4,11 @@ import { getLiveAnomalies } from '../api/camerasApi'
 import { normalizeError } from '../api/client'
 import AlertDetailDrawer from '../components/alerts/AlertDetailDrawer'
 import CaseDetailDrawer from '../components/cases/CaseDetailDrawer'
+import OperationsTimeline from '../components/command/OperationsTimeline'
+import ReviewQueuePanel from '../components/command/ReviewQueuePanel'
+import Tactical3DStatusScene from '../components/command/Tactical3DStatusScene'
 import CommandOverview from '../components/dashboard/CommandOverview'
+import CommandPageHeader from '../components/layout/CommandPageHeader'
 import { useCameras } from '../hooks/useCameras'
 import { useAuth } from '../hooks/useAuth'
 import { useLatestFrames } from '../hooks/useLatestFrames'
@@ -162,6 +166,62 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
 
   return (
     <>
+      <CommandPageHeader
+        eyebrow="Overview"
+        title="Command Dashboard"
+        description="Unified operational status across live streams, cases, map activity, simulated drone runtime, and operator review workflows."
+        badges={[
+          `${mergedAlerts.length} active alerts`,
+          `${caseState?.requiringReviewCount || 0} cases require review`,
+          `${activeHandoffs.length} active handoffs`,
+        ]}
+        actions={(
+          <div className="button-row">
+            <button type="button" className="command-action-button" onClick={() => { window.location.hash = 'live-streams' }}>
+              Open live streams
+            </button>
+            <button type="button" className="command-action-button" onClick={() => { window.location.hash = 'drone-operations' }}>
+              Open drone hub
+            </button>
+            <button type="button" className="command-action-button" onClick={() => { window.location.hash = 'cases' }}>
+              Open cases
+            </button>
+          </div>
+        )}
+      />
+
+      <div className="command-summary-grid" style={{ marginBottom: 16 }}>
+        <article className="command-summary-card">
+          <span>Operational status</span>
+          <strong>{health?.status || 'unknown'}</strong>
+          <p>{health?.reasons?.[0] || 'Runtime telemetry is flowing through the dashboard.'}</p>
+        </article>
+        <article className="command-summary-card">
+          <span>Camera health summary</span>
+          <strong>{cameras.length}</strong>
+          <p>{analyticsPreview?.summary?.degraded_streams ?? 0} degraded stream(s) reported in the current overview.</p>
+        </article>
+        <article className="command-summary-card">
+          <span>Drone status summary</span>
+          <strong>{drone.status?.health?.status || 'unknown'}</strong>
+          <p>{drone.telemetry?.timestamp ? `Latest simulated telemetry at ${drone.telemetry.timestamp}` : 'No simulated telemetry reported to the dashboard yet.'}</p>
+        </article>
+        <article className="command-summary-card">
+          <span>Review queue</span>
+          <strong>{caseState?.requiringReviewCount || 0}</strong>
+          <p>Cases and cross-source observations remain operator-reviewed workflows.</p>
+        </article>
+      </div>
+
+      <div className="command-two-column" style={{ marginBottom: 16 }}>
+        <Tactical3DStatusScene summary="Abstract overview of cameras, simulated drone runtime, and fusion dependencies for the FYP command-center demo." />
+        <ReviewQueuePanel limit={8} />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <OperationsTimeline />
+      </div>
+
       <section className="panel analytics-preview-panel">
         <div className="panel-header">
           <div>

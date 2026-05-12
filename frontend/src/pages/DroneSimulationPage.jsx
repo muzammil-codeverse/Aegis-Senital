@@ -5,6 +5,7 @@ import DroneSafetyBadge from '../components/drone/DroneSafetyBadge'
 import DroneStatusPanel from '../components/drone/DroneStatusPanel'
 import DroneTelemetryPanel from '../components/drone/DroneTelemetryPanel'
 import DroneVideoPreview from '../components/drone/DroneVideoPreview'
+import CommandPageHeader from '../components/layout/CommandPageHeader'
 import { useDroneSimulation } from '../hooks/useDroneSimulation'
 
 export default function DroneSimulationPage() {
@@ -16,15 +17,17 @@ export default function DroneSimulationPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded border bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Drone simulation</p>
-          <h1 className="text-xl font-semibold text-slate-950">Simulated aerial intelligence source</h1>
-        </div>
-        <button type="button" className="rounded border px-3 py-2 text-xs text-slate-700" onClick={drone.refreshAll}>
-          Refresh status
-        </button>
-      </div>
+      <CommandPageHeader
+        eyebrow="Drone Operations"
+        title="Drone Simulation"
+        description="Live simulated aerial observation workspace backed by the Cosys-AirSim runtime. This page never claims a real drone feed."
+        badges={['Simulated aerial observation', 'Operator review required']}
+        actions={(
+          <button type="button" className="command-action-button" onClick={drone.refreshAll}>
+            Refresh status
+          </button>
+        )}
+      />
 
       <DroneSafetyBadge />
 

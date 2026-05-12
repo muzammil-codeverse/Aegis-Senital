@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import SessionExpiredBanner from './components/auth/SessionExpiredBanner'
-import AppShell from './components/layout/AppShell'
+import CommandCenterShell from './components/layout/CommandCenterShell'
 import { useAlerts } from './hooks/useAlerts'
 import { useAuth } from './hooks/useAuth'
 import { useCases } from './hooks/useCases'
 import { useIncidents } from './hooks/useIncidents'
 import { useMetrics } from './hooks/useMetrics'
+import { commandPagePermissions, commandRouteIds, getCommandPageMeta } from './navigation/commandNavigation'
 import { useSystemHealth } from './hooks/useSystemHealth'
 import { useWebSocketAlerts } from './hooks/useWebSocketAlerts'
 import AlertsPage from './pages/AlertsPage'
@@ -14,6 +15,8 @@ import AuditLogPage from './pages/AuditLogPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import CasesPage from './pages/CasesPage'
 import Dashboard from './pages/Dashboard'
+import DroneFusionPage from './pages/DroneFusionPage'
+import DroneOperationsHub from './pages/DroneOperationsHub'
 import ForensicsPage from './pages/ForensicsPage'
 import IdentityPage from './pages/IdentityPage'
 import IncidentsPage from './pages/IncidentsPage'
@@ -28,29 +31,30 @@ import SystemHealthPage from './pages/SystemHealthPage'
 import UploadedVideoAnalysisPage from './pages/UploadedVideoAnalysisPage'
 
 const VALID_PAGES = new Set([
-  'dashboard', 'alerts', 'incidents', 'cases', 'system', 'forensics',
-  'identities', 'watchlist', 'models', 'audit', 'analytics', 'security', 'uploaded-video-analysis', 'model-governance', 'map-operations', 'investigation', 'drone-simulation', 'drone-mission-planner', 'login',
+  ...commandRouteIds,
+  'forensics',
+  'watchlist',
+  'models',
+  'audit',
+  'security',
+  'login',
 ])
 
 const PAGE_PERMISSIONS = {
-  dashboard: 'camera:read',
-  alerts: 'alert:read',
-  incidents: 'incident:read',
-  cases: 'case:read',
-  analytics: 'analytics:read',
-  system: 'metrics:read',
+  ...commandPagePermissions,
   forensics: 'forensics:read',
-  identities: 'identity:read',
   watchlist: 'watchlist:read',
   models: 'model:read',
   audit: 'audit:read',
   security: 'admin',
-  'uploaded-video-analysis': 'uploaded_video:read',
-  'model-governance': 'model:read',
-  'map-operations': 'gis:read',
-  'investigation': 'investigation:read',
-  'drone-simulation': 'drone:read',
-  'drone-mission-planner': 'drone:read',
+}
+
+const LEGACY_PAGE_META = {
+  forensics: { id: 'forensics', label: 'Forensics', description: 'Forensic review tools' },
+  watchlist: { id: 'watchlist', label: 'Watchlist', description: 'Watchlist and monitoring list' },
+  models: { id: 'models', label: 'Models', description: 'Model registry and controls' },
+  audit: { id: 'audit', label: 'Audit Logs', description: 'Audit trail and administrator review' },
+  security: { id: 'security', label: 'Security', description: 'Administrative security controls' },
 }
 
 export default function App() {
@@ -113,11 +117,11 @@ function AuthenticatedApp() {
   }
 
   return (
-    <AppShell
+    <CommandCenterShell
       currentPage={currentPage}
       onNavigate={navigate}
+      pageMeta={LEGACY_PAGE_META[currentPage] || getCommandPageMeta(currentPage)}
       metrics={metricsState.metrics}
-      health={health}
       websocketStatus={websocketState.status}
       lastMessageAt={websocketState.lastMessageAt}
       reconnectCount={websocketState.reconnectCount}
@@ -125,7 +129,7 @@ function AuthenticatedApp() {
       <ProtectedRoute permission={PAGE_PERMISSIONS[currentPage]}>
         {renderPage(currentPage, sharedProps)}
       </ProtectedRoute>
-    </AppShell>
+    </CommandCenterShell>
   )
 }
 
@@ -133,6 +137,7 @@ function renderPage(page, props) {
   if (page === 'alerts') return <AlertsPage {...props} />
   if (page === 'incidents') return <IncidentsPage {...props} />
   if (page === 'cases') return <CasesPage caseState={props.caseState} />
+  if (page === 'osint-enrichment') return <CasesPage caseState={props.caseState} />
   if (page === 'analytics') return <AnalyticsPage />
   if (page === 'system') return <SystemHealthPage {...props} />
   if (page === 'forensics') return <ForensicsPage {...props} />
@@ -145,8 +150,11 @@ function renderPage(page, props) {
   if (page === 'model-governance') return <ModelGovernancePage />
   if (page === 'map-operations') return <MapOperationsPage />
   if (page === 'investigation') return <InvestigationWorkspacePage />
+  if (page === 'drone-operations') return <DroneOperationsHub />
   if (page === 'drone-simulation') return <DroneSimulationPage />
   if (page === 'drone-mission-planner') return <DroneMissionPlannerPage />
+  if (page === 'drone-fusion') return <DroneFusionPage />
+  if (page === 'live-streams') return <Dashboard {...props} />
   return <Dashboard {...props} />
 }
 

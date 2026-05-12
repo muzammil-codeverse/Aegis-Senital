@@ -13,13 +13,26 @@ This document outlines the state of the Drone Simulation environment for Phase 4
 - The runtime has been tested and successfully communicates with the Python client over RPC.
 
 ## 3. How to launch simulator
-To start the simulator locally:
-1. Open PowerShell or Command Prompt.
-2. Navigate to the simulator executable:
-   ```powershell
-   cd C:\AegisExternalTools\drone_sim\runtime\environments\Blocks\Blocks_packaged_Windows_55_33\Windows
-   .\Blocks.exe -windowed -ResX=640 -ResY=480
-   ```
+Use the repo launcher so startup stays consistent and crash diagnostics are visible:
+
+```powershell
+python scripts\launch_blocks_runtime.py
+```
+
+If you need to launch it manually, use the same safe profile:
+
+```powershell
+cd C:\AegisExternalTools\drone_sim\runtime\environments\Blocks\Blocks_packaged_Windows_55_33\Windows
+.\Blocks.exe -windowed -ResX=640 -ResY=480
+```
+
+If Windows shows an Unreal fatal error, check the latest crash summary with:
+
+```powershell
+python scripts\verify_drone_sim_runtime.py --strict
+```
+
+That command now prints the most recent crash context, including the GPU Unreal bound to during the failure.
 
 ## 4. How to verify RPC
 Once the simulator is open, verify the RPC port is listening:

@@ -6,6 +6,7 @@ import { useAuth } from './useAuth'
 
 const DEFAULT_POLL_MS = 4000
 const MAX_BACKOFF_MS = 30000
+const MAX_RECONNECT_ATTEMPTS = 8
 
 function mergeStatusPayload(item, setState) {
   setState(previous => ({
@@ -130,8 +131,12 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
           setWsStatus('closed')
           return
         }
-        if (event.code === 1008) {
+        if (event.code === 1008 || event.code === 4401 || event.code === 4403) {
           setWsStatus('auth_error')
+          return
+        }
+        if (reconnectRef.current >= MAX_RECONNECT_ATTEMPTS) {
+          setWsStatus('degraded')
           return
         }
         reconnectRef.current += 1

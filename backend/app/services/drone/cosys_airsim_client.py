@@ -44,19 +44,19 @@ class CosysAirSimClient:
     def __init__(
         self,
         *,
-        host: str,
-        port: int,
-        vehicle_name: str,
-        camera_name: str,
+        host: str | None = None,
+        port: int | None = None,
+        vehicle_name: str | None = None,
+        camera_name: str | None = None,
         timeout_seconds: float = 5.0,
         drone_id: str = "drone_sim_01",
         default_home: dict[str, Any] | None = None,
         image_type: str = "scene",
     ) -> None:
-        self.host = host
-        self.port = int(port)
-        self.vehicle_name = vehicle_name
-        self.camera_name = camera_name
+        self.host = str(host or os.environ.get("AEGIS_AIRSIM_HOST") or "127.0.0.1")
+        self.port = int(port or os.environ.get("AEGIS_AIRSIM_PORT") or 41451)
+        self.vehicle_name = str(vehicle_name or os.environ.get("AEGIS_AIRSIM_VEHICLE") or "Drone1")
+        self.camera_name = str(camera_name or os.environ.get("AEGIS_AIRSIM_CAMERA") or "front_center")
         self.timeout_seconds = float(timeout_seconds)
         self.drone_id = drone_id
         self.default_home = dict(default_home or {})
@@ -69,6 +69,7 @@ class CosysAirSimClient:
         self._last_error: str | None = None
         self._latest_telemetry: DroneTelemetry | None = None
         self._latest_frame: DroneCameraFrame | None = None
+        self._supports_named_vehicle_calls: bool | None = None
 
     def connect(self) -> DroneConnectionStatus:
         endpoint = f"{self.host}:{self.port}"
@@ -158,6 +159,7 @@ class CosysAirSimClient:
     def disconnect(self) -> None:
         self._client = None
         self._connected = False
+        self._supports_named_vehicle_calls = None
 
     def is_connected(self) -> bool:
         return bool(self._connected and self._client is not None)
@@ -176,7 +178,7 @@ class CosysAirSimClient:
                 )
 
         try:
-            state = self._call(self._client.getMultirotorState, vehicle_name=self.vehicle_name)
+            state = self._call_with_vehicle_fallback(self._client.getMultirotorState)
             kinematics = getattr(state, "kinematics_estimated", None)
             position = getattr(kinematics, "position", None)
             velocity = getattr(kinematics, "linear_velocity", None)
@@ -260,7 +262,7 @@ class CosysAirSimClient:
                 False,
                 False,
             )
-            responses = self._call(self._client.simGetImages, [image_request], vehicle_name=self.vehicle_name)
+            responses = self._call_with_vehicle_fallback(self._client.simGetImages, [image_request])
             if not responses:
                 raise RuntimeError("simGetImages returned no responses")
             response = responses[0]
@@ -370,10 +372,16 @@ class CosysAirSimClient:
                 )
 
         try:
+            self._prepare_vehicle_for_command(command)
             method = getattr(self._client, method_name)
-            result = self._call(method, *args, vehicle_name=self.vehicle_name)
+            result = self._call_with_vehicle_fallback(method, *args)
             if hasattr(result, "join"):
                 result.join()
+            if command == "land":
+                try:
+                    self._call_with_vehicle_fallback(self._client.armDisarm, False)
+                except Exception:
+                    pass
             self._last_error = None
             return DroneCommandResponse(
                 drone_id=self.drone_id,
@@ -400,6 +408,18 @@ class CosysAirSimClient:
                 issued_at=issued_at,
                 completed_at=_now_iso(),
             )
+
+    def _prepare_vehicle_for_command(self, command: str) -> None:
+        if self._client is None:
+            raise RuntimeError("Simulated drone runtime is disconnected.")
+        if hasattr(self._client, "enableApiControl"):
+            self._call_with_vehicle_fallback(self._client.enableApiControl, True)
+        if command != "land" and hasattr(self._client, "armDisarm"):
+            self._call_with_vehicle_fallback(self._client.armDisarm, True)
+
+    def get_drone_state(self) -> dict[str, Any]:
+        telemetry = self.get_telemetry()
+        return telemetry.model_dump(mode="json")
 
     def _load_client_module(self) -> Any | None:
         if self._client_module is not None:
@@ -473,6 +493,31 @@ class CosysAirSimClient:
         else:
             accepted = kwargs
         return method(*args, **accepted)
+
+    def _call_with_vehicle_fallback(self, method: Any, *args: Any) -> Any:
+        if self._supports_named_vehicle_calls is False:
+            return self._call(method, *args)
+        try:
+            result = self._call(method, *args, vehicle_name=self.vehicle_name)
+            self._supports_named_vehicle_calls = True
+            return result
+        except Exception as exc:
+            if not self._supports_vehicle_fallback(exc):
+                raise
+            logger.warning(
+                "Cosys-AirSim rejected named vehicle '%s'; retrying RPC without vehicle_name.",
+                self.vehicle_name,
+            )
+            self._supports_named_vehicle_calls = False
+            return self._call(method, *args)
+
+    def _supports_vehicle_fallback(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            ("vehicle api for" in message and "not available" in message)
+            or "vehicle does not exist" in message
+            or "retry connection over the limit" in message
+        )
 
     def _orientation_from_quaternion(self, orientation: Any) -> DroneOrientation:
         if orientation is None:

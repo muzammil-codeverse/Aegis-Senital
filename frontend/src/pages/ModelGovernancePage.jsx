@@ -1,4 +1,5 @@
 import React from 'react'
+import CommandPageHeader from '../components/layout/CommandPageHeader'
 import { useModelGovernance } from '../hooks/useModelGovernance.js'
 import ModelRegistryPanel from '../components/model-governance/ModelRegistryPanel.jsx'
 import ModelLimitationsPanel from '../components/model-governance/ModelLimitationsPanel.jsx'
@@ -11,6 +12,12 @@ export default function ModelGovernancePage() {
 
   return (
     <div className="page-stack">
+      <CommandPageHeader
+        eyebrow="Intelligence"
+        title="Model Governance"
+        description="Operational model governance with limitation badges, drift review, promotion policy visibility, and rollback auditing."
+        badges={['Model limitation badges', 'Promotion safeguards', 'Operator review required']}
+      />
       <section className="panel">
         <div className="panel-header">
           <div>

@@ -60,8 +60,8 @@ class TestStartMission:
     def test_fails_gracefully_when_simulator_disconnected(self, plan_svc, exec_svc, repo):
         """When simulator is not connected, mission transitions to 'failed' without raising."""
         mission, session = _create_mission_and_session(plan_svc, repo)
-        # No simulator → _get_airsim_client returns None
-        result = exec_svc.start_mission(mission, session)
+        with patch.object(exec_svc, "_get_airsim_client", return_value=None):
+            result = exec_svc.start_mission(mission, session)
         assert result.status == DroneMissionStatus.FAILED
         assert result.last_error is not None
         # Verify a SIMULATOR_DISCONNECTED event was recorded

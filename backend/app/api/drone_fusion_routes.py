@@ -48,6 +48,7 @@ from app.services.audit_log_service import get_audit_log_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/drone-fusion", tags=["drone-fusion"])
+ws_router = APIRouter(tags=["drone-fusion"])
 
 # ---------------------------------------------------------------------------
 # WebSocket broadcaster
@@ -109,7 +110,7 @@ def _audit(
 
 def _require_perm(user: UserAccount, perm: str, request: Request) -> None:
     rbac = get_rbac_config()
-    if not has_permission(user, perm, rbac):
+    if not has_permission(user.role, perm, rbac):
         _audit(request, "drone_fusion_access_denied", user=user, resource_id=perm, success=False)
         raise HTTPException(status_code=403, detail=f"Permission required: {perm}")
 
@@ -389,16 +390,11 @@ async def fusion_health(
 # WebSocket /ws/drone-fusion
 # ---------------------------------------------------------------------------
 
-@router.websocket("/ws/drone-fusion")
+@ws_router.websocket("/ws/drone-fusion")
 async def ws_drone_fusion(websocket: WebSocket) -> None:
-    user = await authenticate_websocket(websocket)
+    user = await authenticate_websocket(websocket, required_permission="drone_fusion:read")
     if user is None:
         await reject_ws(websocket, code=4401, reason="Authentication required")
-        return
-
-    rbac = get_rbac_config()
-    if not has_permission(user, "drone_fusion:read", rbac):
-        await reject_ws(websocket, code=4403, reason="drone_fusion:read permission required")
         return
 
     await websocket.accept()
