@@ -255,6 +255,11 @@ def permission_for_request(method: str, path: str) -> str | None:
     if path.startswith("/cameras/"):
         return "camera:read"
 
+    if path.startswith("/api/gis/"):
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            return "gis:write"
+        return "gis:read"
+
     if path.startswith("/api/map/"):
         return "map:read"
     if path.startswith("/api/handoffs/"):

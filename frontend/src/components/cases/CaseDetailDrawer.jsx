@@ -12,6 +12,7 @@ import LlmSafetyBadge from './LlmSafetyBadge'
 import CaseEnrichmentPanel from '../osint/CaseEnrichmentPanel'
 import ErrorState from '../common/ErrorState'
 import LoadingState from '../common/LoadingState'
+import { useAuth } from '../../hooks/useAuth'
 import { formatDateTime } from '../../utils/time'
 
 export default function CaseDetailDrawer({
@@ -59,6 +60,7 @@ export default function CaseDetailDrawer({
   onAskCaseQuestion,
   onOpenGeneratedReport,
 }) {
+  const auth = useAuth()
   if (!open) return null
   return (
     <aside className="detail-drawer" aria-label="Case details">
@@ -95,6 +97,18 @@ export default function CaseDetailDrawer({
             <span>Updated</span><strong>{formatDateTime(caseItem.updated_at)}</strong>
           </div>
           <div className="button-row">
+            {auth.hasPermission('gis:read') && caseItem?.case_id ? (
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  window.sessionStorage.setItem('aegis.map.case_id', caseItem.case_id)
+                  window.location.hash = 'map-operations'
+                }}
+              >
+                Show case location
+              </button>
+            ) : null}
             <button type="button" className="text-button" disabled={busy} onClick={() => onResolve?.('Resolved from drawer')}>Resolve</button>
             <button type="button" className="text-button" disabled={busy} onClick={() => onReopen?.('Reopened from drawer')}>Reopen</button>
             <button type="button" className="text-button danger" disabled={busy} onClick={() => onDismiss?.('Dismissed from drawer')}>Dismiss</button>

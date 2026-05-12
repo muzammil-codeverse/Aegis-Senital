@@ -103,7 +103,7 @@ phone_model/**/*.png
 logs/
 
 # Runtime/model artifacts that must stay uncommitted
-models/
+/models/
 datasets/
 runs/
 runtime_state/

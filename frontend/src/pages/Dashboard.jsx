@@ -6,6 +6,7 @@ import AlertDetailDrawer from '../components/alerts/AlertDetailDrawer'
 import CaseDetailDrawer from '../components/cases/CaseDetailDrawer'
 import CommandOverview from '../components/dashboard/CommandOverview'
 import { useCameras } from '../hooks/useCameras'
+import { useAuth } from '../hooks/useAuth'
 import { useLatestFrames } from '../hooks/useLatestFrames'
 import { useFrameUpdates } from '../hooks/useFrameUpdates'
 import { useHandoffs } from '../hooks/useHandoffs'
@@ -16,6 +17,7 @@ import { compareSeverity } from '../utils/severity'
 import { DASHBOARD_POLL_MS } from '../config'
 
 export default function Dashboard({ alertState, incidentState, caseState, metricsState, websocketState, health }) {
+  const auth = useAuth()
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
@@ -171,9 +173,11 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
             <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
               Analyze Video
             </button>
-            <button type="button" className="text-button" onClick={() => { window.location.hash = 'model-governance' }}>
-              Model governance
-            </button>
+            {auth.hasPermission('gis:read') ? (
+              <button type="button" className="text-button" onClick={() => { window.location.hash = 'map-operations' }}>
+                View on Map
+              </button>
+            ) : null}
           </div>
         </div>
         {analyticsPreviewError ? <p className="muted">{analyticsPreviewError}</p> : null}

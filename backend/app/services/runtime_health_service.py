@@ -355,6 +355,33 @@ class RuntimeHealthService:
                 "missing_dependencies": [],
             }
 
+    def _check_gis(self) -> dict:
+        try:
+            from app.repositories.gis_repository import get_gis_repository
+            from app.services.gis_service import evaluate_gis_readiness
+
+            report = evaluate_gis_readiness()
+            repo = get_gis_repository()
+            st = str(report.get("status") or "unknown")
+            mapped = "error" if st == "failed" else ("degraded" if st == "degraded" else "ok")
+            return {
+                "enabled": bool(report.get("enabled", True)),
+                "status": "healthy" if mapped == "ok" else ("degraded" if mapped == "degraded" else "failed"),
+                "provider": str(report.get("provider") or "local_mock"),
+                "camera_profiles": int(repo.count_camera_profiles()),
+                "geofences": int(repo.count_geofences()),
+                "last_error": report.get("last_error"),
+            }
+        except Exception as exc:
+            return {
+                "enabled": True,
+                "status": "degraded",
+                "provider": "unknown",
+                "camera_profiles": 0,
+                "geofences": 0,
+                "last_error": str(exc)[:160],
+            }
+
     def _check_analytics(self) -> dict:
         production_mode = (os.getenv("APP_ENV") or "").lower() in {"prod", "production"}
         try:
@@ -733,6 +760,7 @@ class RuntimeHealthService:
         analytics = self._check_analytics()
         uploaded_video = self._check_uploaded_video()
         persistence = self._check_persistence()
+        gis = self._check_gis()
         checks = {
             "database": self._check_database(),
             "redis": self._check_redis(),
@@ -752,6 +780,7 @@ class RuntimeHealthService:
             "analytics": analytics,
             "uploaded_video": uploaded_video,
             "persistence": persistence,
+            "gis": gis,
         }
 
         if not include_sensitive:
@@ -791,6 +820,7 @@ class RuntimeHealthService:
             "analytics": analytics,
             "uploaded_video": uploaded_video,
             "persistence": persistence,
+            "gis": gis,
         }
 
     def is_alive(self) -> bool:
@@ -901,6 +931,10 @@ class RuntimeHealthService:
             failures.append(
                 f"uploaded_video: {uploaded_video.get('last_error') or uploaded_video.get('status')}"
             )
+
+        gis_check = self._check_gis()
+        if self._production_mode() and gis_check.get("enabled") and gis_check.get("status") == "failed":
+            failures.append(f"gis: {gis_check.get('last_error') or 'map provider not ready'}")
 
         persistence = self._check_persistence()
         if persistence.get("enabled", False) and persistence.get("status") == "failed":

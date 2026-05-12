@@ -1,0 +1,53 @@
+gis:
+  enabled: true
+
+  provider:
+    default: "local_mock"   # local_mock | mapbox | google_maps | cesium
+    require_api_key_in_production: true
+
+  map:
+    default_center:
+      latitude: 30.1575
+      longitude: 71.5249
+    default_zoom: 13
+    coordinate_system: "WGS84"
+
+  cameras:
+    require_location_for_map_display: true
+    default_coverage_radius_meters: 80
+    default_fov_degrees: 75
+    show_field_of_view_cones: true
+
+  events:
+    show_event_markers: true
+    show_case_markers: true
+    show_uploaded_video_events: true
+    max_marker_age_hours: 72
+
+  heatmap:
+    enabled: true
+    radius_meters: 250
+    severity_weights:
+      low: 1
+      medium: 3
+      high: 7
+      critical: 12
+
+  geofencing:
+    enabled: true
+    storage: "jsonl"
+    production_backend: "postgres"
+    allow_restricted_zones: true
+
+  access_control:
+    filter_markers_by_object_scope: true
+    hide_unauthorized_camera_locations: true
+
+  frontend:
+    allow_local_mock_without_api_key: true
+    mapbox_env_var: "VITE_MAPBOX_TOKEN"
+    google_maps_env_var: "VITE_GOOGLE_MAPS_API_KEY"
+
+  storage:
+    dev_camera_profiles_path: "storage/gis/camera_geo_profiles.jsonl"
+    dev_geofences_path: "storage/gis/geofences.jsonl"

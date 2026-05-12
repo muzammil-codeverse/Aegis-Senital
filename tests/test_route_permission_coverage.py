@@ -63,6 +63,8 @@ def test_sensitive_routes_have_explicit_permission_mapping():
         ("GET", "/api/model-governance/registry"): "model:read",
         ("POST", "/api/model-governance/rollback"): "model:rollback",
         ("POST", "/api/model-governance/promote"): "model:approve",
+        ("GET", "/api/gis/config"): "gis:read",
+        ("POST", "/api/gis/geofences"): "gis:write",
     }
     for route_key, permission in expected.items():
         method, path = route_key

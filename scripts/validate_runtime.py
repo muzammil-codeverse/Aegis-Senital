@@ -471,6 +471,40 @@ def validate_persistence_configuration(profile: str) -> list[dict]:
     return results
 
 
+def validate_gis_configuration(profile: str) -> list[dict]:
+    results: list[dict] = []
+    print("\n[GIS / Map]")
+    path = ROOT / "configs" / "runtime" / "gis.yaml"
+    if not path.exists():
+        results.append(check("gis config", False, str(path), required=True))
+        return results
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        results.append(check("gis config parseable", False, str(exc), required=True))
+        return results
+    gis = cfg.get("gis", cfg)
+    enabled = bool(gis.get("enabled", True))
+    results.append(check("gis enabled", True, "enabled" if enabled else "disabled", required=False))
+    provider = str((gis.get("provider") or {}).get("default") or "local_mock").lower()
+    results.append(check("gis provider configured", True, provider, required=False))
+    try:
+        for path_str in ("backend", str(ROOT)):
+            if path_str not in sys.path:
+                sys.path.insert(0, path_str)
+        from app.services.gis_service import evaluate_gis_readiness
+
+        report = evaluate_gis_readiness()
+    except Exception as exc:
+        report = {"enabled": enabled, "status": "failed", "last_error": str(exc)[:200], "provider": provider}
+    ok = report.get("status") != "failed"
+    detail = str(report.get("last_error") or report.get("status") or "")
+    required = profile == "production" and enabled and not ok
+    results.append(check("gis map readiness", ok, detail or "ready", required=required))
+    results.append(check("gis development local_mock without paid key", True, provider, required=False))
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Core validation (unchanged from original — profile-independent)
 # ---------------------------------------------------------------------------
@@ -504,6 +538,7 @@ def validate(profile: str) -> None:
         "configs/runtime/model_registry.yaml",
         "configs/runtime/model_governance.yaml",
         "configs/runtime/uploaded_video.yaml",
+        "configs/runtime/gis.yaml",
     ]:
         exists = (ROOT / cfg).exists()
         _record(check(cfg, exists, required=True))
@@ -693,6 +728,12 @@ def validate(profile: str) -> None:
         if not r["ok"] and r["required"]:
             required_failures.append(r["name"])
     all_results.extend(persistence_results)
+
+    gis_results = validate_gis_configuration(profile)
+    for r in gis_results:
+        if not r["ok"] and r["required"]:
+            required_failures.append(r["name"])
+    all_results.extend(gis_results)
 
     # Profile-based dependency checks
     dep_results = validate_dependencies(profile)

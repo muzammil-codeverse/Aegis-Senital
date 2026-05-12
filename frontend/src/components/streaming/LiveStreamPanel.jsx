@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { API_BASE_URL } from '../../config'
 import { getMjpegStreamUrl } from '../../api/streamingApi'
 import { useHlsStream } from '../../hooks/useHlsStream'
+import { useAuth } from '../../hooks/useAuth'
 import { useStreamHealth } from '../../hooks/useStreamHealth'
 import { useWebRTCStream } from '../../hooks/useWebRTCStream'
 import CameraStreamControls from './CameraStreamControls'
@@ -9,6 +10,7 @@ import StreamHealthBadge from './StreamHealthBadge'
 import StreamStatsPanel from './StreamStatsPanel'
 
 export default function LiveStreamPanel({ camera }) {
+  const auth = useAuth()
   const cameraId = camera?.camera_id
   const videoRef = useRef(null)
   const [transport, setTransport] = useState('webrtc')
@@ -34,7 +36,21 @@ export default function LiveStreamPanel({ camera }) {
           <p className="eyebrow">Streaming</p>
           <h2 style={{ fontSize: '0.95rem' }}>{camera.name || cameraId}</h2>
         </div>
-        <StreamHealthBadge status={health?.status || 'stopped'} />
+        <div className="button-row">
+          {auth.hasPermission('gis:read') ? (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                window.sessionStorage.setItem('aegis.map.camera_id', cameraId)
+                window.location.hash = 'map-operations'
+              }}
+            >
+              View on Map
+            </button>
+          ) : null}
+          <StreamHealthBadge status={health?.status || 'stopped'} />
+        </div>
       </div>
 
       <div className="button-row" style={{ marginBottom: 10 }}>

@@ -3,6 +3,7 @@ import { useAuth } from '../../hooks/useAuth'
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Command', permission: 'camera:read' },
   { id: 'analytics', label: 'Analytics', permission: 'analytics:read' },
+  { id: 'map-operations', label: 'Map', permission: 'gis:read' },
   { id: 'alerts', label: 'Alerts', permission: 'alert:read' },
   { id: 'incidents', label: 'Incidents', permission: 'incident:read' },
   { id: 'cases', label: 'Cases', permission: 'case:read' },

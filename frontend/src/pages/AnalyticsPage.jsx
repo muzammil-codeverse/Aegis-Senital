@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import AnalyticsCommandCenter from '../components/analytics/AnalyticsCommandCenter'
+import { getGeofences, getGisHeatmap } from '../api/gisApi'
 import { useAuth } from '../hooks/useAuth'
 import { useAnalytics } from '../hooks/useAnalytics'
 
 export default function AnalyticsPage() {
   const auth = useAuth()
+  const [gisSnap, setGisSnap] = useState(null)
   const [initialCameraId] = useState(() => {
     const value = window.sessionStorage.getItem('aegis.analytics.camera') || ''
     if (value) window.sessionStorage.removeItem('aegis.analytics.camera')
@@ -14,6 +16,20 @@ export default function AnalyticsPage() {
     enabled: auth.hasPermission('analytics:read'),
     initialFilters: { camera_id: initialCameraId },
   })
+
+  useEffect(() => {
+    if (!auth.hasPermission('gis:read')) return undefined
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [h, g] = await Promise.all([getGisHeatmap(), getGeofences()])
+        if (!cancelled) setGisSnap({ heatmapCells: h.count, geofences: g.count })
+      } catch {
+        if (!cancelled) setGisSnap(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [auth])
 
   return (
     <>
@@ -29,7 +45,17 @@ export default function AnalyticsPage() {
           <button type="button" className="text-button" onClick={() => { window.location.hash = 'model-governance' }}>
             Model governance
           </button>
+          {auth.hasPermission('gis:read') ? (
+            <button type="button" className="text-button" onClick={() => { window.location.hash = 'map-operations' }}>
+              Map / GIS
+            </button>
+          ) : null}
         </div>
+        {gisSnap ? (
+          <p className="muted" style={{ marginTop: 8 }}>
+            GIS snapshot: heatmap cells {gisSnap.heatmapCells}, geofences {gisSnap.geofences}. Open Map for highest-risk area and camera coverage context.
+          </p>
+        ) : null}
         <p className="muted">
           Use the uploaded-video workflow to replay evidence through the same analytics pipeline, then compare event counts and case output from this dashboard.
         </p>

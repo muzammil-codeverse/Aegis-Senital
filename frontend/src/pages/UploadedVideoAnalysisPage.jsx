@@ -7,8 +7,10 @@ import UploadedVideoReportPanel from '../components/uploaded-video/UploadedVideo
 import UploadedVideoTimeline from '../components/uploaded-video/UploadedVideoTimeline'
 import { useUploadedVideo } from '../hooks/useUploadedVideo'
 import { useUploadedVideoProgress } from '../hooks/useUploadedVideoProgress'
+import { useAuth } from '../hooks/useAuth'
 
 export default function UploadedVideoAnalysisPage() {
+  const auth = useAuth()
   const uploadedVideo = useUploadedVideo()
   const progress = useUploadedVideoProgress(uploadedVideo.currentSession?.session_id, {
     enabled: Boolean(uploadedVideo.currentSession?.session_id),
@@ -38,7 +40,14 @@ export default function UploadedVideoAnalysisPage() {
             <p className="eyebrow">Recent Sessions</p>
             <h2>Session Library</h2>
           </div>
-          <span className="count-pill">{uploadedVideo.sessions.length}</span>
+          <div className="button-row">
+            {auth.hasPermission('gis:read') ? (
+              <button type="button" className="text-button" onClick={() => { window.location.hash = 'map-operations' }}>
+                Show event location
+              </button>
+            ) : null}
+            <span className="count-pill">{uploadedVideo.sessions.length}</span>
+          </div>
         </div>
         {uploadedVideo.error ? <p className="error-text">{uploadedVideo.error}</p> : null}
         <div className="uploaded-video-session-list">

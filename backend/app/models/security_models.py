@@ -69,6 +69,11 @@ class AuditAction(Enum):
     IDENTITY_CANDIDATE_REJECTED = "identity_candidate_rejected"
     IDENTITY_CANDIDATE_ESCALATED = "identity_candidate_escalated"
     IDENTITY_CANDIDATE_ACCESS_DENIED = "identity_candidate_access_denied"
+    GIS_CAMERA_PROFILE_UPDATED = "gis_camera_profile_updated"
+    GIS_CAMERA_PROFILE_ACCESS_DENIED = "gis_camera_profile_access_denied"
+    GIS_GEOFENCE_CREATED = "gis_geofence_created"
+    GIS_GEOFENCE_UPDATED = "gis_geofence_updated"
+    GIS_GEOFENCE_DELETED = "gis_geofence_deleted"
 
 
 SENSITIVE_AUDIT_KEYS = {
