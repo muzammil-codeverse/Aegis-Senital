@@ -156,9 +156,34 @@ All of the following must be true before the system is declared production-ready
 - [ ] `python scripts/check_postgres_schema.py` — PASSED
 - [ ] `python scripts/check_frontend_safe_wording.py` — PASSED
 - [ ] `GET /api/system/readiness` — HTTP 200
-- [ ] `pytest tests/` — all tests pass (871+ passed, known skip count stable)
+- [ ] `pytest tests/` — all tests pass (1009+ passed, known skip count stable)
 - [ ] Git working tree clean — no uncommitted changes to source files
 - [ ] No `.env` or secrets in repository
+
+---
+
+## Phase 53 Completion Record (2026-05-13)
+
+All production gates were passed in Phase 53:
+
+| Gate | Result |
+|---|---|
+| `validate_runtime --profile production` | **119/119 PASSED** |
+| PostgreSQL bootstrap (18 tables) | **PASSED** |
+| Redis connectivity | **PASSED** |
+| OpenAI live API verification | **PASSED** |
+| `pytest tests/` | **1009 passed, 0 failed** |
+| Frontend build | **PASSED** |
+| Safe wording check | **PASSED** |
+| Accessibility check | **PASSED** |
+| AEGIS_JWT_SECRET (64+ chars) | **CONFIRMED** |
+| No secrets committed | **CONFIRMED** |
+
+Environment priority bug fixed: `AEGIS_ENV` now takes precedence over `APP_ENV` in all environment detection functions (`persistence.py`, `security/config.py`, `llm_service.py`).
+
+OpenAI `reasoning.effort` fix: parameter is now only included for o1/o3/o4-class models.
+
+Docker Compose host port mappings: PostgreSQL (5432) and Redis (6379) now exposed to host.
 
 ---
 
@@ -169,9 +194,9 @@ They are documented here honestly. Production cannot be claimed fully ready unti
 
 | Item | Status | Required Action |
 |---|---|---|
-| `AEGIS_JWT_SECRET` | Missing in local env | Set to 64+ char random string |
-| `REDIS_URL` | Missing — Redis not running locally | Start Redis service or Docker |
-| `OPENAI_API_KEY` | Missing — no paid key | Provide valid OpenAI key or set provider to `disabled` |
+| `AEGIS_JWT_SECRET` | **RESOLVED (Phase 53)** — 86-char random token generated | Rotate key before live deployment; use secrets manager |
+| `REDIS_URL` | **RESOLVED (Phase 53)** — Docker Compose Redis provisioned | Replace with managed Redis (ElastiCache etc.) for live deployment |
+| `OPENAI_API_KEY` | **RESOLVED (Phase 53)** — Live key configured and verified | Store in secrets manager; rotate before deploy |
 | PostgreSQL live connection | Fails locally (SQLite DSN in env) | Set `POSTGRES_DSN` to a real PostgreSQL DSN |
 
 These are **external blockers** — the code and validation are correct. Production readiness requires

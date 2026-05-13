@@ -28,26 +28,36 @@ export default function DroneMissionPlannerPage() {
     missions,
     loading,
     error,
+    cityPresets,
+    cityPresetError,
+    evidenceBundle,
     activeSession,
     telemetry,
     events,
     report,
     fetchMissions,
+    fetchCityPresets,
     handleCreate,
     handleDelete,
+    handleImportCityPreset,
     handleStart,
     handlePause,
     handleResume,
     handleCancel,
+    loadEvidenceBundle,
   } = useDroneMissions()
 
   const [selectedMission, setSelectedMission] = useState(null)
   const [newName, setNewName] = useState('Simulated Aerial Patrol Mission')
   const [newRouteType, setNewRouteType] = useState('linear')
   const [newWaypoints, setNewWaypoints] = useState([])
+  const [selectedPreset, setSelectedPreset] = useState('fixed_camera_handoff_demo')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [presetLoading, setPresetLoading] = useState(false)
+  const [presetError, setPresetError] = useState(null)
+  const [evidenceLoading, setEvidenceLoading] = useState(false)
 
   async function onCreateMission(e) {
     e.preventDefault()
@@ -99,6 +109,31 @@ export default function DroneMissionPlannerPage() {
     finally { setActionLoading(false) }
   }
 
+  async function onImportPreset() {
+    setPresetLoading(true)
+    setPresetError(null)
+    try {
+      const mission = await handleImportCityPreset(selectedPreset)
+      setSelectedMission(mission)
+    } catch (err) {
+      setPresetError(err.message)
+    } finally {
+      setPresetLoading(false)
+    }
+  }
+
+  async function onExportEvidence() {
+    if (!activeSession?.session_id) return
+    setEvidenceLoading(true)
+    try {
+      await loadEvidenceBundle(activeSession.session_id)
+    } finally {
+      setEvidenceLoading(false)
+    }
+  }
+
+  const selectedPresetDetails = cityPresets.find(item => item.name === selectedPreset) || null
+
   return (
     <div className="page-content" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <CommandPageHeader
@@ -133,6 +168,35 @@ export default function DroneMissionPlannerPage() {
           <div className="panel">
             <div className="panel-header">New Simulated Mission</div>
             <div className="panel-body" style={{ padding: 8 }}>
+              <div style={{ marginBottom: 10, padding: 8, border: '1px solid #334155', borderRadius: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>City Mission Presets</div>
+                <label style={{ fontSize: 11, display: 'block' }}>
+                  Preset
+                  <select
+                    value={selectedPreset}
+                    onChange={event => setSelectedPreset(event.target.value)}
+                    style={{ display: 'block', width: '100%', marginTop: 2 }}
+                  >
+                    {(cityPresets || []).map(preset => (
+                      <option key={preset.name} value={preset.name}>{preset.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="button-row" style={{ marginTop: 6 }}>
+                  <button className="btn btn-sm" type="button" onClick={fetchCityPresets}>Refresh presets</button>
+                  <button className="btn btn-sm btn-primary" type="button" onClick={onImportPreset} disabled={presetLoading || !cityPresets.length}>
+                    {presetLoading ? 'Importing...' : 'Import preset'}
+                  </button>
+                </div>
+                {selectedPresetDetails ? (
+                  <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
+                    Expected outcome: {selectedPresetDetails.expected_demo_outcome || 'n/a'}
+                  </div>
+                ) : null}
+                {cityPresetError ? <div style={{ marginTop: 6, color: '#f87171', fontSize: 11 }}>{cityPresetError}</div> : null}
+                {presetError ? <div style={{ marginTop: 6, color: '#f87171', fontSize: 11 }}>{presetError}</div> : null}
+              </div>
+
               <form onSubmit={onCreateMission}>
                 <label style={{ fontSize: 11 }}>
                   Mission name
@@ -182,6 +246,7 @@ export default function DroneMissionPlannerPage() {
                 mission={selectedMission}
                 session={activeSession}
                 telemetry={telemetry}
+                selectedPreset={selectedPresetDetails}
               />
             </div>
           </div>
@@ -194,6 +259,7 @@ export default function DroneMissionPlannerPage() {
                 <MissionExecutionControls
                   selectedMission={selectedMission}
                   activeSession={activeSession}
+                  selectedPreset={selectedPresetDetails}
                   onStart={onStart}
                   onPause={onPause}
                   onResume={onResume}
@@ -220,6 +286,37 @@ export default function DroneMissionPlannerPage() {
               <div className="panel-header">Telemetry Timeline</div>
               <div className="panel-body" style={{ padding: 8 }}>
                 <MissionTelemetryTimeline telemetry={telemetry} />
+              </div>
+            </div>
+          )}
+
+          {activeSession && (
+            <div className="panel">
+              <div className="panel-header">
+                <span>Mission Evidence Export</span>
+                <button className="btn btn-sm" type="button" onClick={onExportEvidence} disabled={evidenceLoading}>
+                  {evidenceLoading ? 'Exporting...' : 'Export bundle'}
+                </button>
+              </div>
+              <div className="panel-body" style={{ padding: 8, fontSize: 12 }}>
+                <div className="button-row">
+                  <span className="state-chip">simulated_geo=true</span>
+                  <span className="state-chip">Operator review required</span>
+                </div>
+                {selectedPresetDetails ? (
+                  <p style={{ marginTop: 8 }}>
+                    Safe wording: {selectedPresetDetails.safe_wording || 'Simulated aerial observation.'}
+                  </p>
+                ) : null}
+                {evidenceBundle ? (
+                  <p style={{ marginTop: 8, color: '#94a3b8' }}>
+                    Export includes telemetry summary, route summary, detection summary, and fusion summary.
+                  </p>
+                ) : (
+                  <p style={{ marginTop: 8, color: '#94a3b8' }}>
+                    Export a bundle after or during a mission to attach simulated evidence to a reviewable case.
+                  </p>
+                )}
               </div>
             </div>
           )}

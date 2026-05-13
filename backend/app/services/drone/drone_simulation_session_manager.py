@@ -6,9 +6,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-import cv2
-import numpy as np
-
 from app.models.drone_simulation_models import (
     DroneCameraFrame,
     DroneCommandResponse,
@@ -17,14 +14,11 @@ from app.models.drone_simulation_models import (
     DroneTelemetry,
 )
 from app.models.security_models import UserAccount
+from app.services.drone.drone_stream_service import DroneStreamService
 from app.services.drone.drone_simulation_service import get_drone_simulation_service
 from core.event_bus import EventType, get_event_bus
-from inference.drone.drone_frame_adapter import DroneFrameAdapter
 from inference.metrics import metrics
-from inference.model_pool import get_model_pool
 from inference.monitoring.metrics import get_metrics
-from inference.stream.stream_processor import StreamProcessor
-from ml.runtime import ModelRouter, system_boot_check
 
 
 def _now_iso() -> str:
@@ -62,7 +56,7 @@ class DroneSimulationSessionManager:
         self._latest_telemetry: DroneTelemetry | None = None
         self._latest_frame: DroneCameraFrame | None = None
         self._flight_path: list[DroneFlightPathPoint] = []
-        self._processor: StreamProcessor | None = None
+        self._stream_service = DroneStreamService(self._service)
         self._last_telemetry_event_ts = 0.0
         self._last_frame_event_ts = 0.0
 
@@ -103,12 +97,7 @@ class DroneSimulationSessionManager:
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
         with self._lock:
-            if self._processor is not None:
-                try:
-                    self._processor.stop()
-                except Exception:
-                    pass
-            self._processor = None
+            self._stream_service.stop()
             self._service.disconnect()
             self._session.active = False
             self._session.status = "stopped"
@@ -142,26 +131,6 @@ class DroneSimulationSessionManager:
     def move_to_position(self, x: float, y: float, z: float, velocity: float) -> DroneCommandResponse:
         return self._service.move_to_position(x, y, z, velocity)
 
-    def _ensure_processor(self) -> StreamProcessor | None:
-        if self._processor is not None:
-            return self._processor
-        if not bool((self._service.config.get("stream") or {}).get("process_through_stream_processor", True)):
-            return None
-        pool = get_model_pool()
-        if not pool.is_loaded:
-            system_boot_check()
-            router = ModelRouter()
-            weapon = router.get_model("weapon")
-            phone = router.get_model("phone")
-            pool.load(weapon_path=weapon["resolved_path"], phone_path=phone["resolved_path"])
-        self._processor = StreamProcessor(
-            stream_id=f"cam_{self._service.drone_id}",
-            source=f"cosys_airsim://{self._service.drone_id}",
-            model_pool=pool,
-        )
-        self._processor.source_type = "drone_simulation"
-        return self._processor
-
     def _run_loop(self) -> None:
         config = self._service.config
         telemetry_hz = max(1.0, float((config.get("telemetry") or {}).get("poll_hz", 5)))
@@ -170,7 +139,7 @@ class DroneSimulationSessionManager:
         frame_interval = 1.0 / frame_fps
         next_telemetry_at = 0.0
         next_frame_at = 0.0
-        self._ensure_processor()
+        self._stream_service.start()
         with self._lock:
             self._session.status = "running"
             self._session.updated_at = _now_iso()
@@ -217,25 +186,24 @@ class DroneSimulationSessionManager:
         self._publish_status_event("drone_telemetry")
 
     def _poll_frame(self) -> None:
-        frame = self._service.get_frame()
-        self._latest_frame = frame
-        if not frame.frame_available:
+        previous_processed = int(self._stream_service.stats().get("frames_processed_total") or 0)
+        frames = self._stream_service.capture_and_process(
+            mission_id=self._session.metadata.get("mission_id"),
+            session_id=self._session.session_id,
+        )
+        if not frames:
             return
-        decoded = DroneFrameAdapter.to_decoded_packet(frame, frame.telemetry)
-        processor = self._ensure_processor()
-        if processor is not None:
-            result = processor.process_decoded_packet(decoded)
-            _metric_set("drone_sim_frames_processed_total", self._session.frames_processed_total + 1)
-            if isinstance(result, dict):
-                frame.metadata["processing_result"] = {
-                    "events": len(result.get("events") or []),
-                    "anomalies": len(result.get("anomalies") or []),
-                    "incidents": len(result.get("incidents") or []),
-                    "scenarios": len(result.get("scenarios") or []),
-                }
+        preferred = self._stream_service.get_latest_frame("front_center")
+        frame = preferred or next((item for item in frames if item.frame_available), frames[0])
+        self._latest_frame = frame
+        processed_total = int(self._stream_service.stats().get("frames_processed_total") or previous_processed)
+        processed_delta = max(0, processed_total - previous_processed)
+        if processed_delta == 0 and frame.frame_available:
+            processed_delta = 1
+        _metric_set("drone_sim_frames_processed_total", processed_total)
         with self._lock:
             self._session.frame_index = frame.frame_index
-            self._session.frames_processed_total += 1
+            self._session.frames_processed_total += processed_delta
             self._session.updated_at = _now_iso()
         if (time.time() - self._last_frame_event_ts) >= 1.0:
             event = self._service.create_observation_event(
@@ -243,6 +211,15 @@ class DroneSimulationSessionManager:
                 telemetry=frame.telemetry,
                 frame=frame,
                 confidence=0.55,
+            )
+            event.metadata.update(
+                {
+                    "drone_camera": frame.camera_name,
+                    "source_id": frame.source_id,
+                    "city_runtime": frame.city_runtime,
+                    "mission_id": self._session.metadata.get("mission_id"),
+                    "session_id": self._session.session_id,
+                }
             )
             self._service.persist_observation_event(event, telemetry=frame.telemetry, frame_index=frame.frame_index)
             self._last_frame_event_ts = time.time()

@@ -28,6 +28,7 @@ def _osint_config(tmp_path):
 
 
 def test_case_repository_health_is_healthy_in_development(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ENV", raising=False)
     monkeypatch.setenv("APP_ENV", "development")
     health = JsonlCaseRepository(config=_case_config(tmp_path)).health_check().to_dict()
     assert health["store"] == "cases"

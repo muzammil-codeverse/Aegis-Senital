@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -12,11 +12,11 @@ for path in (ROOT, ROOT / "backend"):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from app.services.drone.drone_frame_adapter import DroneFrameAdapter
 from app.services.drone.drone_simulation_service import DroneSimulationService
-from inference.drone.drone_frame_adapter import DroneFrameAdapter
 
 
-def _process_packet_with_stream_processor(packet, device: str) -> tuple[str, dict]:
+def _run_stream_processor(packet, device: str) -> tuple[bool, dict, str | None]:
     try:
         from inference.model_pool import get_model_pool
         from inference.stream.stream_processor import StreamProcessor
@@ -28,11 +28,8 @@ def _process_packet_with_stream_processor(packet, device: str) -> tuple[str, dic
             router = ModelRouter()
             weapon = router.get_model("weapon")
             phone = router.get_model("phone")
-            pool.load(
-                weapon_path=weapon["resolved_path"],
-                phone_path=phone["resolved_path"],
-                device=device,
-            )
+            pool.load(weapon_path=weapon["resolved_path"], phone_path=phone["resolved_path"], device=device)
+
         processor = StreamProcessor(
             stream_id="cam_drone_sim_01",
             source="cosys_airsim://drone_sim_01",
@@ -40,71 +37,68 @@ def _process_packet_with_stream_processor(packet, device: str) -> tuple[str, dic
         )
         processor.source_type = "drone_simulation"
         result = processor.process_decoded_packet(packet)
-        return "stream_processor", {
-            "events": len(result.get("events") or []),
-            "anomalies": len(result.get("anomalies") or []),
-            "incidents": len(result.get("incidents") or []),
-            "scenarios": len(result.get("scenarios") or []),
-        }
+        return True, result, None
     except Exception as exc:
-        return "adapter_only", {
-            "warning": f"StreamProcessor unavailable for smoke path: {exc}",
-            "events": 0,
-            "anomalies": 0,
-            "incidents": 0,
-            "scenarios": 0,
-        }
+        return False, {}, str(exc)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Smoke test the simulated drone integration pipeline.")
-    parser.add_argument("--strict", action="store_true", help="Fail if the simulator is unavailable.")
-    parser.add_argument("--device", default="auto", help="Inference device hint for StreamProcessor smoke.")
-    parser.add_argument("--max-frames", type=int, default=30, help="Maximum frame capture attempts before giving up.")
+    parser = argparse.ArgumentParser(description="Smoke test simulated drone pipeline through StreamProcessor.")
+    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--duration", type=int, default=30)
     args = parser.parse_args()
 
     service = DroneSimulationService()
     status = service.connect()
     if not status.connected:
-        message = status.last_error or "Simulated drone runtime is unavailable."
-        print(message)
+        print(json.dumps({"status": "failed", "reason": status.last_error or "runtime unavailable"}, indent=2))
         return 1 if args.strict else 0
 
-    telemetry = None
-    frame = None
-    for _ in range(max(1, args.max_frames)):
+    deadline = time.time() + max(5, args.duration)
+    frames_processed = 0
+    inference_attempted = False
+    last_error = None
+    aggregates = {"events": 0, "anomalies": 0, "incidents": 0, "scenarios": 0}
+
+    while time.time() < deadline:
         telemetry = service.get_telemetry()
         frame = service.get_frame()
-        if telemetry.status == "connected" and frame.frame_available:
-            break
+        if telemetry.status != "connected" or not frame.frame_available:
+            time.sleep(0.2)
+            continue
+        packet = DroneFrameAdapter.to_decoded_packet(frame, telemetry)
+        ok, result, err = _run_stream_processor(packet, args.device)
+        inference_attempted = True
+        if ok:
+            frames_processed += 1
+            aggregates["events"] += len(result.get("events") or [])
+            aggregates["anomalies"] += len(result.get("anomalies") or [])
+            aggregates["incidents"] += len(result.get("incidents") or [])
+            aggregates["scenarios"] += len(result.get("scenarios") or [])
+        else:
+            last_error = err
         time.sleep(0.1)
 
-    if telemetry is None or telemetry.status == "disconnected":
-        print("Simulated telemetry could not be retrieved from the connected runtime.")
-        service.disconnect()
-        return 1 if args.strict else 0
-    if frame is None or not frame.frame_available:
-        print("No simulated frame was available from the runtime during smoke capture.")
-        service.disconnect()
-        return 1 if args.strict else 0
-
-    packet = DroneFrameAdapter.to_decoded_packet(frame, telemetry)
-    mode, processing = _process_packet_with_stream_processor(packet, args.device)
+    service.disconnect()
 
     payload = {
-        "status": "ok",
-        "mode": mode,
-        "source_type": packet.metadata.get("source_type"),
-        "camera_id": packet.metadata.get("camera_id"),
-        "drone_id": packet.metadata.get("drone_id"),
-        "simulated": packet.metadata.get("simulated"),
-        "telemetry_status": telemetry.status,
-        "frame_index": frame.frame_index,
-        "processing": processing,
+        "status": "ok" if frames_processed > 0 and inference_attempted else "failed",
+        "frames_processed": frames_processed,
+        "model_inference_attempted": inference_attempted,
+        "no_crash": last_error is None,
+        "last_error": last_error,
+        "outputs": aggregates,
+        "safe_labels": [
+            "Simulated aerial observation",
+            "Candidate cross-source observation",
+            "Operator review required",
+        ],
     }
     print(json.dumps(payload, indent=2))
-    service.disconnect()
-    return 0
+    if args.strict and payload["status"] != "ok":
+        return 1
+    return 0 if payload["status"] == "ok" else 1
 
 
 if __name__ == "__main__":

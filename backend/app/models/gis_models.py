@@ -211,6 +211,7 @@ class MapLayerResponse(BaseModel):
     drone_mission_waypoints: list[dict[str, Any]] = Field(default_factory=list)
     active_mission_paths: list[dict[str, Any]] = Field(default_factory=list)
     completed_mission_paths: list[dict[str, Any]] = Field(default_factory=list)
+    fixed_camera_handoffs: list[dict[str, Any]] = Field(default_factory=list)
     stream_status_by_camera: dict[str, Any] = Field(default_factory=dict)
     viewport: MapViewportRequest | None = None
 

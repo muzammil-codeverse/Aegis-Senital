@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import inspect
+import json
 import logging
 import math
 import os
@@ -21,8 +22,10 @@ from app.models.drone_simulation_models import (
     DroneHealthStatus,
     DroneOrientation,
     DronePose,
+    DroneRuntimeStatus,
     DroneTelemetry,
 )
+from app.services.drone.drone_camera_registry import SUPPORTED_DRONE_CAMERAS, build_drone_source_id
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,8 @@ class CosysAirSimClient:
         drone_id: str = "drone_sim_01",
         default_home: dict[str, Any] | None = None,
         image_type: str = "scene",
+        allowed_cameras: list[str] | tuple[str, ...] | None = None,
+        runtime_inventory_path: str | Path = "storage/drone_sim/runtime_inventory.json",
     ) -> None:
         self.host = str(host or os.environ.get("AEGIS_AIRSIM_HOST") or "127.0.0.1")
         self.port = int(port or os.environ.get("AEGIS_AIRSIM_PORT") or 41451)
@@ -61,6 +66,15 @@ class CosysAirSimClient:
         self.drone_id = drone_id
         self.default_home = dict(default_home or {})
         self.image_type = str(image_type or "scene").strip().lower()
+        self.allowed_cameras = tuple(
+            str(camera).strip().lower()
+            for camera in (allowed_cameras or SUPPORTED_DRONE_CAMERAS)
+            if str(camera).strip()
+        )
+        if self.camera_name not in self.allowed_cameras:
+            self.allowed_cameras = tuple(dict.fromkeys((self.camera_name, *self.allowed_cameras)))
+        self.runtime_inventory_path = Path(runtime_inventory_path)
+        self.city_runtime = str(os.environ.get("AEGIS_DRONE_RUNTIME_NAME") or "").strip() or None
 
         self._client_module: Any | None = None
         self._client: Any | None = None
@@ -222,6 +236,7 @@ class CosysAirSimClient:
                 velocity=vel,
                 orientation=attitude,
                 camera_name=self.camera_name,
+                city_runtime=self._runtime_name_hint(),
                 status="connected",
                 metadata={"vehicle_name": self.vehicle_name},
             )
@@ -237,85 +252,237 @@ class CosysAirSimClient:
                 simulated=True,
                 timestamp=_now_iso(),
                 camera_name=self.camera_name,
+                city_runtime=self._runtime_name_hint(),
                 status="degraded",
                 last_error=self._last_error,
             )
 
     def get_frame(self) -> DroneCameraFrame:
+        return self.get_camera_frame(self.camera_name)
+
+    def get_camera_frame(self, camera_name: str) -> DroneCameraFrame:
+        camera = self._normalize_camera_name(camera_name)
         telemetry = self._latest_telemetry or self.get_telemetry()
         if telemetry.status == "disconnected":
             return DroneCameraFrame(
                 drone_id=self.drone_id,
                 provider="cosys_airsim",
                 simulated=True,
-                camera_name=self.camera_name,
+                camera_name=camera,
+                source_id=build_drone_source_id(self.drone_id, camera),
+                city_runtime=self._runtime_name_hint(),
                 status="disconnected",
                 frame_available=False,
                 telemetry=telemetry,
                 last_error=telemetry.last_error,
             )
 
+        frames = self.get_multi_camera_frames([camera], telemetry=telemetry)
+        if frames:
+            return frames[0]
+        return DroneCameraFrame(
+            drone_id=self.drone_id,
+            provider="cosys_airsim",
+            simulated=True,
+            camera_name=camera,
+            source_id=build_drone_source_id(self.drone_id, camera),
+            city_runtime=self._runtime_name_hint(),
+            status="degraded",
+            frame_available=False,
+            telemetry=telemetry,
+            last_error=self._last_error or "No frame returned from runtime",
+        )
+
+    def get_multi_camera_frames(
+        self,
+        camera_names: list[str],
+        *,
+        telemetry: DroneTelemetry | None = None,
+    ) -> list[DroneCameraFrame]:
+        if not camera_names:
+            return []
+        safe_cameras = [self._normalize_camera_name(name) for name in camera_names]
+        telemetry = telemetry or self._latest_telemetry or self.get_telemetry()
+        if telemetry.status == "disconnected":
+            return [
+                DroneCameraFrame(
+                    drone_id=self.drone_id,
+                    provider="cosys_airsim",
+                    simulated=True,
+                    camera_name=name,
+                    source_id=build_drone_source_id(self.drone_id, name),
+                    city_runtime=self._runtime_name_hint(),
+                    status="disconnected",
+                    frame_available=False,
+                    telemetry=telemetry,
+                    last_error=telemetry.last_error,
+                )
+                for name in safe_cameras
+            ]
+
         try:
-            image_request = self._client_module.ImageRequest(
-                self.camera_name,
-                self._resolve_image_type(),
-                False,
-                False,
-            )
-            responses = self._call_with_vehicle_fallback(self._client.simGetImages, [image_request])
+            image_requests = [
+                self._client_module.ImageRequest(
+                    camera_name,
+                    self._resolve_image_type(),
+                    False,
+                    False,
+                )
+                for camera_name in safe_cameras
+            ]
+            responses = self._call_with_vehicle_fallback(self._client.simGetImages, image_requests)
             if not responses:
                 raise RuntimeError("simGetImages returned no responses")
-            response = responses[0]
-            width = int(getattr(response, "width", 0) or 0)
-            height = int(getattr(response, "height", 0) or 0)
-            if width <= 0 or height <= 0:
-                raise RuntimeError("simGetImages returned an empty frame")
-            raw = np.frombuffer(getattr(response, "image_data_uint8", b""), dtype=np.uint8)
-            if raw.size == 0:
-                raise RuntimeError("simGetImages returned no frame bytes")
-            frame = raw.reshape(height, width, 3)
-            ok, encoded = cv2.imencode(".jpg", frame)
-            if not ok:
-                raise RuntimeError("OpenCV failed to encode the simulated frame")
-            self._frame_index += 1
-            payload = base64.b64encode(encoded.tobytes()).decode("ascii")
-            item = DroneCameraFrame(
-                drone_id=self.drone_id,
-                provider="cosys_airsim",
-                simulated=True,
-                timestamp=_now_iso(),
-                frame_index=self._frame_index,
-                camera_name=self.camera_name,
-                width=width,
-                height=height,
-                image_base64=payload,
-                status="connected",
-                frame_available=True,
-                telemetry=telemetry,
-                metadata={
-                    "vehicle_name": self.vehicle_name,
-                    "source_type": "drone_simulation",
-                    "simulated": True,
-                },
-            )
-            self._latest_frame = item
+
+            frames: list[DroneCameraFrame] = []
+            runtime_name = self._runtime_name_hint()
+            for index, camera_name in enumerate(safe_cameras):
+                response = responses[index] if index < len(responses) else None
+                if response is None:
+                    frames.append(
+                        DroneCameraFrame(
+                            drone_id=self.drone_id,
+                            provider="cosys_airsim",
+                            simulated=True,
+                            camera_name=camera_name,
+                            source_id=build_drone_source_id(self.drone_id, camera_name),
+                            city_runtime=runtime_name,
+                            status="degraded",
+                            frame_available=False,
+                            telemetry=telemetry,
+                            last_error=f"Camera '{camera_name}' returned no response",
+                        )
+                    )
+                    continue
+                width = int(getattr(response, "width", 0) or 0)
+                height = int(getattr(response, "height", 0) or 0)
+                if width <= 0 or height <= 0:
+                    frames.append(
+                        DroneCameraFrame(
+                            drone_id=self.drone_id,
+                            provider="cosys_airsim",
+                            simulated=True,
+                            camera_name=camera_name,
+                            source_id=build_drone_source_id(self.drone_id, camera_name),
+                            city_runtime=runtime_name,
+                            status="degraded",
+                            frame_available=False,
+                            telemetry=telemetry,
+                            last_error=f"Camera '{camera_name}' returned an empty frame",
+                        )
+                    )
+                    continue
+                raw = np.frombuffer(getattr(response, "image_data_uint8", b""), dtype=np.uint8)
+                if raw.size == 0:
+                    frames.append(
+                        DroneCameraFrame(
+                            drone_id=self.drone_id,
+                            provider="cosys_airsim",
+                            simulated=True,
+                            camera_name=camera_name,
+                            source_id=build_drone_source_id(self.drone_id, camera_name),
+                            city_runtime=runtime_name,
+                            status="degraded",
+                            frame_available=False,
+                            telemetry=telemetry,
+                            last_error=f"Camera '{camera_name}' returned no frame bytes",
+                        )
+                    )
+                    continue
+                frame = raw.reshape(height, width, 3)
+                ok, encoded = cv2.imencode(".jpg", frame)
+                if not ok:
+                    frames.append(
+                        DroneCameraFrame(
+                            drone_id=self.drone_id,
+                            provider="cosys_airsim",
+                            simulated=True,
+                            camera_name=camera_name,
+                            source_id=build_drone_source_id(self.drone_id, camera_name),
+                            city_runtime=runtime_name,
+                            status="degraded",
+                            frame_available=False,
+                            telemetry=telemetry,
+                            last_error=f"Camera '{camera_name}' failed JPEG encoding",
+                        )
+                    )
+                    continue
+
+                self._frame_index += 1
+                payload = base64.b64encode(encoded.tobytes()).decode("ascii")
+                item = DroneCameraFrame(
+                    drone_id=self.drone_id,
+                    provider="cosys_airsim",
+                    simulated=True,
+                    timestamp=_now_iso(),
+                    frame_index=self._frame_index,
+                    camera_name=camera_name,
+                    source_id=build_drone_source_id(self.drone_id, camera_name),
+                    city_runtime=runtime_name,
+                    width=width,
+                    height=height,
+                    image_base64=payload,
+                    status="connected",
+                    frame_available=True,
+                    telemetry=telemetry,
+                    metadata={
+                        "vehicle_name": self.vehicle_name,
+                        "source_type": "drone_simulation",
+                        "source_id": build_drone_source_id(self.drone_id, camera_name),
+                        "simulated": True,
+                    },
+                )
+                frames.append(item)
+                if camera_name == self.camera_name:
+                    self._latest_frame = item
             self._last_error = None
-            return item
+            return frames
         except Exception as exc:
-            self._last_error = f"Failed to capture simulated frame: {exc}"
+            self._last_error = f"Failed to capture simulated frame batch: {exc}"
             self._connected = False
-            return DroneCameraFrame(
-                drone_id=self.drone_id,
-                provider="cosys_airsim",
-                simulated=True,
-                timestamp=_now_iso(),
-                frame_index=self._frame_index,
-                camera_name=self.camera_name,
-                status="degraded",
-                frame_available=False,
-                telemetry=telemetry,
-                last_error=self._last_error,
-            )
+            return [
+                DroneCameraFrame(
+                    drone_id=self.drone_id,
+                    provider="cosys_airsim",
+                    simulated=True,
+                    timestamp=_now_iso(),
+                    frame_index=self._frame_index,
+                    camera_name=name,
+                    source_id=build_drone_source_id(self.drone_id, name),
+                    city_runtime=self._runtime_name_hint(),
+                    status="degraded",
+                    frame_available=False,
+                    telemetry=telemetry,
+                    last_error=self._last_error,
+                )
+                for name in safe_cameras
+            ]
+
+    def get_vehicle_state(self) -> DroneTelemetry:
+        return self.get_telemetry()
+
+    def get_city_runtime_status(self) -> DroneRuntimeStatus:
+        available: list[str] = []
+        selected = self.city_runtime
+        if self.runtime_inventory_path.exists():
+            try:
+                payload = json.loads(self.runtime_inventory_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                payload = {}
+            selected = str(payload.get("selected_runtime") or selected or "").strip() or None
+            available = [str(item) for item in (payload.get("available_runtimes") or []) if str(item).strip()]
+        connected = self.is_connected()
+        port_open = self._port_open()
+        return DroneRuntimeStatus(
+            selected_runtime=selected,
+            available_runtimes=available,
+            fallback_used=selected == "Blocks",
+            endpoint=f"{self.host}:{self.port}",
+            port_open=port_open,
+            connected=connected,
+            inventory_path=str(self.runtime_inventory_path.resolve()),
+            last_error=None if port_open else self._last_error,
+        )
 
     def takeoff(self) -> DroneCommandResponse:
         return self._run_command("takeoff", "takeoffAsync")
@@ -420,6 +587,22 @@ class CosysAirSimClient:
     def get_drone_state(self) -> dict[str, Any]:
         telemetry = self.get_telemetry()
         return telemetry.model_dump(mode="json")
+
+    def _normalize_camera_name(self, camera_name: str) -> str:
+        name = str(camera_name or "").strip().lower()
+        if not name:
+            name = self.camera_name
+        if name not in self.allowed_cameras:
+            raise ValueError(
+                f"Unsupported camera '{camera_name}'. Supported cameras: {', '.join(self.allowed_cameras)}"
+            )
+        return name
+
+    def _runtime_name_hint(self) -> str | None:
+        status = self.get_city_runtime_status()
+        if status.selected_runtime:
+            self.city_runtime = status.selected_runtime
+        return status.selected_runtime
 
     def _load_client_module(self) -> Any | None:
         if self._client_module is not None:

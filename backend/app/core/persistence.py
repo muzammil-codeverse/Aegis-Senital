@@ -100,7 +100,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def environment_name() -> str:
-    return (os.getenv("APP_ENV") or os.getenv("AEGIS_ENV") or "development").strip().lower()
+    return (os.getenv("AEGIS_ENV") or os.getenv("APP_ENV") or "development").strip().lower()
 
 
 def is_production_environment() -> bool:

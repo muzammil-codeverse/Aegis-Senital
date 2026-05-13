@@ -4,6 +4,7 @@ from app.core import persistence as persistence_module
 
 
 def test_development_allows_jsonl(monkeypatch):
+    monkeypatch.delenv("AEGIS_ENV", raising=False)
     monkeypatch.setenv("APP_ENV", "development")
     persistence_module.reset_persistence_config_cache()
     assert persistence_module.get_store_backend("cases") == "jsonl"

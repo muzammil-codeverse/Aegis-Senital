@@ -32,6 +32,14 @@ export async function createMission(payload) {
   return _request(BASE, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export async function listCityMissionPresets() {
+  return _request(`${BASE}/presets/city`)
+}
+
+export async function importCityMissionPreset(presetName) {
+  return _request(`${BASE}/presets/${encodeURIComponent(presetName)}/import`, { method: 'POST' })
+}
+
 export async function updateMission(missionId, payload) {
   return _request(`${BASE}/${missionId}`, { method: 'PATCH', body: JSON.stringify(payload) })
 }
@@ -72,4 +80,8 @@ export async function getSessionEvents(sessionId, { limit = 200, offset = 0 } = 
 
 export async function getSessionReport(sessionId) {
   return _request(`${BASE}/sessions/${sessionId}/report`)
+}
+
+export async function getSessionEvidenceBundle(sessionId) {
+  return _request(`${BASE}/sessions/${sessionId}/evidence-bundle`)
 }

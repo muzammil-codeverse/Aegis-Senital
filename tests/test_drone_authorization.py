@@ -23,6 +23,7 @@ def _user(role: str, camera_scopes: list[str]) -> UserAccount:
 
 class _FakeService:
     drone_id = "drone_sim_01"
+    allowed_cameras = ("front_center",)
     config = {"connection": {"camera_name": "front_center", "vehicle_name": "Drone1"}}
 
     def latest_telemetry(self):
@@ -39,6 +40,10 @@ class _FakeService:
 
     def get_telemetry(self):
         return DroneTelemetry(status="connected")
+
+    def get_runtime_status(self):
+        from app.models.drone_simulation_models import DroneRuntimeStatus
+        return DroneRuntimeStatus(selected_runtime="Blocks", available_runtimes=["Blocks"], fallback_used=True, connected=True, port_open=True)
 
 
 class _FakeManager:

@@ -68,6 +68,16 @@ export default function AnalyticsPage() {
             Drone simulation status: {drone.status?.health?.status || 'unknown'} with {drone.stats.framesProcessed} processed frames and {drone.stats.events} detected events from the simulated aerial source.
           </p>
         ) : null}
+        {auth.hasPermission('drone:read') ? (
+          <div className="metric-strip" style={{ marginTop: 10 }}>
+            <article className="metric-tile"><span>Drone runtime</span><strong>{drone.runtimeStatus?.selected_runtime || 'unknown'}</strong></article>
+            <article className="metric-tile"><span>Active mission</span><strong>{drone.status?.session?.status || 'idle'}</strong></article>
+            <article className="metric-tile"><span>Frames processed</span><strong>{drone.stats.framesProcessed}</strong></article>
+            <article className="metric-tile"><span>Detections generated</span><strong>{drone.stats.events}</strong></article>
+            <article className="metric-tile"><span>Fusion correlations</span><strong>{analytics?.data?.dashboard?.drone_fusion_correlations ?? analytics?.data?.summary?.drone_fusion_correlations ?? 0}</strong></article>
+            <article className="metric-tile"><span>Feed health</span><strong>{drone.status?.health?.status || 'unknown'}</strong></article>
+          </div>
+        ) : null}
         <p className="muted">
           Use the uploaded-video workflow to replay evidence through the same analytics pipeline, then compare event counts and case output from this dashboard.
         </p>

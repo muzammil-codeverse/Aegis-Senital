@@ -102,6 +102,9 @@ def _install_auth(monkeypatch):
 
 
 def test_llm_endpoints_use_local_stub_and_persist_reports(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ENV", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("APP_ENV", "test")
     users = _install_auth(monkeypatch)
     monkeypatch.setattr(case_service_module, "_CASE_SERVICE_SUBSCRIBED", True)
     case_service = CaseService(repository=JsonlCaseRepository(config=_case_config(tmp_path)), config=_case_config(tmp_path))
@@ -153,6 +156,9 @@ def test_llm_endpoints_use_local_stub_and_persist_reports(tmp_path, monkeypatch)
 
 
 def test_llm_permissions_and_missing_key_verification_message(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ENV", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("APP_ENV", "test")
     users = _install_auth(monkeypatch)
     monkeypatch.setattr(case_service_module, "_CASE_SERVICE_SUBSCRIBED", True)
     case_service = CaseService(repository=JsonlCaseRepository(config=_case_config(tmp_path)), config=_case_config(tmp_path))

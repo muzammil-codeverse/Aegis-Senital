@@ -13,6 +13,8 @@ function mergeStatusPayload(item, setState) {
     session: item?.session ?? previous.session,
     connection: item?.connection ?? previous.connection,
     health: item?.health ?? previous.health,
+    runtimeStatus: item?.runtime_status ?? previous.runtimeStatus,
+    cameraSources: item?.camera_sources ?? previous.cameraSources,
     telemetry: item?.telemetry ?? previous.telemetry,
     latestFrameAvailable: Boolean(item?.latest_frame_available ?? previous.latestFrameAvailable),
   }))
@@ -26,11 +28,14 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
     session: null,
     connection: null,
     health: null,
+    runtimeStatus: null,
+    cameraSources: [],
     telemetry: null,
     latestFrameAvailable: false,
   })
   const [flightPath, setFlightPath] = useState([])
   const [latestFrame, setLatestFrame] = useState(null)
+  const [cameraFrames, setCameraFrames] = useState({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [actionError, setActionError] = useState(null)
@@ -50,9 +55,22 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
         droneSimulationApi.getFlightPath(),
         droneSimulationApi.getLatestFrame(),
       ])
+      const [runtimeResponse, camerasResponse] = await Promise.all([
+        droneSimulationApi.getRuntimeStatus().catch(() => ({ item: null })),
+        droneSimulationApi.listCameras().catch(() => ({ items: [] })),
+      ])
       mergeStatusPayload(statusResponse.item, setStatus)
+      if (runtimeResponse?.item) {
+        setStatus(previous => ({ ...previous, runtimeStatus: runtimeResponse.item }))
+      }
+      if (Array.isArray(camerasResponse?.items)) {
+        setStatus(previous => ({ ...previous, cameraSources: camerasResponse.items }))
+      }
       setFlightPath(pathResponse.items || [])
       setLatestFrame(frameResponse.item || null)
+      if (frameResponse.item?.camera_name) {
+        setCameraFrames(previous => ({ ...previous, [frameResponse.item.camera_name]: frameResponse.item }))
+      }
       setLastTelemetryAt(statusResponse.item?.telemetry?.timestamp || Date.now())
       setError(null)
     } catch (err) {
@@ -67,8 +85,25 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
     try {
       const response = await droneSimulationApi.getLatestFrame()
       setLatestFrame(response.item || null)
+      if (response.item?.camera_name) {
+        setCameraFrames(previous => ({ ...previous, [response.item.camera_name]: response.item }))
+      }
     } catch (err) {
       setError(normalizeError(err))
+    }
+  }, [canRead])
+
+  const refreshCameraFrame = useCallback(async cameraName => {
+    if (!canRead || !cameraName) return null
+    try {
+      const response = await droneSimulationApi.getCameraLatestFrame(cameraName)
+      if (response.item) {
+        setCameraFrames(previous => ({ ...previous, [cameraName]: response.item }))
+      }
+      return response.item || null
+    } catch (err) {
+      setError(normalizeError(err))
+      return null
     }
   }, [canRead])
 
@@ -109,13 +144,43 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
       socket.onmessage = event => {
         try {
           const message = JSON.parse(event.data)
-          if (message?.event_type !== 'drone_telemetry') return
-          setStatus(previous => ({
-            ...previous,
-            telemetry: message.telemetry ?? previous.telemetry,
-            session: message.session ?? previous.session,
-          }))
-          setLastTelemetryAt(message.timestamp || Date.now())
+          const messageType = String(message?.type || '').toLowerCase()
+          const eventType = String(message?.event_type || '').toLowerCase()
+          if (messageType === 'telemetry' || eventType === 'drone_telemetry') {
+            const data = message?.data || {}
+            setStatus(previous => ({
+              ...previous,
+              telemetry: data.telemetry ?? message.telemetry ?? previous.telemetry,
+              session: data.session ?? message.session ?? previous.session,
+            }))
+            setLastTelemetryAt(message.timestamp || Date.now())
+          }
+          if (messageType === 'runtime_status') {
+            const data = message?.data || {}
+            setStatus(previous => ({
+              ...previous,
+              runtimeStatus: {
+                ...previous.runtimeStatus,
+                ...data,
+              },
+            }))
+          }
+          if (messageType === 'frame_status') {
+            const data = message?.data || {}
+            if (data?.camera_name) {
+              setCameraFrames(previous => ({
+                ...previous,
+                [data.camera_name]: {
+                  ...previous[data.camera_name],
+                  camera_name: data.camera_name,
+                  frame_available: Boolean(data.frame_available),
+                  frame_index: data.frame_index,
+                  status: data.status,
+                  last_error: data.last_error || null,
+                },
+              }))
+            }
+          }
           setError(null)
         } catch (err) {
           console.warn('Unable to parse drone simulation websocket message', err)
@@ -172,6 +237,8 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
 
   const startSession = useCallback(() => runAction(() => droneSimulationApi.startSession()), [runAction])
   const stopSession = useCallback(() => runAction(() => droneSimulationApi.stopSession()), [runAction])
+  const launchRuntime = useCallback(prefer => runAction(() => droneSimulationApi.launchRuntime(prefer || 'AirSimNH')), [runAction])
+  const runMissionDemo = useCallback(mission => runAction(() => droneSimulationApi.runMissionDemo(mission || 'fixed_camera_handoff_demo')), [runAction])
   const takeoff = useCallback(() => runAction(() => droneSimulationApi.takeoff()), [runAction])
   const land = useCallback(() => runAction(() => droneSimulationApi.land()), [runAction])
   const hover = useCallback(() => runAction(() => droneSimulationApi.hover()), [runAction])
@@ -193,8 +260,11 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
     canControl,
     status,
     telemetry: status.telemetry,
+    runtimeStatus: status.runtimeStatus,
+    cameraSources: status.cameraSources || [],
     flightPath,
     latestFrame,
+    cameraFrames,
     stats,
     wsStatus,
     loading,
@@ -203,8 +273,11 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
     lastTelemetryAt,
     refreshAll,
     refreshFrame,
+    refreshCameraFrame,
     startSession,
     stopSession,
+    launchRuntime,
+    runMissionDemo,
     takeoff,
     land,
     hover,

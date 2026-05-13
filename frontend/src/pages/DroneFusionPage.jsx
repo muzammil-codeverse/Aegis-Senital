@@ -11,6 +11,7 @@ import HandoffSuggestionPanel from '../components/drone-fusion/HandoffSuggestion
 import CommandPageHeader from '../components/layout/CommandPageHeader'
 import CommandSection from '../components/layout/CommandSection'
 import { useDroneFusion } from '../hooks/useDroneFusion'
+import { useDroneMissions } from '../hooks/useDroneMissions'
 
 function countByStatus(items) {
   return items.reduce((acc, item) => {
@@ -24,6 +25,7 @@ export default function DroneFusionPage() {
   const [caseId, setCaseId] = useState('')
   const [activeTab, setActiveTab] = useState('overview')
   const fusion = useDroneFusion({ caseId: caseId || undefined })
+  const missions = useDroneMissions()
 
   const tabs = ['overview', 'observations', 'correlations', 'handoffs', 'timeline', 'map']
   const counts = useMemo(() => countByStatus(fusion.correlations || []), [fusion.correlations])
@@ -47,7 +49,7 @@ export default function DroneFusionPage() {
       <CommandPageHeader
         eyebrow="Drone Operations"
         title="Drone Fusion"
-        description="Cross-source review workspace for simulated drone observations and fixed camera events. All outputs remain candidate observations until operator review."
+        description="Cross-source review workspace with mission context for simulated drone observations and fixed camera events. All outputs remain candidate observations until operator review."
         badges={[
           'Candidate cross-source observation',
           'Simulated drone source badges',
@@ -101,6 +103,7 @@ export default function DroneFusionPage() {
         actions={<FusionSafetyBadge simulated operatorReviewRequired />}
       >
         <div className="button-row">
+          <span className="state-chip">Mission context</span>
           <span className="state-chip">Simulated drone observation</span>
           <span className="state-chip">Possible movement path</span>
           <span className="state-chip">Evidence-backed hypothesis</span>
@@ -176,6 +179,15 @@ export default function DroneFusionPage() {
           correlations={fusion.correlations}
           onReview={fusion.reviewCorrelation}
           onCorrelate={() => fusion.correlate({ case_id: caseId || undefined })}
+          onCorrelateMission={() => fusion.correlate({ case_id: caseId || undefined, source_types: ['drone_simulation', 'fixed_camera'] })}
+          onRunHandoffDemo={() => {
+            const sessionId = missions?.activeSession?.session_id
+            if (!sessionId) {
+              window.location.hash = 'drone-mission-planner'
+              return
+            }
+            fusion.correlate({ case_id: caseId || undefined, source_types: ['drone_simulation', 'fixed_camera'], event_id: sessionId })
+          }}
           loading={fusion.loading}
         />
       ) : null}

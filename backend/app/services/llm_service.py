@@ -63,7 +63,7 @@ def _now_iso() -> str:
 
 
 def _environment_name() -> str:
-    return (os.getenv("APP_ENV") or os.getenv("AEGIS_ENV") or "development").strip().lower()
+    return (os.getenv("AEGIS_ENV") or os.getenv("APP_ENV") or "development").strip().lower()
 
 
 def _is_production() -> bool:

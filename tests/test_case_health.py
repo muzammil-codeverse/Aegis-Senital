@@ -19,7 +19,9 @@ def _config(tmp_path):
     }
 
 
-def test_case_repository_health_reports_jsonl_healthy(tmp_path):
+def test_case_repository_health_reports_jsonl_healthy(tmp_path, monkeypatch):
+    monkeypatch.delenv("AEGIS_ENV", raising=False)
+    monkeypatch.setenv("APP_ENV", "development")
     repo = JsonlCaseRepository(config=_config(tmp_path))
     health = repo.health()
     assert health["storage"] == "jsonl"

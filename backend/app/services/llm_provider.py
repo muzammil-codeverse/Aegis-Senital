@@ -129,6 +129,12 @@ class OpenAIResponsesProvider(LlmProvider):
             raise ValueError(f"Unsupported model kind '{model_kind}'")
         return str(os.getenv(env_name, "").strip() or fallback)
 
+    @staticmethod
+    def _model_supports_reasoning(model_name: str) -> bool:
+        """Return True only for o1/o3/o4-class reasoning models that accept reasoning.effort."""
+        name = model_name.lower()
+        return any(name.startswith(prefix) for prefix in ("o1", "o3", "o4-mini", "o4"))
+
     def generate(self, prompt: str, *, context: dict | None = None) -> str:
         payload = context or {}
         model = str(payload.get("model") or self.resolve_model_name("default"))
@@ -148,13 +154,16 @@ class OpenAIResponsesProvider(LlmProvider):
 
         for attempt in range(self._max_retries + 1):
             try:
-                response = client.responses.create(
-                    model=model,
-                    reasoning={"effort": reasoning_effort},
-                    instructions=instructions,
-                    input=prompt,
-                    max_output_tokens=max_output_tokens,
-                )
+                kwargs: dict[str, Any] = {
+                    "model": model,
+                    "input": prompt,
+                    "max_output_tokens": max_output_tokens,
+                }
+                if instructions:
+                    kwargs["instructions"] = instructions
+                if self._model_supports_reasoning(model):
+                    kwargs["reasoning"] = {"effort": reasoning_effort}
+                response = client.responses.create(**kwargs)
                 text = getattr(response, "output_text", None) or self._extract_output_text(response)
                 if text:
                     return text.strip()

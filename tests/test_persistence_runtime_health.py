@@ -68,6 +68,8 @@ def _minimal_runtime_state(service, monkeypatch):
 
 
 def test_runtime_health_reports_persistence_stores(monkeypatch):
+    monkeypatch.delenv("AEGIS_ENV", raising=False)
+    monkeypatch.setenv("APP_ENV", "development")
     service = RuntimeHealthService(config={"runtime": {}, "services": {}})
     _minimal_runtime_state(service, monkeypatch)
     monkeypatch.setattr(service, "_check_case_management", lambda: {"enabled": True, "storage": "jsonl", "status": "healthy", "last_error": None})

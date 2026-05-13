@@ -1,5 +1,12 @@
 import FusionSafetyBadge from './FusionSafetyBadge'
 
+function missionContextLabel(obs) {
+  const missionId = obs?.metadata?.mission_id
+  const sessionId = obs?.metadata?.session_id
+  if (!missionId && !sessionId) return 'none'
+  return missionId ? `mission:${missionId}` : `session:${sessionId}`
+}
+
 export default function FusionObservationTable({ observations = [] }) {
   if (!observations.length) return <div style={{ color: '#6b7280', padding: 8 }}>No observations.</div>
   return (
@@ -8,6 +15,9 @@ export default function FusionObservationTable({ observations = [] }) {
         <thead>
           <tr style={{ borderBottom: '1px solid #374151', textAlign: 'left' }}>
             <th style={{ padding: '4px 8px' }}>Source</th>
+            <th style={{ padding: '4px 8px' }}>Drone Camera</th>
+            <th style={{ padding: '4px 8px' }}>City Runtime</th>
+            <th style={{ padding: '4px 8px' }}>Mission Context</th>
             <th style={{ padding: '4px 8px' }}>Event Type</th>
             <th style={{ padding: '4px 8px' }}>Timestamp</th>
             <th style={{ padding: '4px 8px' }}>Geo</th>
@@ -21,7 +31,12 @@ export default function FusionObservationTable({ observations = [] }) {
                 <span style={{ color: '#60a5fa' }}>{obs.source_type}</span>
                 <br /><span style={{ fontSize: 11, color: '#6b7280' }}>{obs.source_id}</span>
               </td>
-              <td style={{ padding: '4px 8px' }}>{obs.event_type || '—'}</td>
+              <td style={{ padding: '4px 8px' }}>{obs?.metadata?.drone_camera || obs?.metadata?.camera_name || 'n/a'}</td>
+              <td style={{ padding: '4px 8px' }}>{obs?.metadata?.city_runtime || 'n/a'}</td>
+              <td style={{ padding: '4px 8px' }}>
+                <span className="state-chip">{missionContextLabel(obs)}</span>
+              </td>
+              <td style={{ padding: '4px 8px' }}>{obs.event_type || 'n/a'}</td>
               <td style={{ padding: '4px 8px', fontSize: 11 }}>{obs.timestamp?.slice(0, 19)}</td>
               <td style={{ padding: '4px 8px', fontSize: 11 }}>
                 {obs.geo_missing

@@ -28,6 +28,7 @@ export default function LiveStreamPanel({ camera }) {
 
   const mjpegUrl = webrtc.fallbackUrl || `${API_BASE_URL}${getMjpegStreamUrl(cameraId)}`
   const transportError = webrtc.error || error
+  const isDroneSource = String(camera?.metadata?.source_type || camera?.source_type || '').toLowerCase().includes('drone')
 
   return (
     <section className="panel" style={{ padding: 12 }}>
@@ -52,6 +53,16 @@ export default function LiveStreamPanel({ camera }) {
           <StreamHealthBadge status={health?.status || 'stopped'} />
         </div>
       </div>
+
+      {isDroneSource ? (
+        <div className="button-row" style={{ marginBottom: 10 }}>
+          <span className="state-chip">Simulated source</span>
+          <span className="state-chip">Operator review required</span>
+          <button type="button" className="text-button" onClick={() => { window.location.hash = 'drone-simulation' }}>
+            Open drone operations
+          </button>
+        </div>
+      ) : null}
 
       <div className="button-row" style={{ marginBottom: 10 }}>
         <button type="button" className="text-button" onClick={() => setTransport('webrtc')}>WebRTC</button>

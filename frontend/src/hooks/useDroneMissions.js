@@ -7,10 +7,13 @@ import {
   cancelSession,
   createMission,
   deleteMission,
+  getSessionEvidenceBundle,
   getSessionEvents,
   getSessionReport,
   getSessionStatus,
   getSessionTelemetry,
+  importCityMissionPreset,
+  listCityMissionPresets,
   listMissions,
   pauseSession,
   resumeSession,
@@ -27,6 +30,9 @@ export function useDroneMissions() {
   const [telemetry, setTelemetry] = useState([])
   const [events, setEvents] = useState([])
   const [report, setReport] = useState(null)
+  const [cityPresets, setCityPresets] = useState([])
+  const [cityPresetError, setCityPresetError] = useState(null)
+  const [evidenceBundle, setEvidenceBundle] = useState(null)
   const pollRef = useRef(null)
 
   const fetchMissions = useCallback(async () => {
@@ -46,6 +52,20 @@ export function useDroneMissions() {
     fetchMissions()
   }, [fetchMissions])
 
+  const fetchCityPresets = useCallback(async () => {
+    try {
+      const data = await listCityMissionPresets()
+      setCityPresets(data.items || [])
+      setCityPresetError(null)
+    } catch (err) {
+      setCityPresetError(err.message)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchCityPresets()
+  }, [fetchCityPresets])
+
   const handleCreate = useCallback(async (payload) => {
     const data = await createMission(payload)
     await fetchMissions()
@@ -55,6 +75,12 @@ export function useDroneMissions() {
   const handleDelete = useCallback(async (missionId) => {
     await deleteMission(missionId)
     await fetchMissions()
+  }, [fetchMissions])
+
+  const handleImportCityPreset = useCallback(async (presetName) => {
+    const data = await importCityMissionPreset(presetName)
+    await fetchMissions()
+    return data.item
   }, [fetchMissions])
 
   const handleStart = useCallback(async (missionId) => {
@@ -88,6 +114,13 @@ export function useDroneMissions() {
     await fetchMissions()
   }, [activeSession, fetchMissions])
 
+  const loadEvidenceBundle = useCallback(async (sessionId) => {
+    if (!sessionId) return null
+    const data = await getSessionEvidenceBundle(sessionId)
+    setEvidenceBundle(data.item || null)
+    return data.item || null
+  }, [])
+
   const startPolling = useCallback((sessionId) => {
     stopPolling()
     pollRef.current = setInterval(async () => {
@@ -108,11 +141,14 @@ export function useDroneMissions() {
             const rptData = await getSessionReport(sessionId)
             setReport(rptData.item)
           } catch (_) {}
+          try {
+            await loadEvidenceBundle(sessionId)
+          } catch (_) {}
           await fetchMissions()
         }
       } catch (_) {}
     }, POLL_INTERVAL_MS)
-  }, [fetchMissions])
+  }, [fetchMissions, loadEvidenceBundle])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -131,12 +167,18 @@ export function useDroneMissions() {
     telemetry,
     events,
     report,
+    cityPresets,
+    cityPresetError,
+    evidenceBundle,
     fetchMissions,
+    fetchCityPresets,
     handleCreate,
     handleDelete,
+    handleImportCityPreset,
     handleStart,
     handlePause,
     handleResume,
     handleCancel,
+    loadEvidenceBundle,
   }
 }

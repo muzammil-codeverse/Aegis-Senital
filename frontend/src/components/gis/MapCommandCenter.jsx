@@ -7,8 +7,10 @@ import DronePathLayer from './DronePathLayer'
 import EventMapDrawer from './EventMapDrawer'
 import EventMarkerLayer from './EventMarkerLayer'
 import GeofenceLayer from './GeofenceLayer'
+import HandoffArrowLayer from './HandoffArrowLayer'
 import MapFilterPanel from './MapFilterPanel'
 import MapProviderCanvas from './MapProviderCanvas'
+import MissionRouteLayer from './MissionRouteLayer'
 import NearbyCamerasPanel from './NearbyCamerasPanel'
 import RiskHeatmapLayer from './RiskHeatmapLayer'
 
@@ -48,7 +50,7 @@ export default function MapCommandCenter({
         <div className="panel-header" style={{ padding: '12px 16px' }}>
           <div>
             <p className="eyebrow">GIS</p>
-            <h2>Map operations — camera coverage & risk zones</h2>
+            <h2>Map operations - camera coverage, drone routes, and handoff overlays</h2>
           </div>
         </div>
         <div style={{ height: 480, position: 'relative' }}>
@@ -59,6 +61,12 @@ export default function MapCommandCenter({
                 <GeofenceLayer geofences={layers?.geofences} project={ctx.project} />
                 <CameraFovLayer fovs={layers?.camera_fovs} project={ctx.project} />
                 <DronePathLayer paths={layers?.drone_paths} project={ctx.project} />
+                <MissionRouteLayer
+                  activePaths={layers?.active_mission_paths}
+                  completedPaths={layers?.completed_mission_paths}
+                  project={ctx.project}
+                />
+                <HandoffArrowLayer handoffs={layers?.fixed_camera_handoffs} project={ctx.project} />
                 <EventMarkerLayer
                   markers={layers?.event_markers}
                   project={ctx.project}
@@ -75,7 +83,7 @@ export default function MapCommandCenter({
           </MapProviderCanvas>
         </div>
         <p className="muted" style={{ padding: '8px 16px 12px', fontSize: '0.75rem' }}>
-          Candidate event locations derive from camera geo profiles or authorized upload metadata. Operator review required for enforcement actions.
+          Candidate event locations derive from camera geo profiles, simulated drone telemetry, and mission overlays. Operator review required for enforcement actions.
         </p>
       </section>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -83,6 +91,10 @@ export default function MapCommandCenter({
         <NearbyCamerasPanel latitude={refLat} longitude={refLon} />
         <div className="panel" style={{ padding: 12, fontSize: '0.72rem' }}>
           <p className="eyebrow">Stream status</p>
+          <div className="button-row" style={{ marginBottom: 8 }}>
+            <span className="state-chip">active routes: {(layers?.active_mission_paths || []).length}</span>
+            <span className="state-chip">handoff arrows: {(layers?.fixed_camera_handoffs || []).length}</span>
+          </div>
           <ul style={{ paddingLeft: 16 }}>
             {cameras.slice(0, 8).map(c => (
               <li key={c.camera_id}>

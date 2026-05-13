@@ -14,6 +14,7 @@ from app.models.drone_simulation_models import (
     DroneFlightPathPoint,
     DroneHealthStatus,
     DroneObservationEvent,
+    DroneRuntimeStatus,
     DroneTelemetry,
 )
 from app.models.gis_models import CameraGeoProfile
@@ -23,6 +24,11 @@ from app.repositories.incident_repository import get_incident_repository
 from app.security.config import PROJECT_ROOT
 from app.services.camera_registry import get_camera_registry
 from app.services.drone.cosys_airsim_client import CosysAirSimClient
+from app.services.drone.drone_camera_registry import (
+    SUPPORTED_DRONE_CAMERAS,
+    build_drone_source_id,
+    register_drone_camera_sources,
+)
 from inference.config_runtime import load_runtime_config
 from inference.metrics import metrics
 from inference.monitoring.metrics import get_metrics
@@ -63,23 +69,32 @@ class DroneSimulationService:
         self._config = dict(raw.get("drone_simulation") or {})
         connection = dict(self._config.get("connection") or {})
         stream = dict(self._config.get("stream") or {})
+        drone_stream = dict(self._config.get("drone_stream") or {})
         capture = dict(self._config.get("capture") or {})
         gis = dict(self._config.get("gis") or {})
         self._stream_camera_id = str(stream.get("pseudo_camera_id") or "drone_sim_01")
         self._feed_name = str(stream.get("feed_name") or "Simulated Drone Feed")
         self._default_home = dict(gis.get("default_home") or {})
+        configured_cameras = list(drone_stream.get("cameras") or []) or list(SUPPORTED_DRONE_CAMERAS)
+        normalized_cameras = [str(name).strip().lower() for name in configured_cameras if str(name).strip()]
+        self._allowed_cameras = tuple(dict.fromkeys(normalized_cameras or list(SUPPORTED_DRONE_CAMERAS)))
+        self._default_camera_name = str(connection.get("camera_name") or "front_center").strip().lower()
+        if self._default_camera_name not in self._allowed_cameras:
+            self._allowed_cameras = tuple(dict.fromkeys((self._default_camera_name, *self._allowed_cameras)))
         self._client = CosysAirSimClient(
             host=str(connection.get("host") or "127.0.0.1"),
             port=int(connection.get("port") or 41451),
             vehicle_name=str(connection.get("vehicle_name") or "Drone1"),
-            camera_name=str(connection.get("camera_name") or "front_center"),
+            camera_name=self._default_camera_name,
             timeout_seconds=float(connection.get("timeout_seconds") or 5.0),
             drone_id=self._stream_camera_id,
             default_home=self._default_home,
             image_type=str(capture.get("image_type") or "scene"),
+            allowed_cameras=list(self._allowed_cameras),
         )
         self._last_status: DroneConnectionStatus | None = None
         self._last_frame: DroneCameraFrame | None = None
+        self._latest_frames: dict[str, DroneCameraFrame] = {}
         self._last_telemetry: DroneTelemetry | None = None
         self._last_health: DroneHealthStatus | None = None
         self.ensure_registered()
@@ -92,21 +107,30 @@ class DroneSimulationService:
     def drone_id(self) -> str:
         return self._stream_camera_id
 
+    @property
+    def allowed_cameras(self) -> tuple[str, ...]:
+        return self._allowed_cameras
+
+    def source_id_for_camera(self, camera_name: str) -> str:
+        return build_drone_source_id(self._stream_camera_id, str(camera_name).strip().lower())
+
     def ensure_registered(self) -> None:
         registry = get_camera_registry()
-        camera = registry.get_camera(self._stream_camera_id)
         source_uri = (
             f"cosys_airsim://{self._client.host}:{self._client.port}/"
-            f"{self._client.vehicle_name}/{self._client.camera_name}"
+            f"{self._client.vehicle_name}/{self._default_camera_name}"
         )
         metadata = {
             "source_type": "drone_simulation",
             "simulated": True,
             "provider": "cosys_airsim",
             "vehicle_name": self._client.vehicle_name,
-            "camera_name": self._client.camera_name,
+            "camera_name": self._default_camera_name,
+            "drone_id": self._stream_camera_id,
             "safety_badge": "Simulated drone feed",
+            "operator_review_required": True,
         }
+        camera = registry.get_camera(self._stream_camera_id)
         if camera is None:
             try:
                 registry.register_camera(
@@ -137,6 +161,15 @@ class DroneSimulationService:
                 },
             )
 
+        register_drone_camera_sources(
+            registry,
+            drone_id=self._stream_camera_id,
+            host=self._client.host,
+            port=self._client.port,
+            vehicle_name=self._client.vehicle_name,
+            default_fov=90.0,
+        )
+
     def connect(self) -> DroneConnectionStatus:
         _metric_increment("drone_sim_connection_attempts_total")
         self.ensure_registered()
@@ -144,14 +177,14 @@ class DroneSimulationService:
         self._last_status = status
         if not status.connected:
             _metric_increment("drone_sim_connection_failures_total")
-            get_camera_registry().set_camera_status(self._stream_camera_id, CameraStatus.OFFLINE.value, status.last_error)
+            self._set_camera_status_for_sources(CameraStatus.OFFLINE.value, status.last_error)
         else:
-            get_camera_registry().set_camera_status(self._stream_camera_id, CameraStatus.ONLINE.value)
+            self._set_camera_status_for_sources(CameraStatus.ONLINE.value)
         return status
 
     def disconnect(self) -> None:
         self._client.disconnect()
-        get_camera_registry().set_camera_status(self._stream_camera_id, CameraStatus.OFFLINE.value, "operator stop")
+        self._set_camera_status_for_sources(CameraStatus.OFFLINE.value, "operator stop")
 
     def is_connected(self) -> bool:
         return self._client.is_connected()
@@ -163,16 +196,38 @@ class DroneSimulationService:
             _metric_increment("drone_sim_telemetry_updates_total")
             self._update_registered_geo_profile(telemetry)
             get_camera_registry().mark_frame_seen(self._stream_camera_id, timestamp=time.time())
+            get_camera_registry().mark_frame_seen(self.source_id_for_camera(self._default_camera_name), timestamp=time.time())
         return telemetry
 
-    def get_frame(self) -> DroneCameraFrame:
+    def get_frame(self, camera_name: str | None = None) -> DroneCameraFrame:
         started = time.perf_counter()
-        frame = self._client.get_frame()
+        frame = self._client.get_camera_frame(camera_name or self._default_camera_name)
         self._last_frame = frame
+        self._latest_frames[frame.source_id or build_drone_source_id(self._stream_camera_id, frame.camera_name)] = frame
         if frame.frame_available:
             _metric_increment("drone_sim_frames_captured_total")
+            get_camera_registry().mark_frame_seen(frame.source_id or self._stream_camera_id, timestamp=time.time())
         _metric_set("drone_sim_frame_latency_ms", round((time.perf_counter() - started) * 1000.0, 2))
         return frame
+
+    def get_camera_frame(self, camera_name: str) -> DroneCameraFrame:
+        return self.get_frame(camera_name)
+
+    def get_multi_camera_frames(self, camera_names: list[str]) -> list[DroneCameraFrame]:
+        started = time.perf_counter()
+        telemetry = self.get_telemetry()
+        frames = self._client.get_multi_camera_frames(camera_names, telemetry=telemetry)
+        for frame in frames:
+            source_id = frame.source_id or build_drone_source_id(self._stream_camera_id, frame.camera_name)
+            self._latest_frames[source_id] = frame
+            if frame.frame_available:
+                _metric_increment("drone_sim_frames_captured_total")
+                get_camera_registry().mark_frame_seen(source_id, timestamp=time.time())
+        _metric_set("drone_sim_frame_latency_ms", round((time.perf_counter() - started) * 1000.0, 2))
+        return frames
+
+    def get_runtime_status(self) -> DroneRuntimeStatus:
+        return self._client.get_city_runtime_status()
 
     def takeoff(self) -> DroneCommandResponse:
         response = self._client.takeoff()
@@ -200,7 +255,10 @@ class DroneSimulationService:
         self._last_health = health
         return health
 
-    def latest_frame(self) -> DroneCameraFrame | None:
+    def latest_frame(self, camera_name: str | None = None) -> DroneCameraFrame | None:
+        if camera_name:
+            source_id = build_drone_source_id(self._stream_camera_id, camera_name.strip().lower())
+            return self._latest_frames.get(source_id)
         return self._last_frame
 
     def latest_telemetry(self) -> DroneTelemetry | None:
@@ -247,10 +305,12 @@ class DroneSimulationService:
             safe_label="Simulated aerial observation",
             evidence_refs=list(evidence_refs or []),
             metadata={
-                "camera_name": self._client.camera_name,
+                "camera_name": frame.camera_name if frame is not None else self._client.camera_name,
+                "source_id": frame.source_id if frame is not None else self.source_id_for_camera(self._client.camera_name),
                 "frame_index": getattr(frame, "frame_index", None),
                 "provider": "cosys_airsim",
                 "simulated": True,
+                "city_runtime": frame.city_runtime if frame is not None else telemetry.city_runtime if telemetry is not None else None,
             },
         )
 
@@ -267,9 +327,11 @@ class DroneSimulationService:
                 "safe_label": event.safe_label,
                 "simulated": True,
                 "source_type": "drone_simulation",
+                "drone_camera": metadata.get("camera_name"),
                 "latitude": event.latitude,
                 "longitude": event.longitude,
                 "altitude_meters": event.altitude_meters,
+                "city_runtime": metadata.get("city_runtime"),
                 "telemetry": telemetry.model_dump(mode="json") if telemetry is not None else None,
             }
         )
@@ -277,7 +339,7 @@ class DroneSimulationService:
             incident_id=event.event_id,
             event_id=event.event_id,
             source_type="drone_simulation",
-            camera_id=self._stream_camera_id,
+            camera_id=str(metadata.get("source_id") or self._stream_camera_id),
             session_id=self._stream_camera_id,
             event_type=f"drone_{event.observation_type}",
             severity="medium",
@@ -337,11 +399,37 @@ class DroneSimulationService:
                 },
             },
         )
+        for camera_name in self._allowed_cameras:
+            source_id = self.source_id_for_camera(camera_name)
+            camera = get_camera_registry().get_camera(source_id)
+            merged = {**dict(camera.metadata or {}), "last_telemetry_at": telemetry.timestamp} if camera else {
+                "last_telemetry_at": telemetry.timestamp
+            }
+            get_camera_registry().update_camera(
+                source_id,
+                {
+                    "status": CameraStatus.ONLINE.value,
+                    "location": {
+                        "latitude": profile.latitude,
+                        "longitude": profile.longitude,
+                        "altitude_meters": profile.altitude_meters,
+                        "region": profile.region,
+                    },
+                    "view_direction_degrees": profile.heading_degrees,
+                    "metadata": merged,
+                },
+            )
 
     def _record_command_metrics(self, response: DroneCommandResponse) -> None:
         _metric_increment("drone_sim_commands_total")
         if not response.success:
             _metric_increment("drone_sim_command_failures_total")
+
+    def _set_camera_status_for_sources(self, status: str, reason: str | None = None) -> None:
+        registry = get_camera_registry()
+        registry.set_camera_status(self._stream_camera_id, status, reason)
+        for camera_name in self._allowed_cameras:
+            registry.set_camera_status(self.source_id_for_camera(camera_name), status, reason)
 
 
 _service: DroneSimulationService | None = None

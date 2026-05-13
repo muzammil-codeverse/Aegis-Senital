@@ -23,7 +23,7 @@ load_project_env()
 
 
 def _environment_name() -> str:
-    return (os.getenv("APP_ENV") or os.getenv("AEGIS_ENV") or "dev").strip().lower()
+    return (os.getenv("AEGIS_ENV") or os.getenv("APP_ENV") or "dev").strip().lower()
 
 
 def environment_name() -> str:

@@ -7,9 +7,11 @@ Every lifecycle event is audited.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 
 from app.api.security_dependencies import (
@@ -32,6 +34,7 @@ from app.services.drone.drone_mission_execution_service import (
     MissionExecutionError,
     get_drone_mission_execution_service,
 )
+from app.services.drone.drone_mission_evidence_service import get_drone_mission_evidence_service
 from app.services.drone.drone_mission_service import (
     ValidationError,
     get_drone_mission_service,
@@ -39,6 +42,7 @@ from app.services.drone.drone_mission_service import (
 from app.repositories.drone_mission_repository import get_drone_mission_repository
 
 router = APIRouter(tags=["drone-mission"])
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +95,106 @@ def _require_drone_mission(
 ) -> UserAccount:
     _require_permission(current_user, "drone:control")
     return current_user
+
+
+def _load_city_mission_presets() -> list[dict[str, Any]]:
+    path = PROJECT_ROOT / "configs" / "runtime" / "drone_city_missions.yaml"
+    if not path.exists():
+        return []
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return list((payload.get("drone_city_missions") or {}).get("presets") or [])
+
+
+def _route_points_for_runtime(preset: dict[str, Any], runtime_name: str) -> list[dict[str, Any]]:
+    routes = dict(preset.get("routes") or {})
+    runtime = str(runtime_name or "").strip()
+    if runtime == "CityEnviron":
+        points = list(routes.get("city_route") or [])
+    elif runtime == "Blocks":
+        points = list(routes.get("compact_route") or [])
+    else:
+        points = list(routes.get("neighborhood_route") or [])
+    if points:
+        return points
+    return list(preset.get("waypoints") or [])
+
+
+@router.get("/api/drone-missions/presets/city")
+def list_city_mission_presets(
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del request, current_user
+    items = _load_city_mission_presets()
+    return {"items": items, "count": len(items), "status": "ok"}
+
+
+@router.post("/api/drone-missions/presets/{preset_name}/import")
+def import_city_mission_preset(
+    preset_name: str,
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_mission),
+):
+    svc = get_drone_mission_service()
+    preset = None
+    for item in _load_city_mission_presets():
+        if str(item.get("name")) == preset_name:
+            preset = item
+            break
+    if preset is None:
+        raise HTTPException(status_code=404, detail=f"Preset '{preset_name}' not found")
+    runtime_name = str((request.query_params.get("runtime") or "AirSimNH")).strip()
+    if runtime_name not in {"CityEnviron", "AirSimNH", "Blocks"}:
+        raise HTTPException(status_code=400, detail="runtime must be CityEnviron, AirSimNH, or Blocks")
+    points = _route_points_for_runtime(preset, runtime_name)
+    request_model = DroneMissionCreateRequest.model_validate(
+        {
+            "name": f"City preset: {preset_name}",
+            "description": preset.get("description"),
+            "route_type": "linear",
+            "waypoints": [
+                {
+                    "sequence_index": idx,
+                    "latitude": point.get("lat"),
+                    "longitude": point.get("lon"),
+                    "altitude_meters": point.get("altitude_m", 40),
+                    "velocity_mps": float(point.get("velocity_mps") or 5.0),
+                    "hold_seconds": float(point.get("hold_seconds") or preset.get("dwell_seconds") or 2),
+                    "camera_action": "hover_and_observe",
+                    "metadata": {
+                        "action": point.get("action"),
+                        "simulated_geo": True,
+                        "demo": True,
+                        "simulated": True,
+                        "operator_review_required": True,
+                    },
+                }
+                for idx, point in enumerate(points)
+            ],
+            "metadata": {
+                "city_preset": preset_name,
+                "runtime": runtime_name,
+                "camera": preset.get("camera"),
+                "expected_demo_outcome": preset.get("expected_demo_outcome"),
+                "safe_wording": preset.get("safe_wording"),
+                "runtime_compatibility": preset.get("runtime_compatibility"),
+                "simulated_geo": True,
+                "demo": True,
+                "simulated": True,
+                "operator_review_required": True,
+            },
+        }
+    )
+    mission = svc.create_mission(request_model, created_by=current_user.username)
+    _audit(
+        request,
+        AuditAction.DRONE_MISSION_CREATED,
+        user=current_user,
+        resource_id=mission.mission_id,
+        detail=f"City mission preset imported: {preset_name}",
+        metadata={"preset": preset_name},
+    )
+    return {"item": mission.model_dump(mode="json"), "status": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +508,17 @@ def get_drone_mission_report(
         resource_id=session_id,
     )
     return {"item": report.model_dump(mode="json"), "status": "ok"}
+
+
+@router.get("/api/drone-missions/sessions/{session_id}/evidence-bundle")
+def get_drone_mission_evidence_bundle(
+    session_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del request, current_user
+    bundle = get_drone_mission_evidence_service().build_mission_evidence_bundle(session_id)
+    return {"item": bundle, "status": "ok"}
 
 
 # ---------------------------------------------------------------------------

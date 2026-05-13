@@ -251,6 +251,118 @@ def _fallback_drone_profile(user: UserAccount | None) -> CameraGeoProfile | None
     )
 
 
+def _build_mission_route_layers() -> dict[str, list[dict[str, Any]]]:
+    try:
+        from app.repositories.drone_mission_repository import get_drone_mission_repository
+    except Exception:
+        return {
+            "drone_mission_routes": [],
+            "drone_mission_waypoints": [],
+            "active_mission_paths": [],
+            "completed_mission_paths": [],
+        }
+
+    repo = get_drone_mission_repository()
+    missions = repo.list_missions(limit=200, offset=0)
+    routes: list[dict[str, Any]] = []
+    waypoints: list[dict[str, Any]] = []
+    active_paths: list[dict[str, Any]] = []
+    completed_paths: list[dict[str, Any]] = []
+    for mission in missions:
+        pts = [
+            {
+                "latitude": wp.latitude,
+                "longitude": wp.longitude,
+                "altitude_meters": wp.altitude_meters,
+                "sequence_index": wp.sequence_index,
+                "action": (wp.metadata or {}).get("action"),
+            }
+            for wp in mission.waypoints
+            if wp.latitude is not None and wp.longitude is not None
+        ]
+        route_item = {
+            "mission_id": mission.mission_id,
+            "name": mission.name,
+            "status": mission.status.value,
+            "simulated": mission.simulated,
+            "operator_review_required": mission.operator_review_required,
+            "safe_label": mission.safe_label,
+            "points": pts,
+            "metadata": mission.metadata or {},
+        }
+        routes.append(route_item)
+        waypoints.extend(
+            {
+                "mission_id": mission.mission_id,
+                "name": mission.name,
+                "status": mission.status.value,
+                "waypoint_index": item["sequence_index"],
+                "latitude": item["latitude"],
+                "longitude": item["longitude"],
+                "altitude_meters": item["altitude_meters"],
+                "action": item.get("action"),
+                "simulated": True,
+                "operator_review_required": True,
+            }
+            for item in pts
+        )
+        sessions = repo.list_sessions(mission_id=mission.mission_id, limit=20, offset=0)
+        latest_session = sessions[-1] if sessions else None
+        session_status = str(getattr(latest_session.status, "value", latest_session.status) if latest_session else mission.status.value)
+        if session_status in {"executing", "paused"}:
+            active_paths.append({
+                **route_item,
+                "session_id": latest_session.session_id if latest_session else None,
+                "current_waypoint_index": int(latest_session.current_waypoint_index) if latest_session else 0,
+                "progress_percent": float(latest_session.progress_percent) if latest_session else 0.0,
+            })
+        if session_status in {"completed", "cancelled", "failed"} or mission.status.value in {"completed", "cancelled", "failed"}:
+            completed_paths.append({
+                **route_item,
+                "session_id": latest_session.session_id if latest_session else None,
+                "completion_percent": float(latest_session.progress_percent) if latest_session else 0.0,
+            })
+    return {
+        "drone_mission_routes": routes,
+        "drone_mission_waypoints": waypoints,
+        "active_mission_paths": active_paths,
+        "completed_mission_paths": completed_paths,
+    }
+
+
+def _build_fixed_camera_handoff_layers(cameras: list[CameraGeoProfile]) -> list[dict[str, Any]]:
+    try:
+        from app.repositories.drone_fusion_repository import get_drone_fusion_repository
+    except Exception:
+        return []
+
+    by_camera = {camera.camera_id: camera for camera in cameras}
+    handoffs: list[dict[str, Any]] = []
+    for handoff in get_drone_fusion_repository().list_handoffs(limit=200):
+        from_profile = by_camera.get(handoff.from_source_id)
+        if from_profile is None and str(handoff.from_source_id).startswith("drone_sim_01"):
+            from_profile = by_camera.get("drone_sim_01")
+        to_profile = by_camera.get(handoff.to_source_id)
+        if to_profile is None and str(handoff.to_source_id).startswith("drone_sim_01"):
+            to_profile = by_camera.get("drone_sim_01")
+        if from_profile is None or to_profile is None:
+            continue
+        handoffs.append(
+            {
+                "handoff_id": handoff.handoff_id,
+                "from_source_id": handoff.from_source_id,
+                "to_source_id": handoff.to_source_id,
+                "confidence": float(handoff.confidence),
+                "simulated": True,
+                "operator_review_required": True,
+                "safe_summary": handoff.safe_summary,
+                "from": {"latitude": from_profile.latitude, "longitude": from_profile.longitude},
+                "to": {"latitude": to_profile.latitude, "longitude": to_profile.longitude},
+            }
+        )
+    return handoffs
+
+
 def build_map_layers(
     repo: GisRepository,
     user: UserAccount | None,
@@ -376,6 +488,9 @@ def build_map_layers(
     except Exception:
         stream_status = {}
 
+    mission_layers = _build_mission_route_layers()
+    handoff_layers = _build_fixed_camera_handoff_layers(cameras)
+
     return MapLayerResponse(
         cameras=cameras,
         camera_fovs=fovs,
@@ -384,6 +499,11 @@ def build_map_layers(
         heatmap_cells=heatmap_cells,
         geofences=geofences,
         drone_paths=drone_paths,
+        drone_mission_routes=mission_layers.get("drone_mission_routes", []),
+        drone_mission_waypoints=mission_layers.get("drone_mission_waypoints", []),
+        active_mission_paths=mission_layers.get("active_mission_paths", []),
+        completed_mission_paths=mission_layers.get("completed_mission_paths", []),
+        fixed_camera_handoffs=handoff_layers,
         stream_status_by_camera=stream_status,
         viewport=viewport,
     )

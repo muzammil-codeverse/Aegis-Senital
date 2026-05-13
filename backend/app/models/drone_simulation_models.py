@@ -57,6 +57,7 @@ class DroneTelemetry(DroneBaseModel):
     velocity: DronePose = Field(default_factory=DronePose)
     orientation: DroneOrientation = Field(default_factory=DroneOrientation)
     camera_name: str = "front_center"
+    city_runtime: str | None = None
     status: DroneConnectionState = "disconnected"
     last_error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -69,6 +70,8 @@ class DroneCameraFrame(DroneBaseModel):
     timestamp: str = Field(default_factory=_now_iso)
     frame_index: int = 0
     camera_name: str = "front_center"
+    source_id: str | None = None
+    city_runtime: str | None = None
     width: int = 0
     height: int = 0
     content_type: str = "image/jpeg"
@@ -98,6 +101,7 @@ class DroneSimulationSession(DroneBaseModel):
     allow_multiple: bool = False
     stream_processor_enabled: bool = True
     last_error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DroneFlightPathPoint(DroneBaseModel):
@@ -159,6 +163,18 @@ class DroneHealthStatus(DroneBaseModel):
     frame_available: bool = False
     active_session: bool = False
     checked_at: str = Field(default_factory=_now_iso)
+    last_error: str | None = None
+
+
+class DroneRuntimeStatus(DroneBaseModel):
+    selected_runtime: str | None = None
+    available_runtimes: list[str] = Field(default_factory=list)
+    fallback_used: bool = False
+    endpoint: str | None = None
+    port_open: bool = False
+    connected: bool = False
+    checked_at: str = Field(default_factory=_now_iso)
+    inventory_path: str | None = None
     last_error: str | None = None
 
 

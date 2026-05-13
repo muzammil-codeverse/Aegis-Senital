@@ -1,0 +1,125 @@
+﻿drone_city_missions:
+  simulated_geo: true
+  home_point:
+    latitude: 30.1575
+    longitude: 71.5249
+    altitude_m: 40
+  runtime_compatibility:
+    CityEnviron:
+      waypoint_scale: city
+      preferred: true
+    AirSimNH:
+      waypoint_scale: neighborhood
+      preferred: true
+    Blocks:
+      waypoint_scale: compact
+      fallback_route: true
+  presets:
+    - name: perimeter_patrol
+      description: Simulated perimeter patrol around demo city sectors.
+      simulated_geo: true
+      camera: front_center
+      dwell_seconds: 2
+      safe_wording: Simulated aerial observation
+      expected_demo_outcome: Candidate perimeter movement pattern for operator review.
+      routes:
+        city_route:
+          - { lat: 30.1583, lon: 71.5239, altitude_m: 52, action: observe }
+          - { lat: 30.1590, lon: 71.5250, altitude_m: 52, action: scan }
+          - { lat: 30.1578, lon: 71.5262, altitude_m: 52, action: orbit }
+          - { lat: 30.1569, lon: 71.5246, altitude_m: 52, action: observe }
+        neighborhood_route:
+          - { lat: 30.1579, lon: 71.5241, altitude_m: 45, action: observe }
+          - { lat: 30.1584, lon: 71.5250, altitude_m: 45, action: scan }
+          - { lat: 30.1573, lon: 71.5258, altitude_m: 45, action: orbit }
+          - { lat: 30.1569, lon: 71.5247, altitude_m: 45, action: observe }
+        compact_route:
+          - { lat: 30.1575, lon: 71.5247, altitude_m: 34, action: observe }
+          - { lat: 30.1578, lon: 71.5250, altitude_m: 34, action: scan }
+          - { lat: 30.1574, lon: 71.5253, altitude_m: 34, action: observe }
+
+    - name: incident_response
+      description: Simulated response from launch point toward demo incident marker.
+      simulated_geo: true
+      camera: front_center
+      dwell_seconds: 2
+      safe_wording: Operator review required
+      expected_demo_outcome: Evidence-backed hypothesis from aerial to ground context handoff.
+      routes:
+        city_route:
+          - { lat: 30.1574, lon: 71.5246, altitude_m: 56, action: observe }
+          - { lat: 30.1583, lon: 71.5259, altitude_m: 56, action: scan }
+          - { lat: 30.1589, lon: 71.5268, altitude_m: 50, action: handoff }
+        neighborhood_route:
+          - { lat: 30.1575, lon: 71.5248, altitude_m: 48, action: observe }
+          - { lat: 30.1580, lon: 71.5257, altitude_m: 48, action: scan }
+          - { lat: 30.1583, lon: 71.5263, altitude_m: 44, action: handoff }
+        compact_route:
+          - { lat: 30.1575, lon: 71.5248, altitude_m: 34, action: observe }
+          - { lat: 30.1578, lon: 71.5252, altitude_m: 34, action: scan }
+          - { lat: 30.1579, lon: 71.5254, altitude_m: 34, action: handoff }
+
+    - name: crowd_monitoring
+      description: Simulated hover and scan pattern over a demo crowd corridor.
+      simulated_geo: true
+      camera: downward
+      dwell_seconds: 3
+      safe_wording: Candidate cross-source observation
+      expected_demo_outcome: Possible crowd-density anomaly candidate for operator review.
+      routes:
+        city_route:
+          - { lat: 30.1571, lon: 71.5236, altitude_m: 60, action: scan }
+          - { lat: 30.1581, lon: 71.5238, altitude_m: 60, action: orbit }
+          - { lat: 30.1588, lon: 71.5248, altitude_m: 60, action: observe }
+        neighborhood_route:
+          - { lat: 30.1572, lon: 71.5239, altitude_m: 54, action: scan }
+          - { lat: 30.1579, lon: 71.5241, altitude_m: 54, action: orbit }
+          - { lat: 30.1584, lon: 71.5247, altitude_m: 54, action: observe }
+        compact_route:
+          - { lat: 30.1574, lon: 71.5242, altitude_m: 34, action: scan }
+          - { lat: 30.1577, lon: 71.5244, altitude_m: 34, action: orbit }
+          - { lat: 30.1579, lon: 71.5246, altitude_m: 34, action: observe }
+
+    - name: traffic_corridor_scan
+      description: Simulated linear scan along a demo traffic corridor.
+      simulated_geo: true
+      camera: downward
+      dwell_seconds: 2
+      safe_wording: Possible movement path
+      expected_demo_outcome: Possible movement path and candidate congestion markers.
+      routes:
+        city_route:
+          - { lat: 30.1568, lon: 71.5225, altitude_m: 50, action: scan }
+          - { lat: 30.1576, lon: 71.5237, altitude_m: 50, action: scan }
+          - { lat: 30.1582, lon: 71.5249, altitude_m: 50, action: observe }
+          - { lat: 30.1588, lon: 71.5260, altitude_m: 50, action: handoff }
+        neighborhood_route:
+          - { lat: 30.1569, lon: 71.5229, altitude_m: 46, action: scan }
+          - { lat: 30.1575, lon: 71.5237, altitude_m: 46, action: scan }
+          - { lat: 30.1580, lon: 71.5246, altitude_m: 46, action: observe }
+          - { lat: 30.1584, lon: 71.5256, altitude_m: 46, action: handoff }
+        compact_route:
+          - { lat: 30.1572, lon: 71.5240, altitude_m: 34, action: scan }
+          - { lat: 30.1575, lon: 71.5244, altitude_m: 34, action: observe }
+          - { lat: 30.1578, lon: 71.5248, altitude_m: 34, action: handoff }
+
+    - name: fixed_camera_handoff_demo
+      description: Simulated mission for drone-to-fixed-camera handoff workflow.
+      simulated_geo: true
+      camera: front_center
+      dwell_seconds: 2
+      safe_wording: Evidence-backed hypothesis
+      expected_demo_outcome: Candidate cross-source handoff for operator review.
+      routes:
+        city_route:
+          - { lat: 30.1572, lon: 71.5238, altitude_m: 50, action: observe }
+          - { lat: 30.1580, lon: 71.5249, altitude_m: 50, action: handoff }
+          - { lat: 30.1587, lon: 71.5258, altitude_m: 50, action: observe }
+        neighborhood_route:
+          - { lat: 30.1573, lon: 71.5240, altitude_m: 44, action: observe }
+          - { lat: 30.1579, lon: 71.5248, altitude_m: 44, action: handoff }
+          - { lat: 30.1584, lon: 71.5254, altitude_m: 44, action: observe }
+        compact_route:
+          - { lat: 30.1574, lon: 71.5244, altitude_m: 34, action: observe }
+          - { lat: 30.1577, lon: 71.5247, altitude_m: 34, action: handoff }
+          - { lat: 30.1579, lon: 71.5250, altitude_m: 34, action: observe }

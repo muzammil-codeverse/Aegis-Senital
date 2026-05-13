@@ -49,8 +49,8 @@ export default function MapOperationsPage() {
       <CommandPageHeader
         eyebrow="Geospatial"
         title="Map Operations"
-        description="GIS command surface for cameras, events, routes, geofences, and fusion overlays. Data visibility remains RBAC-scoped."
-        badges={['Layer toggles', 'Operational overlays', 'Degraded provider handling']}
+        description="GIS command surface for cameras, events, simulated drone trail/FOV, mission routes, and fixed-camera handoff overlays. Data visibility remains RBAC-scoped."
+        badges={['Layer toggles', 'Drone mission overlays', 'Operational overlays']}
       />
       {gisMap.error && <p className="error-text">{gisMap.error}</p>}
       <MapCommandCenter

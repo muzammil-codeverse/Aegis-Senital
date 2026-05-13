@@ -6,6 +6,7 @@ from app.models.drone_simulation_models import (
     DroneCommandResponse,
     DroneConnectionStatus,
     DroneHealthStatus,
+    DroneRuntimeStatus,
     DroneSimulationSession,
     DroneTelemetry,
 )
@@ -53,6 +54,7 @@ class _FakeService:
     def __init__(self):
         self.drone_id = "drone_sim_01"
         self.config = {"connection": {"camera_name": "front_center", "vehicle_name": "Drone1"}}
+        self.allowed_cameras = ("front_center", "downward")
 
     def latest_telemetry(self):
         return _telemetry()
@@ -82,6 +84,15 @@ class _FakeService:
 
     def get_frame(self):
         return _frame()
+
+    def get_runtime_status(self):
+        return DroneRuntimeStatus(
+            selected_runtime="Blocks",
+            available_runtimes=["Blocks"],
+            fallback_used=True,
+            connected=True,
+            port_open=True,
+        )
 
 
 class _FakeManager:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 
 from app.api.object_authorization import can_access_camera, ensure_stream_access
 from app.api.security_dependencies import (
@@ -16,10 +19,15 @@ from app.models.security_models import AuditAction, UserAccount
 from app.security.config import get_rbac_config
 from app.security.permissions import has_permission
 from app.services.audit_log_service import get_audit_log_service
+from app.services.drone.drone_camera_registry import SUPPORTED_DRONE_CAMERAS, build_drone_source_id
+from app.repositories.drone_fusion_repository import get_drone_fusion_repository
+from app.repositories.drone_mission_repository import get_drone_mission_repository
+from app.repositories.incident_repository import get_incident_repository
 from app.services.drone.drone_simulation_service import get_drone_simulation_service
 from app.services.drone.drone_simulation_session_manager import get_drone_simulation_session_manager
 
 router = APIRouter(tags=["drone-simulation"])
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _now_iso() -> str:
@@ -60,6 +68,31 @@ def _service_drone_id() -> str:
     return get_drone_simulation_service().drone_id
 
 
+def _service_camera_names(service) -> list[str]:
+    cameras = getattr(service, "allowed_cameras", None)
+    if cameras is None:
+        return ["front_center"]
+    return [str(item).strip().lower() for item in cameras if str(item).strip()]
+
+
+def _sensitive_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+
+
+def _ws_payload(message_type: str, data: dict | None = None) -> dict:
+    return {
+        "type": message_type,
+        "source_type": "drone_simulation",
+        "simulated": True,
+        "operator_review_required": True,
+        "timestamp": _now_iso(),
+        "data": data or {},
+    }
+
+
 def _require_drone_read(
     request: Request,
     current_user: UserAccount = Depends(require_api_permission("drone:read")),
@@ -90,6 +123,13 @@ def get_drone_simulation_status_api(
     telemetry = manager.get_latest_telemetry() or service.latest_telemetry()
     frame = manager.get_latest_frame() or service.latest_frame()
     health = service.get_health(active_session=bool(session.active))
+    runtime_status = service.get_runtime_status() if hasattr(service, "get_runtime_status") else {
+        "selected_runtime": None,
+        "available_runtimes": [],
+        "fallback_used": False,
+        "connected": bool(getattr(health, "simulator_connected", False)),
+        "port_open": False,
+    }
     connection = service.connect() if not session.active and telemetry is None else {
         "drone_id": service.drone_id,
         "provider": "cosys_airsim",
@@ -105,8 +145,20 @@ def get_drone_simulation_status_api(
             "session": session.model_dump(mode="json"),
             "connection": connection.model_dump(mode="json") if hasattr(connection, "model_dump") else connection,
             "health": health.model_dump(mode="json"),
+            "runtime_status": runtime_status.model_dump(mode="json") if hasattr(runtime_status, "model_dump") else runtime_status,
             "telemetry": telemetry.model_dump(mode="json") if telemetry is not None else None,
             "latest_frame_available": bool(frame and frame.frame_available),
+            "camera_sources": [
+                {
+                    "source_id": build_drone_source_id(service.drone_id, camera_name),
+                    "camera_name": camera_name,
+                    "source_type": "drone_simulation",
+                    "drone_id": service.drone_id,
+                    "simulated": True,
+                    "operator_review_required": True,
+                }
+                for camera_name in _service_camera_names(service)
+            ],
         },
         "status": "ok",
     }
@@ -153,7 +205,37 @@ def get_drone_simulation_telemetry_api(
     ensure_stream_access(request, get_current_user_from_request(request), _service_drone_id())
     manager = get_drone_simulation_session_manager()
     telemetry = manager.get_latest_telemetry() or get_drone_simulation_service().get_telemetry()
-    return {"item": telemetry.model_dump(mode="json"), "status": "ok"}
+    return {
+        "item": {
+            **telemetry.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        },
+        "status": "ok",
+    }
+
+
+@router.get("/api/drone-simulation/events")
+def get_drone_simulation_events_api(
+    request: Request,
+    limit: int = 50,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del current_user
+    ensure_stream_access(request, get_current_user_from_request(request), _service_drone_id())
+    repo = get_incident_repository()
+    items = repo.list_events({"source_type": "drone_simulation", "limit": max(1, min(int(limit), 250))})
+    payload = [
+        {
+            **item.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        }
+        for item in items
+    ]
+    return {"items": payload, "count": len(payload), "status": "ok"}
 
 
 @router.get("/api/drone-simulation/flight-path")
@@ -246,7 +328,218 @@ def get_drone_simulation_frame_api(
         detail="Latest simulated drone frame accessed",
         metadata={"frame_index": frame.frame_index, "frame_available": frame.frame_available},
     )
-    return {"item": frame.model_dump(mode="json"), "status": "ok"}
+    return {
+        "item": {
+            **frame.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        },
+        "status": "ok",
+    }
+
+
+@router.get("/api/drone-simulation/runtime-status")
+def get_drone_runtime_status_api(
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del current_user
+    ensure_stream_access(request, get_current_user_from_request(request), _service_drone_id())
+    status = get_drone_simulation_service().get_runtime_status()
+    return {"item": status.model_dump(mode="json"), "status": "ok"}
+
+
+@router.get("/api/drone-simulation/runtime")
+def get_drone_runtime_api(
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del request, current_user
+    status = get_drone_simulation_service().get_runtime_status()
+    return {
+        "item": {
+            **status.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        },
+        "status": "ok",
+    }
+
+
+@router.post("/api/drone-simulation/runtime/launch")
+def launch_drone_runtime_api(
+    body: dict | None,
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_control),
+):
+    del current_user
+    prefer = str((body or {}).get("prefer") or "AirSimNH")
+    if prefer not in {"CityEnviron", "AirSimNH", "Blocks"}:
+        raise HTTPException(status_code=400, detail="prefer must be CityEnviron, AirSimNH, or Blocks")
+    command = [
+        sys.executable,
+        "scripts/launch_city_drone_runtime.py",
+        "--prefer",
+        prefer,
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    status = get_drone_simulation_service().get_runtime_status()
+    return {
+        "item": {
+            "prefer": prefer,
+            "returncode": completed.returncode,
+            "output_tail": "\n".join(completed.stdout.splitlines()[-10:]),
+            "runtime_status": status.model_dump(mode="json"),
+        },
+        "status": "ok" if completed.returncode == 0 else "failed",
+    }
+
+
+@router.post("/api/drone-simulation/stream/start")
+def start_drone_stream_api(
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_control),
+):
+    manager = get_drone_simulation_session_manager()
+    session = manager.start_session(current_user)
+    _audit(
+        request,
+        AuditAction.DRONE_SIMULATION_STARTED,
+        user=get_current_user_from_request(request),
+        resource_id=session.session_id,
+        detail="Simulated drone stream started",
+    )
+    return {
+        "item": {
+            "session": session.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        },
+        "status": "ok",
+    }
+
+
+@router.post("/api/drone-simulation/stream/stop")
+def stop_drone_stream_api(
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_control),
+):
+    manager = get_drone_simulation_session_manager()
+    session = manager.stop_session(current_user)
+    _audit(
+        request,
+        AuditAction.DRONE_SIMULATION_STOPPED,
+        user=get_current_user_from_request(request),
+        resource_id=session.session_id,
+        detail="Simulated drone stream stopped",
+    )
+    return {
+        "item": {
+            "session": session.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        },
+        "status": "ok",
+    }
+
+
+@router.post("/api/drone-simulation/missions/run-demo")
+def run_drone_mission_demo_api(
+    body: dict | None,
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_control),
+):
+    del current_user
+    mission = str((body or {}).get("mission") or "fixed_camera_handoff_demo")
+    command = [
+        sys.executable,
+        "scripts/run_city_drone_mission_demo.py",
+        "--mission",
+        mission,
+        "--device",
+        "cuda",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=str(PROJECT_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        check=False,
+    )
+    return {
+        "item": {
+            "mission": mission,
+            "returncode": completed.returncode,
+            "output_tail": "\n".join(completed.stdout.splitlines()[-12:]),
+        },
+        "status": "ok" if completed.returncode == 0 else "failed",
+    }
+
+
+@router.get("/api/drone-simulation/cameras")
+def list_drone_simulation_cameras_api(
+    request: Request,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del current_user
+    service = get_drone_simulation_service()
+    ensure_stream_access(request, get_current_user_from_request(request), _service_drone_id())
+    items = [
+        {
+            "source_id": build_drone_source_id(service.drone_id, camera_name),
+            "camera_name": camera_name,
+            "source_type": "drone_simulation",
+            "drone_id": service.drone_id,
+            "simulated": True,
+            "operator_review_required": True,
+        }
+        for camera_name in _service_camera_names(service)
+    ]
+    return {"items": items, "count": len(items), "status": "ok"}
+
+
+@router.get("/api/drone-simulation/cameras/{camera_name}/latest-frame")
+def get_drone_camera_latest_frame_api(
+    camera_name: str,
+    request: Request,
+    response: Response,
+    current_user: UserAccount = Depends(_require_drone_read),
+):
+    del current_user
+    normalized_name = str(camera_name).strip().lower()
+    if normalized_name not in SUPPORTED_DRONE_CAMERAS:
+        raise HTTPException(status_code=404, detail=f"Unsupported drone camera '{camera_name}'")
+    ensure_stream_access(request, get_current_user_from_request(request), _service_drone_id())
+    source_id = build_drone_source_id(_service_drone_id(), normalized_name)
+    ensure_stream_access(request, get_current_user_from_request(request), source_id)
+    manager = get_drone_simulation_session_manager()
+    service = get_drone_simulation_service()
+    frame = manager.get_latest_frame()
+    if frame is None or frame.camera_name != normalized_name:
+        frame = service.latest_frame(normalized_name) or service.get_camera_frame(normalized_name)
+    for key, value in _sensitive_headers().items():
+        response.headers[key] = value
+    return {
+        "item": {
+            **frame.model_dump(mode="json"),
+            "source_type": "drone_simulation",
+            "simulated": True,
+            "operator_review_required": True,
+        },
+        "status": "ok",
+    }
 
 
 @router.websocket("/ws/drone-simulation")
@@ -263,18 +556,85 @@ async def drone_simulation_ws(websocket: WebSocket):
         return
     await websocket.accept()
     manager = get_drone_simulation_session_manager()
+    mission_repo = get_drone_mission_repository()
+    fusion_repo = get_drone_fusion_repository()
+    incident_repo = get_incident_repository()
     try:
         while True:
             telemetry = manager.get_latest_telemetry() or service.latest_telemetry() or service.get_telemetry()
-            payload = {
-                "event_type": "drone_telemetry",
-                "drone_id": service.drone_id,
-                "simulated": True,
-                "telemetry": telemetry.model_dump(mode="json") if telemetry is not None else None,
-                "session": manager.get_session_status().model_dump(mode="json"),
-                "timestamp": _now_iso(),
-            }
-            await websocket.send_json(payload)
+            frame = manager.get_latest_frame() or service.latest_frame() or service.get_frame()
+            runtime = service.get_runtime_status()
+            mission_sessions = mission_repo.list_sessions(limit=1, offset=0)
+            latest_mission = mission_sessions[-1].model_dump(mode="json") if mission_sessions else None
+            latest_events = incident_repo.list_events({"source_type": "drone_simulation", "limit": 1})
+            latest_event = latest_events[-1].model_dump(mode="json") if latest_events else None
+            pending_fusion = fusion_repo.list_correlations(review_status="pending", limit=200)
+
+            telemetry_payload = _ws_payload(
+                "telemetry",
+                {
+                    "drone_id": service.drone_id,
+                    "telemetry": telemetry.model_dump(mode="json") if telemetry is not None else None,
+                    "session": manager.get_session_status().model_dump(mode="json"),
+                },
+            )
+            telemetry_payload["event_type"] = "drone_telemetry"
+            await websocket.send_json(telemetry_payload)
+
+            await websocket.send_json(
+                {
+                    **_ws_payload(
+                        "frame_status",
+                        {
+                            "camera_name": frame.camera_name if frame is not None else "front_center",
+                            "frame_available": bool(frame and frame.frame_available),
+                            "frame_index": frame.frame_index if frame is not None else None,
+                            "status": frame.status if frame is not None else "disconnected",
+                            "last_error": frame.last_error if frame is not None else None,
+                        },
+                    ),
+                    "event_type": "drone_frame_status",
+                }
+            )
+            await websocket.send_json(
+                {
+                    **_ws_payload(
+                        "runtime_status",
+                        {
+                            "selected_runtime": runtime.selected_runtime,
+                            "available_runtimes": runtime.available_runtimes,
+                            "fallback_used": runtime.fallback_used,
+                            "connected": runtime.connected,
+                            "port_open": runtime.port_open,
+                        },
+                    ),
+                    "event_type": "drone_runtime_status",
+                }
+            )
+            await websocket.send_json(
+                {
+                    **_ws_payload("mission_status", latest_mission or {"status": "idle"}),
+                    "event_type": "drone_mission_status",
+                }
+            )
+            await websocket.send_json(
+                {
+                    **_ws_payload("detection_event", latest_event or {"status": "no_event"}),
+                    "event_type": "drone_detection_event",
+                }
+            )
+            await websocket.send_json(
+                {
+                    **_ws_payload(
+                        "fusion_update",
+                        {
+                            "pending_candidates": len(pending_fusion),
+                            "latest_correlation_id": pending_fusion[-1].correlation_id if pending_fusion else None,
+                        },
+                    ),
+                    "event_type": "drone_fusion_update",
+                }
+            )
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         _audit(
