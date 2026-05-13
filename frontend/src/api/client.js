@@ -66,7 +66,7 @@ const UNAUTHORIZED_EVENT_COOLDOWN_MS = 2500
 export function classifyApiError(error) {
   const status = error?.response?.status
   if (!status) {
-    return { kind: 'network', message: 'Backend unavailable. Check that the API is running.' }
+    return { kind: 'network', message: 'Runtime data temporarily unavailable.' }
   }
   if (status === 401) return { kind: 'unauthenticated', message: 'Please sign in to continue.' }
   if (status === 403) return { kind: 'forbidden', message: 'You do not have permission for this action.' }
@@ -160,6 +160,6 @@ export function normalizeError(error) {
   if (error instanceof ApiError) {
     return error.message
   }
-  if (!error?.status) return 'Backend unavailable. Check that the API is running.'
+  if (!error?.status) return 'Runtime data temporarily unavailable.'
   return error?.message || 'Request failed'
 }

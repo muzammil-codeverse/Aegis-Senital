@@ -117,4 +117,9 @@ describe('RuntimeStatusStrip', () => {
       render(<RuntimeStatusStrip runtimeStatus={makeRuntimeStatus([])} />)
     }).not.toThrow()
   })
+
+  it('shows compact waiting message while loading runtime status', () => {
+    render(<RuntimeStatusStrip runtimeStatus={{ ...makeRuntimeStatus([]), loading: true }} compact />)
+    expect(screen.getByText('Signed in, waiting for runtime status')).toBeInTheDocument()
+  })
 })

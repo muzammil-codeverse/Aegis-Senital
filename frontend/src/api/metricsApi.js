@@ -13,10 +13,19 @@ export async function getCoreMetrics() {
  */
 export async function getSystemHealth() {
   try {
-    const payload = await request({ url: '/api/system/health', method: 'GET' })
+    const payload = await request({ url: '/api/system/health', method: 'GET', timeout: 20000 })
     return payload && typeof payload === 'object' ? payload : { status: 'unknown', checks: {} }
   } catch (e) {
     return { status: 'error', checks: {}, error: e?.message || 'Health endpoint unavailable' }
+  }
+}
+
+export async function getPublicHealth() {
+  try {
+    const payload = await request({ url: '/health', method: 'GET', timeout: 8000 })
+    return payload && typeof payload === 'object' ? payload : { status: 'unknown' }
+  } catch (e) {
+    return { status: 'error', error: e?.message || 'Runtime health temporarily unavailable' }
   }
 }
 

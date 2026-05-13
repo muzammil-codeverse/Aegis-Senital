@@ -5,10 +5,11 @@ import { droneSimulationApi } from '../api/droneSimulationApi'
 import { getGisConfig } from '../api/gisApi'
 import { investigationApi } from '../api/investigationApi'
 import { getLlmStatus } from '../api/llmApi'
-import { getSystemHealth } from '../api/metricsApi'
+import { getPublicHealth, getSystemHealth } from '../api/metricsApi'
 import { fetchGovernanceLimitations, fetchPromotionPolicy } from '../api/modelGovernanceApi'
 import { normalizeRuntimeTone } from '../styles/commandCenterTheme'
 import { useAuth } from './useAuth'
+import { API_BASE_URL } from '../config'
 
 function section(key, label, status, summary, extra = {}) {
   return {
@@ -21,7 +22,7 @@ function section(key, label, status, summary, extra = {}) {
 }
 
 function sectionFromHealthCheck(key, label, check) {
-  if (!check) return section(key, label, 'unknown', 'No health data reported')
+  if (!check) return null
   return section(key, label, check.status || check.state || 'unknown', check.detail || check.message || label)
 }
 
@@ -34,12 +35,23 @@ function statusWeight(status) {
 
 function sectionFromApiError(key, label, error, networkAsCritical = false) {
   const status = error?.status
-  if (status === 401) return section(key, label, 'degraded', 'Please sign in to view this subsystem')
-  if (status === 403) return section(key, label, 'degraded', 'Access denied for this subsystem')
+  if (status === 401) return section(key, label, 'unknown', 'Sign in to view this subsystem')
+  if (status === 403) return section(key, label, 'unknown', 'Permission denied for this subsystem')
   if (status === 404) return section(key, label, 'degraded', 'Subsystem endpoint unavailable in this build')
   if (status === 503) return section(key, label, 'degraded', 'Subsystem reported degraded readiness')
-  if (!status) return section(key, label, networkAsCritical ? 'critical' : 'degraded', 'Backend unavailable')
+  if (!status) return section(key, label, networkAsCritical ? 'critical' : 'unknown', 'No recent data')
   return section(key, label, 'critical', error?.message || `${label} unavailable`)
+}
+
+function parseSystemHealth(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { status: 'unknown', checks: {}, detail: 'No recent data' }
+  }
+  const item = payload.item && typeof payload.item === 'object' ? payload.item : payload
+  const checks = item.checks && typeof item.checks === 'object' ? item.checks : {}
+  const status = item.status || item.overall_status || item.health || 'unknown'
+  const detail = item.detail || item.message || item.error || ''
+  return { ...item, status, checks, detail }
 }
 
 export function useRuntimeStatus({ pollMs = 20000 } = {}) {
@@ -67,10 +79,36 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
     }
     const sections = []
     try {
-      const system = await getSystemHealth()
-      sections.push(section('system', 'Backend', system.status || 'unknown', system.error || 'Backend health'))
-      sections.push(sectionFromHealthCheck('database', 'Database', system.checks?.database))
-      sections.push(sectionFromHealthCheck('redis', 'Redis', system.checks?.redis))
+      if (import.meta.env.DEV && !window.__AEGIS_API_BASE_LOGGED__) {
+        window.__AEGIS_API_BASE_LOGGED__ = true
+        // Dev-only diagnostic to help spot base URL drift during demo setup.
+        // eslint-disable-next-line no-console
+        console.info(`[Aegis] API base URL: ${API_BASE_URL}`)
+      }
+      const system = parseSystemHealth(await getSystemHealth())
+      if (system?.status === 'error') {
+        if (system?.error && /sign in|authentication required|invalid or expired token|permission/i.test(String(system.error))) {
+          sections.push(section('system', 'Backend', 'unknown', 'Sign in to view protected runtime health'))
+        } else {
+          const publicHealth = await getPublicHealth()
+          if (publicHealth?.status === 'ok') {
+            sections.push(section(
+              'system',
+              'Backend',
+              'degraded',
+              'Runtime health temporarily unavailable',
+            ))
+          } else {
+            sections.push(section('system', 'Backend', 'critical', 'Backend unavailable'))
+          }
+        }
+      } else {
+        sections.push(section('system', 'Backend', system.status || 'unknown', system.detail || 'Backend health'))
+      }
+      const databaseCheck = sectionFromHealthCheck('database', 'Database', system.checks?.database)
+      if (databaseCheck) sections.push(databaseCheck)
+      const redisCheck = sectionFromHealthCheck('redis', 'Redis', system.checks?.redis)
+      if (redisCheck) sections.push(redisCheck)
 
       if (auth.hasPermission('gis:read')) {
         try {
@@ -101,8 +139,8 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
           sections.push(section(
             'droneMission',
             'Drone Mission',
-            active.length > 0 ? 'ok' : 'degraded',
-            active.length > 0 ? `${active.length} simulated mission(s) active or staged` : 'No active simulated mission session exposed',
+            active.length > 0 ? 'ok' : 'unknown',
+            active.length > 0 ? `${active.length} simulated mission(s) active or staged` : 'No active mission',
             { count: active.length },
           ))
         } catch (error) {
