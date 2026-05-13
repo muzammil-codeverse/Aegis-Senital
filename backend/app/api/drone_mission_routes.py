@@ -557,5 +557,5 @@ async def drone_mission_telemetry_ws(session_id: str, websocket: WebSocket):
             if status.get("status") in ("completed", "cancelled", "failed", "not_found"):
                 break
             await asyncio.sleep(1.0)
-    except WebSocketDisconnect:
+    except BaseException:
         pass

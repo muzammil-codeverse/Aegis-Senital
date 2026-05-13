@@ -411,7 +411,7 @@ async def ws_drone_fusion(websocket: WebSocket) -> None:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
             except asyncio.TimeoutError:
                 await websocket.send_text(json.dumps({"event_type": "ping"}))
-            except WebSocketDisconnect:
+            except (WebSocketDisconnect, BaseException):
                 break
     finally:
         async with _ws_lock:

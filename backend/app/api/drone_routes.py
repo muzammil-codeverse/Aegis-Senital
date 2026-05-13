@@ -636,7 +636,7 @@ async def drone_simulation_ws(websocket: WebSocket):
                 }
             )
             await asyncio.sleep(1.0)
-    except WebSocketDisconnect:
+    except BaseException:
         _audit(
             websocket,
             AuditAction.WEBSOCKET_DISCONNECTED,

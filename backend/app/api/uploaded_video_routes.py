@@ -276,5 +276,5 @@ async def uploaded_video_progress_ws(websocket: WebSocket, session_id: str):
             if status.status in {"completed", "failed", "cancelled"} and not status.active:
                 break
             await asyncio.sleep(1.0)
-    except WebSocketDisconnect:
+    except BaseException:
         return

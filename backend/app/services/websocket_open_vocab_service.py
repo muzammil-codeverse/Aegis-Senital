@@ -114,7 +114,7 @@ class WebSocketOpenVocabService:
 
         try:
             await self._send_loop(client)
-        except WebSocketDisconnect:
+        except BaseException:
             logger.info("Open-vocab WebSocket client disconnected")
         finally:
             with self._lock:

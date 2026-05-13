@@ -67,7 +67,7 @@ class WebSocketAlertService:
             return
         try:
             await self._send_loop(client)
-        except WebSocketDisconnect:
+        except BaseException:
             logger.info("WebSocket alert client disconnected")
         finally:
             with self._lock:
