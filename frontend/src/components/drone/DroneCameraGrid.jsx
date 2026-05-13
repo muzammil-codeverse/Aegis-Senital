@@ -17,7 +17,7 @@ function FrameTile({ cameraName, frame, selected, onSelect, onRefresh }) {
           />
         ) : (
           <div style={{ color: '#94a3b8', fontSize: 12, padding: 12 }}>
-            Disconnected or degraded simulated drone feed. Operator review required.
+            No frame yet. AirSimNH connected state or camera feed may still be warming up.
           </div>
         )}
       </div>

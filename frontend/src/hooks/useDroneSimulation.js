@@ -1,12 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { droneSimulationApi } from '../api/droneSimulationApi'
-import { normalizeError } from '../api/client'
 import { authUsesCookieMode, buildWebSocketProtocols, buildWebSocketUrl } from '../config'
 import { useAuth } from './useAuth'
 
 const DEFAULT_POLL_MS = 4000
 const MAX_BACKOFF_MS = 30000
 const MAX_RECONNECT_ATTEMPTS = 8
+
+function formatScopedError(prefix, err) {
+  if (!err) return `${prefix}: unknown error`
+  const status = err?.status ? `${err.status}` : null
+  const kind = err?.kind || err?.details?.kind || null
+  const detail = err?.message || 'request failed'
+  if (status === '403') return `${prefix}: 403 permission denied`
+  if (status === '404') return `${prefix}: endpoint not found`
+  if (status) return `${prefix}: ${status} ${detail}`
+  if (kind === 'network') return `${prefix}: backend unreachable`
+  return `${prefix}: ${detail}`
+}
 
 function mergeStatusPayload(item, setState) {
   setState(previous => ({
@@ -40,6 +51,8 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
   const [error, setError] = useState(null)
   const [actionError, setActionError] = useState(null)
   const [wsStatus, setWsStatus] = useState(canRead ? 'connecting' : 'disabled')
+  const [uiState, setUiState] = useState('not_started')
+  const [statusDetail, setStatusDetail] = useState('Signed in, waiting for runtime status.')
   const [lastTelemetryAt, setLastTelemetryAt] = useState(null)
   const reconnectRef = useRef(0)
   const reconnectTimerRef = useRef(null)
@@ -72,9 +85,26 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
         setCameraFrames(previous => ({ ...previous, [frameResponse.item.camera_name]: frameResponse.item }))
       }
       setLastTelemetryAt(statusResponse.item?.telemetry?.timestamp || Date.now())
+      const nextSession = statusResponse?.item?.session || {}
+      const nextHealth = statusResponse?.item?.health || {}
+      const nextRuntime = statusResponse?.item?.runtime_status || runtimeResponse?.item || {}
+      if (nextSession?.active) {
+        setUiState('running')
+        setStatusDetail('Simulated drone session is running.')
+      } else if (nextRuntime?.connected) {
+        setUiState(nextHealth?.status === 'degraded' ? 'degraded' : 'not_started')
+        setStatusDetail(nextHealth?.status === 'degraded'
+          ? (nextHealth?.detail || 'AirSimNH connected with degraded runtime checks.')
+          : 'Ready to start simulated drone session.')
+      } else {
+        setUiState('disconnected')
+        setStatusDetail('Drone runtime disconnected.')
+      }
       setError(null)
     } catch (err) {
-      setError(normalizeError(err))
+      setUiState('error')
+      setStatusDetail(formatScopedError('Drone status load failed', err))
+      setError(formatScopedError('Drone status load failed', err))
     } finally {
       setLoading(false)
     }
@@ -89,7 +119,7 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
         setCameraFrames(previous => ({ ...previous, [response.item.camera_name]: response.item }))
       }
     } catch (err) {
-      setError(normalizeError(err))
+      setError(formatScopedError('Latest frame fetch failed', err))
     }
   }, [canRead])
 
@@ -102,7 +132,7 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
       }
       return response.item || null
     } catch (err) {
-      setError(normalizeError(err))
+      setError(formatScopedError(`Camera ${cameraName} frame fetch failed`, err))
       return null
     }
   }, [canRead])
@@ -139,6 +169,12 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
       socket.onopen = () => {
         reconnectRef.current = 0
         setWsStatus('open')
+        setUiState(previous => (previous === 'disconnected' ? 'degraded' : previous))
+        setStatusDetail(previous => (
+          previous?.includes('Ready to start')
+            ? previous
+            : 'Live websocket connected.'
+        ))
       }
 
       socket.onmessage = event => {
@@ -182,6 +218,9 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
             }
           }
           setError(null)
+          if (messageType === 'telemetry' && !status?.session?.active) {
+            setUiState('running')
+          }
         } catch (err) {
           console.warn('Unable to parse drone simulation websocket message', err)
         }
@@ -189,6 +228,7 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
 
       socket.onerror = () => {
         setWsStatus('error')
+        setStatusDetail('WebSocket error. Live polling active.')
       }
 
       socket.onclose = event => {
@@ -198,10 +238,12 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
         }
         if (event.code === 1008 || event.code === 4401 || event.code === 4403) {
           setWsStatus('auth_error')
+          setStatusDetail('Drone websocket authentication required. Live polling active.')
           return
         }
         if (reconnectRef.current >= MAX_RECONNECT_ATTEMPTS) {
           setWsStatus('degraded')
+          setStatusDetail('WebSocket unavailable. Live polling active.')
           return
         }
         reconnectRef.current += 1
@@ -224,11 +266,14 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
     async action => {
       setActionError(null)
       try {
+        setUiState('starting')
         const response = await action()
         await refreshAll()
+        setUiState('running')
         return response.item || null
       } catch (err) {
-        setActionError(normalizeError(err))
+        setUiState('error')
+        setActionError(formatScopedError('Session action failed', err))
         return null
       }
     },
@@ -267,6 +312,8 @@ export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } 
     cameraFrames,
     stats,
     wsStatus,
+    uiState,
+    statusDetail,
     loading,
     error,
     actionError,

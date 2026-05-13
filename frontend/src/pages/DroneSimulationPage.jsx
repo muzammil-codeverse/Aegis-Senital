@@ -41,6 +41,10 @@ export default function DroneSimulationPage() {
 
       <DroneSafetyBadge />
 
+      <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+        {drone.statusDetail}
+      </div>
+
       {drone.error ? (
         <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{drone.error}</div>
       ) : null}
@@ -77,10 +81,11 @@ export default function DroneSimulationPage() {
 
       <div className="grid gap-4 xl:grid-cols-[320px,1fr]">
         <div className="space-y-4">
-          <DroneStatusPanel status={drone.status} stats={drone.stats} wsStatus={drone.wsStatus} />
+          <DroneStatusPanel status={drone.status} stats={drone.stats} wsStatus={drone.wsStatus} uiState={drone.uiState} />
           <DroneControlPanel
             canControl={drone.canControl}
             status={drone.status}
+            uiState={drone.uiState}
             actionError={drone.actionError}
             onStart={drone.startSession}
             onStop={drone.stopSession}

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import DroneCameraGrid from './DroneCameraGrid'
 
 describe('DroneCameraGrid', () => {
-  it('renders camera cards and degraded empty-state wording', async () => {
+  it('renders camera cards and scoped no-frame wording', async () => {
     const onSelect = vi.fn()
     const onRefresh = vi.fn()
     render(
@@ -17,7 +17,7 @@ describe('DroneCameraGrid', () => {
       />,
     )
     expect(screen.getByText(/front center/i)).toBeInTheDocument()
-    expect(screen.getByText(/operator review required/i)).toBeInTheDocument()
+    expect(screen.getByText(/No frame yet/i)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /select/i }))
     expect(onSelect).toHaveBeenCalled()
   })

@@ -17,7 +17,6 @@ export async function uploadUploadedVideo(file, options = {}) {
     url: '/api/uploaded-videos',
     method: 'post',
     data: formData,
-    headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
 

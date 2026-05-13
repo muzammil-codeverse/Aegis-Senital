@@ -7,7 +7,7 @@ function MetricRow({ label, value }) {
   )
 }
 
-export default function DroneStatusPanel({ status, stats, wsStatus }) {
+export default function DroneStatusPanel({ status, stats, wsStatus, uiState }) {
   const session = status?.session || {}
   const connection = status?.connection || {}
   const health = status?.health || {}
@@ -26,6 +26,7 @@ export default function DroneStatusPanel({ status, stats, wsStatus }) {
       <div className="space-y-1">
         <MetricRow label="Connection" value={connection.status || 'unknown'} />
         <MetricRow label="Health" value={health.status || 'unknown'} />
+        <MetricRow label="Runtime state" value={uiState || 'unknown'} />
         <MetricRow label="Session" value={session.status || 'idle'} />
         <MetricRow label="Active session" value={session.active ? 'yes' : 'no'} />
         <MetricRow label="Frames processed" value={stats.framesProcessed} />

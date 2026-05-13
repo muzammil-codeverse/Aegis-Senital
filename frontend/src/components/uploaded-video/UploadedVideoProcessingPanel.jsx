@@ -2,6 +2,7 @@ export default function UploadedVideoProcessingPanel({
   session,
   status,
   connectionStatus,
+  error,
   busy = false,
   onStart,
   onCancel,
@@ -74,8 +75,9 @@ export default function UploadedVideoProcessingPanel({
         >
           Cancel
         </button>
-        <span className="muted">{session.hash_sha256?.slice(0, 20)}…</span>
+        <span className="muted">{session.hash_sha256?.slice(0, 20)}...</span>
       </div>
+      {error ? <p className="error-text">Processing status error: {error}</p> : null}
     </section>
   )
 }

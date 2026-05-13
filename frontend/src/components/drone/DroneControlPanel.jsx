@@ -3,6 +3,7 @@ import { useState } from 'react'
 export default function DroneControlPanel({
   canControl,
   status,
+  uiState,
   actionError,
   onStart,
   onStop,
@@ -25,10 +26,10 @@ export default function DroneControlPanel({
       ) : (
         <>
           <div className="mb-3 flex flex-wrap gap-2">
-            <button type="button" className="rounded bg-slate-900 px-3 py-2 text-xs text-white" onClick={onStart}>
-              Start session
+            <button type="button" className="rounded bg-slate-900 px-3 py-2 text-xs text-white" onClick={onStart} disabled={uiState === 'starting' || active}>
+              {uiState === 'starting' ? 'Starting…' : 'Start session'}
             </button>
-            <button type="button" className="rounded border px-3 py-2 text-xs text-slate-700" onClick={onStop}>
+            <button type="button" className="rounded border px-3 py-2 text-xs text-slate-700" onClick={onStop} disabled={uiState === 'stopping' || !active}>
               Stop session
             </button>
             <button type="button" className="rounded border px-3 py-2 text-xs text-slate-700" onClick={onTakeoff} disabled={!active}>

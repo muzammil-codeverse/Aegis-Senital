@@ -9,8 +9,17 @@ import {
   listUploadedVideoSessions,
   startUploadedVideoProcessing,
   uploadUploadedVideo,
-  uploadedVideoError,
 } from '../api/uploadedVideoApi'
+
+function scopedUploadedVideoError(prefix, err) {
+  const status = err?.status
+  const message = err?.message || 'request failed'
+  if (status === 401) return `${prefix}: auth required`
+  if (status === 403) return `${prefix}: 403 permission denied`
+  if (status === 404) return `${prefix}: endpoint not found`
+  if (status) return `${prefix}: ${status} ${message}`
+  return `${prefix}: ${message}`
+}
 
 export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
   const [sessions, setSessions] = useState([])
@@ -34,7 +43,7 @@ export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
       setError(null)
       return response.items
     } catch (err) {
-      setError(uploadedVideoError(err))
+      setError(scopedUploadedVideoError('Session list unavailable', err))
       return []
     } finally {
       setLoading(false)
@@ -62,13 +71,21 @@ export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
       try {
         const nextReport = await getUploadedVideoReport(sessionId)
         setReport(nextReport)
-      } catch {
+      } catch (err) {
+        if (err?.status === 404) {
+          setReport(null)
+        } else {
+          setError(scopedUploadedVideoError('Report load failed', err))
+        }
+      }
+      if (!session?.status || ['uploaded', 'queued'].includes(String(session.status).toLowerCase())) {
+        setError('Upload accepted, waiting for processing.')
+      } else {
         setReport(null)
       }
-      setError(null)
       return session
     } catch (err) {
-      setError(uploadedVideoError(err))
+      setError(scopedUploadedVideoError('Session detail unavailable', err))
       return null
     } finally {
       setDetailLoading(false)
@@ -94,7 +111,7 @@ export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
       setError(null)
       return session
     } catch (err) {
-      setError(uploadedVideoError(err))
+      setError(scopedUploadedVideoError('Upload request failed', err))
       throw err
     } finally {
       setActionLoading(false)
@@ -110,7 +127,7 @@ export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
       setError(null)
       return nextStatus
     } catch (err) {
-      setError(uploadedVideoError(err))
+      setError(scopedUploadedVideoError('Processing start failed', err))
       throw err
     } finally {
       setActionLoading(false)
@@ -126,7 +143,7 @@ export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
       setError(null)
       return nextStatus
     } catch (err) {
-      setError(uploadedVideoError(err))
+      setError(scopedUploadedVideoError('Processing cancel failed', err))
       throw err
     } finally {
       setActionLoading(false)
@@ -142,7 +159,7 @@ export function useUploadedVideo({ enabled = true, pollMs = 15000 } = {}) {
       setError(null)
       return created
     } catch (err) {
-      setError(uploadedVideoError(err))
+      setError(scopedUploadedVideoError('Case creation failed', err))
       throw err
     } finally {
       setActionLoading(false)

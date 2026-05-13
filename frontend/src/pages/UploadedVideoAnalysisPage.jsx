@@ -30,6 +30,7 @@ export default function UploadedVideoAnalysisPage() {
         session={uploadedVideo.currentSession}
         status={progress.status}
         connectionStatus={progress.connectionStatus}
+        error={progress.error}
         busy={uploadedVideo.actionLoading}
         onStart={uploadedVideo.startProcessing}
         onCancel={uploadedVideo.cancelProcessing}

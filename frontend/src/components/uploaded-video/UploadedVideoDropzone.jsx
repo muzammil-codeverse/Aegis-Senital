@@ -4,6 +4,7 @@ export default function UploadedVideoDropzone({ onUpload, busy = false }) {
   const inputRef = useRef(null)
   const [dragActive, setDragActive] = useState(false)
   const [localError, setLocalError] = useState(null)
+  const [selectedFile, setSelectedFile] = useState(null)
 
   function validate(file) {
     if (!file) return 'Choose a video file to continue.'
@@ -18,8 +19,11 @@ export default function UploadedVideoDropzone({ onUpload, busy = false }) {
   function handleFile(file) {
     const error = validate(file)
     setLocalError(error)
-    if (error || !file) return
-    onUpload(file)
+    if (error || !file) {
+      setSelectedFile(null)
+      return
+    }
+    setSelectedFile(file)
   }
 
   return (
@@ -50,9 +54,19 @@ export default function UploadedVideoDropzone({ onUpload, busy = false }) {
       </button>
       <div className="button-row">
         <button type="button" className="primary-button" onClick={() => inputRef.current?.click()} disabled={busy}>
-          {busy ? 'Uploadingâ€¦' : 'Select Video'}
+          {busy ? 'Uploading…' : 'Select video'}
         </button>
-        <span className="muted">No arbitrary filenames or paths are preserved as storage targets.</span>
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={busy || !selectedFile}
+          onClick={() => selectedFile && onUpload(selectedFile)}
+        >
+          {busy ? 'Uploading…' : 'Upload selected file'}
+        </button>
+        <span className="muted">
+          {selectedFile ? `${selectedFile.name} (${Math.round(selectedFile.size / 1024)} KB)` : 'No file selected'}
+        </span>
       </div>
       {localError ? <p className="error-text">{localError}</p> : null}
       <input
