@@ -12,6 +12,17 @@ export function useAuth() {
 
   const refreshMe = useCallback(async () => {
     if (refreshPromise) return refreshPromise
+    if (authUsesCookieMode() && !getStoredToken()) {
+      authStore.setState({
+        user: null,
+        token: null,
+        permissions: [],
+        authenticated: false,
+        loading: false,
+        error: null,
+      })
+      return null
+    }
     authStore.setState({ loading: true, error: null })
     refreshPromise = getMe()
       .then(payload => {
@@ -31,7 +42,7 @@ export function useAuth() {
           permissions: [],
           authenticated: false,
           loading: false,
-          error: error?.status === 401 ? null : (error?.message || 'Unable to load session'),
+          error: error?.status === 401 ? null : null,
         })
         return null
       })

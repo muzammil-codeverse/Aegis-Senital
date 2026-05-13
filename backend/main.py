@@ -56,6 +56,15 @@ async def log_requests(request: Request, call_next):
     logger.info("-> %s %s", request.method, request.url.path)
     response = await enforce_request_security(request, call_next)
     elapsed_ms = (time.time() - start) * 1000
+    origin = (request.headers.get("origin") or "").strip()
+    if origin and (
+        origin.startswith("http://localhost:")
+        or origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://[::1]:")
+    ):
+        response.headers.setdefault("Access-Control-Allow-Origin", origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        response.headers.setdefault("Vary", "Origin")
     logger.info(
         "<- %s %s %s (%.1fms)",
         request.method,
@@ -72,7 +81,17 @@ async def structured_http_exception(request: Request, exc: HTTPException):
         content = exc.detail
     else:
         content = {"status": "error", "detail": exc.detail or "Request failed"}
-    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
+    response = JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
+    origin = (request.headers.get("origin") or "").strip()
+    if origin and (
+        origin.startswith("http://localhost:")
+        or origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://[::1]:")
+    ):
+        response.headers.setdefault("Access-Control-Allow-Origin", origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        response.headers.setdefault("Vary", "Origin")
+    return response
 
 
 app.include_router(router)

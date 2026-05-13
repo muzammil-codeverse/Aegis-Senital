@@ -54,7 +54,7 @@ export default function UploadedVideoDropzone({ onUpload, busy = false }) {
       </button>
       <div className="button-row">
         <button type="button" className="primary-button" onClick={() => inputRef.current?.click()} disabled={busy}>
-          {busy ? 'Uploading…' : 'Select video'}
+          {busy ? 'Uploading...' : 'Select video'}
         </button>
         <button
           type="button"
@@ -62,7 +62,7 @@ export default function UploadedVideoDropzone({ onUpload, busy = false }) {
           disabled={busy || !selectedFile}
           onClick={() => selectedFile && onUpload(selectedFile)}
         >
-          {busy ? 'Uploading…' : 'Upload selected file'}
+          {busy ? 'Uploading...' : 'Upload selected file'}
         </button>
         <span className="muted">
           {selectedFile ? `${selectedFile.name} (${Math.round(selectedFile.size / 1024)} KB)` : 'No file selected'}

@@ -22,6 +22,7 @@ PUBLIC_PATHS = {
     "/openapi.json",
     "/favicon.ico",
     "/api/auth/login",
+    "/api/auth/me",
 }
 CSRF_EXEMPT_PATHS = {
     "/api/auth/login",
@@ -78,11 +79,34 @@ def _validate_csrf(request: Request) -> None:
     raise HTTPException(status_code=403, detail="CSRF validation failed")
 
 
-def _structured_error(status_code: int, detail: str, permission: str | None = None) -> JSONResponse:
+def _structured_error(
+    request: Request,
+    status_code: int,
+    detail: str,
+    permission: str | None = None,
+) -> JSONResponse:
     content = {"status": "error", "detail": detail}
     if permission:
         content["permission"] = permission
-    return JSONResponse(status_code=status_code, content=content)
+    response = JSONResponse(status_code=status_code, content=content)
+    _attach_cors_headers(request, response)
+    return response
+
+
+def _attach_cors_headers(request: Request, response: JSONResponse) -> None:
+    """
+    Ensure middleware-generated auth errors still include CORS headers.
+    This keeps browser clients from masking 401/403 as generic network failures.
+    """
+    origin = (request.headers.get("origin") or "").strip()
+    if origin and (
+        origin.startswith("http://localhost:")
+        or origin.startswith("http://127.0.0.1:")
+        or origin.startswith("http://[::1]:")
+    ):
+        response.headers.setdefault("Access-Control-Allow-Origin", origin)
+        response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+        response.headers.setdefault("Vary", "Origin")
 
 
 def get_current_user_from_request(request: Request) -> UserAccount | None:
@@ -372,22 +396,22 @@ async def enforce_request_security(request: Request, call_next):
     token = _extract_bearer_token(request)
     if not token:
         record_access_denied(request, None, "Authentication required")
-        return _structured_error(401, "Authentication required")
+        return _structured_error(request, 401, "Authentication required")
 
     user = get_auth_service().get_current_user_from_token(token)
     if user is None:
         record_access_denied(request, None, "Invalid or expired token")
-        return _structured_error(401, "Invalid or expired token")
+        return _structured_error(request, 401, "Invalid or expired token")
     if user.status != UserStatus.ACTIVE.value:
         record_access_denied(request, user, "User account is not active")
-        return _structured_error(403, "User account is not active")
+        return _structured_error(request, 403, "User account is not active")
 
     request.state.current_user = user
     try:
         _validate_csrf(request)
     except HTTPException as exc:
         record_access_denied(request, user, str(exc.detail), metadata={"csrf": True})
-        return _structured_error(exc.status_code, str(exc.detail))
+        return _structured_error(request, exc.status_code, str(exc.detail))
     if required_permission and not has_permission(user.role, required_permission, get_rbac_config()):
         record_access_denied(
             request,
@@ -395,6 +419,6 @@ async def enforce_request_security(request: Request, call_next):
             detail=f"Permission required: {required_permission}",
             metadata={"permission": required_permission},
         )
-        return _structured_error(403, "Insufficient permission", required_permission)
+        return _structured_error(request, 403, "Insufficient permission", required_permission)
 
     return await call_next(request)

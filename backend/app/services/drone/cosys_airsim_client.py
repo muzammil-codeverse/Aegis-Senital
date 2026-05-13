@@ -358,13 +358,27 @@ class CosysAirSimClient:
                         for r in responses_raw
                     ]
                 except Exception as rpc_exc:
-                    if "invalid number of arguments" in str(rpc_exc).lower():
+                    err_str = str(rpc_exc).lower()
+                    if "invalid number of arguments" in err_str:
                         # Older builds without the external param
                         responses_raw = rpc.call("simGetImages", req_dicts, "")
                         responses = [
                             self._client_module.ImageResponse.from_msgpack(r)
                             for r in responses_raw
                         ]
+                    elif "invalid map" in err_str:
+                        # One or more camera names don't exist in this runtime.
+                        # Retry per-camera so valid cameras (e.g. front_center) still succeed.
+                        responses = []
+                        for cam_dict in req_dicts:
+                            try:
+                                single_raw = rpc.call("simGetImages", [cam_dict], "", False)
+                                responses.append(
+                                    self._client_module.ImageResponse.from_msgpack(single_raw[0])
+                                    if single_raw else None
+                                )
+                            except Exception:
+                                responses.append(None)
                     else:
                         raise
             else:

@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const BACKEND_PORT = process.env.BACKEND_PORT || '8001'
 const backendCommand = process.platform === 'win32'
-  ? '.\\.venv\\Scripts\\python.exe -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000'
-  : './.venv/bin/python -m uvicorn main:app --app-dir backend --host 127.0.0.1 --port 8000'
+  ? `.\\.venv\\Scripts\\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port ${BACKEND_PORT}`
+  : `./.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port ${BACKEND_PORT}`
 
 export default defineConfig({
   testDir: './e2e',
@@ -32,7 +33,7 @@ export default defineConfig({
     {
       command: backendCommand,
       cwd: '..',
-      url: 'http://127.0.0.1:8000/',
+      url: `http://127.0.0.1:${BACKEND_PORT}/`,
       reuseExistingServer: !process.env.CI,
       timeout: 180000,
       env: {
