@@ -106,9 +106,25 @@ def resolve_runtime_installation(
             "launcher_type": None,
         }
 
+    import platform
+    on_windows = platform.system() == "Windows"
     for candidate_dir in _iter_candidate_dirs(runtime_root, definition.folder_hints):
         executable = _find_executable(candidate_dir, definition.executable_hints)
         if executable is None:
+            # Check if directory only contains a Linux build (.sh but no .exe)
+            sh_files = list(candidate_dir.rglob("*.sh"))
+            exe_files = list(candidate_dir.rglob("*.exe"))
+            if sh_files and not exe_files and on_windows:
+                return {
+                    "name": definition.name,
+                    "runtime_type": definition.runtime_type,
+                    "available": False,
+                    "reason": "linux_build_incompatible_on_windows",
+                    "runtime_dir": str(candidate_dir.resolve()),
+                    "executable_path": None,
+                    "launcher_type": None,
+                    "checked_at": now_iso(),
+                }
             continue
         return {
             "name": definition.name,

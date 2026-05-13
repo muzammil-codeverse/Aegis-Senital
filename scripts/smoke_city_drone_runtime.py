@@ -92,7 +92,25 @@ def main() -> int:
         state = client.getMultirotorState()
         gps = getattr(state, "gps_location", None)
         image_request = module.ImageRequest("front_center", module.ImageType.Scene, False, False)
-        response = client.simGetImages([image_request])[0]
+        # cosysairsim v3.3 sends (requests, vehicle_name) only. AirSimNH also requires
+        # a 3rd `external` arg. Use the low-level RPC call with serialised dicts so we
+        # control the exact argument list regardless of server build.
+        rpc = getattr(client, "client", None)
+        req_dict = image_request.to_msgpack()
+        try:
+            # 3-arg form: (requests, vehicle_name, external) — works with both builds
+            responses_raw = rpc.call("simGetImages", [req_dict], "", False)
+            responses = [module.ImageResponse.from_msgpack(r) for r in responses_raw]
+        except Exception as img_exc:
+            if "invalid number of arguments" in str(img_exc).lower():
+                # Fall back to 2-arg form (older Cosys builds without `external`)
+                responses_raw = rpc.call("simGetImages", [req_dict], "")
+                responses = [module.ImageResponse.from_msgpack(r) for r in responses_raw]
+            else:
+                raise
+        response = responses[0] if responses else None
+        if response is None:
+            raise RuntimeError("simGetImages returned no responses")
     except Exception as exc:
         payload = {
             "status": "failed",

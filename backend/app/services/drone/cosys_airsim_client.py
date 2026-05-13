@@ -84,6 +84,7 @@ class CosysAirSimClient:
         self._latest_telemetry: DroneTelemetry | None = None
         self._latest_frame: DroneCameraFrame | None = None
         self._supports_named_vehicle_calls: bool | None = None
+        self._server_version: int = 4  # Assume Cosys-AirSim v3.3 compatible
 
     def connect(self) -> DroneConnectionStatus:
         endpoint = f"{self.host}:{self.port}"
@@ -143,6 +144,16 @@ class CosysAirSimClient:
             self._client = client
             self._connected = True
             self._last_error = None
+            # Detect server API version for backward compatibility with AirSim v1.8.1
+            try:
+                rpc = getattr(client, "client", None)
+                if rpc is not None:
+                    raw_ver = rpc.call("getServerVersion")
+                    self._server_version = int(raw_ver) if raw_ver is not None else 4
+                else:
+                    self._server_version = 4
+            except Exception:
+                self._server_version = 4
             return DroneConnectionStatus(
                 drone_id=self.drone_id,
                 provider="cosys_airsim",
@@ -330,7 +341,34 @@ class CosysAirSimClient:
                 )
                 for camera_name in safe_cameras
             ]
-            responses = self._call_with_vehicle_fallback(self._client.simGetImages, image_requests)
+            # Use low-level RPC when available to send the 3-arg form required
+            # by AirSimNH builds: (requests, vehicle_name, external).
+            rpc = getattr(self._client, "client", None)
+            if rpc is not None:
+                # Serialise ImageRequest objects to plain dicts for raw RPC call
+                req_dicts = [
+                    r.to_msgpack() if hasattr(r, "to_msgpack") else r
+                    for r in image_requests
+                ]
+                try:
+                    # 3-arg form works for both AirSimNH and Cosys-AirSim builds
+                    responses_raw = rpc.call("simGetImages", req_dicts, "", False)
+                    responses = [
+                        self._client_module.ImageResponse.from_msgpack(r)
+                        for r in responses_raw
+                    ]
+                except Exception as rpc_exc:
+                    if "invalid number of arguments" in str(rpc_exc).lower():
+                        # Older builds without the external param
+                        responses_raw = rpc.call("simGetImages", req_dicts, "")
+                        responses = [
+                            self._client_module.ImageResponse.from_msgpack(r)
+                            for r in responses_raw
+                        ]
+                    else:
+                        raise
+            else:
+                responses = self._call_with_vehicle_fallback(self._client.simGetImages, image_requests)
             if not responses:
                 raise RuntimeError("simGetImages returned no responses")
 
@@ -700,6 +738,7 @@ class CosysAirSimClient:
             ("vehicle api for" in message and "not available" in message)
             or "vehicle does not exist" in message
             or "retry connection over the limit" in message
+            or "invalid number of arguments" in message
         )
 
     def _orientation_from_quaternion(self, orientation: Any) -> DroneOrientation:

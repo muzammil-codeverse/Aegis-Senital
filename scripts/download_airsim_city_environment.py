@@ -62,7 +62,9 @@ def _fetch_release_assets(timeout: int) -> list[dict[str, Any]]:
 
 
 def _runtime_asset_candidates(runtime_name: str, assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    import platform
     runtime_key = runtime_name.lower()
+    on_windows = platform.system() == "Windows"
     candidates: list[dict[str, Any]] = []
     for asset in assets:
         filename = str(asset.get("asset_name") or "").lower()
@@ -71,6 +73,22 @@ def _runtime_asset_candidates(runtime_name: str, assets: list[dict[str, Any]]) -
         if ".zip" not in filename:
             continue
         candidates.append(asset)
+    # On Windows, first prefer assets from releases explicitly tagged for Windows,
+    # then prefer assets whose filename does not contain "linux".
+    if on_windows:
+        windows_release_candidates = [
+            item for item in candidates
+            if "windows" in str(item.get("release_tag") or "").lower()
+        ]
+        if windows_release_candidates:
+            candidates = windows_release_candidates
+        else:
+            non_linux = [
+                item for item in candidates
+                if "linux" not in str(item.get("asset_name") or "").lower()
+            ]
+            if non_linux:
+                candidates = non_linux
     candidates.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
     return candidates
 
