@@ -32,6 +32,16 @@ function statusWeight(status) {
   return 0
 }
 
+function sectionFromApiError(key, label, error, networkAsCritical = false) {
+  const status = error?.status
+  if (status === 401) return section(key, label, 'degraded', 'Please sign in to view this subsystem')
+  if (status === 403) return section(key, label, 'degraded', 'Access denied for this subsystem')
+  if (status === 404) return section(key, label, 'degraded', 'Subsystem endpoint unavailable in this build')
+  if (status === 503) return section(key, label, 'degraded', 'Subsystem reported degraded readiness')
+  if (!status) return section(key, label, networkAsCritical ? 'critical' : 'degraded', 'Backend unavailable')
+  return section(key, label, 'critical', error?.message || `${label} unavailable`)
+}
+
 export function useRuntimeStatus({ pollMs = 20000 } = {}) {
   const auth = useAuth()
   const [state, setState] = useState({
@@ -44,6 +54,17 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
   })
 
   const refresh = useCallback(async () => {
+    if (!auth.authenticated) {
+      setState({
+        loading: false,
+        error: null,
+        overall: 'unknown',
+        generatedAt: Date.now(),
+        byKey: {},
+        items: [],
+      })
+      return
+    }
     const sections = []
     try {
       const system = await getSystemHealth()
@@ -57,7 +78,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
           const item = gis.item || {}
           sections.push(section('gis', 'GIS', 'ok', item.provider || item.detail || 'GIS provider configured'))
         } catch (error) {
-          sections.push(section('gis', 'GIS', 'critical', error?.message || 'GIS unavailable'))
+          sections.push(sectionFromApiError('gis', 'GIS', error))
         }
       }
 
@@ -72,7 +93,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
             item?.detail || item?.health?.detail || (item?.active_session ? 'Simulated session active' : 'Simulator reachable'),
           ))
         } catch (error) {
-          sections.push(section('droneSimulation', 'Drone Simulation', 'critical', error?.message || 'Drone runtime unavailable'))
+          sections.push(sectionFromApiError('droneSimulation', 'Drone Simulation', error))
         }
         try {
           const missions = await listMissions({ limit: 20 })
@@ -85,7 +106,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
             { count: active.length },
           ))
         } catch (error) {
-          sections.push(section('droneMission', 'Drone Mission', 'critical', error?.message || 'Mission service unavailable'))
+          sections.push(sectionFromApiError('droneMission', 'Drone Mission', error))
         }
       }
 
@@ -100,7 +121,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
             item.detail || item.message || 'Fusion service reachable',
           ))
         } catch (error) {
-          sections.push(section('droneFusion', 'Drone Fusion', 'critical', error?.message || 'Fusion service unavailable'))
+          sections.push(sectionFromApiError('droneFusion', 'Drone Fusion', error))
         }
       }
 
@@ -116,7 +137,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
             { count: pending.length },
           ))
         } catch (error) {
-          sections.push(section('investigation', 'Investigation', 'critical', error?.message || 'Investigation service unavailable'))
+          sections.push(sectionFromApiError('investigation', 'Investigation', error))
         }
       }
 
@@ -141,7 +162,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
             { count: blocking.length },
           ))
         } catch (error) {
-          sections.push(section('modelGovernance', 'Model Governance', 'critical', error?.message || 'Governance service unavailable'))
+          sections.push(sectionFromApiError('modelGovernance', 'Model Governance', error))
         }
       }
 
@@ -156,7 +177,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
             item.detail || item.active_provider || 'LLM status available',
           ))
         } catch (error) {
-          sections.push(section('llm', 'OpenAI / LLM', 'critical', error?.message || 'LLM service unavailable'))
+          sections.push(sectionFromApiError('llm', 'OpenAI / LLM', error))
         }
       }
 
@@ -178,16 +199,17 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
       setState(current => ({
         ...current,
         loading: false,
-        error: error?.message || 'Unable to load runtime status',
+        error: error?.status === 401 ? 'Please sign in.' : (error?.message || 'Unable to load runtime status'),
       }))
     }
-  }, [auth.hasPermission])
+  }, [auth.authenticated, auth.hasPermission])
 
   useEffect(() => {
+    if (!auth.authenticated) return undefined
     refresh()
     const timer = window.setInterval(refresh, pollMs)
     return () => window.clearInterval(timer)
-  }, [pollMs, refresh])
+  }, [auth.authenticated, pollMs, refresh])
 
   return {
     ...state,

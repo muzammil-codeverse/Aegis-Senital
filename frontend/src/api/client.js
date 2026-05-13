@@ -54,8 +54,26 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
     this.status = details.status
+    this.kind = details.kind || 'unknown'
     this.details = details
   }
+}
+
+const AUTH_ENDPOINTS = new Set(['/api/auth/login', '/api/auth/me'])
+let lastUnauthorizedEventAt = 0
+const UNAUTHORIZED_EVENT_COOLDOWN_MS = 2500
+
+export function classifyApiError(error) {
+  const status = error?.response?.status
+  if (!status) {
+    return { kind: 'network', message: 'Backend unavailable. Check that the API is running.' }
+  }
+  if (status === 401) return { kind: 'unauthenticated', message: 'Please sign in to continue.' }
+  if (status === 403) return { kind: 'forbidden', message: 'You do not have permission for this action.' }
+  if (status === 404) return { kind: 'not_found', message: 'This endpoint is unavailable in the current runtime.' }
+  if (status === 503) return { kind: 'unavailable', message: 'Service is currently degraded. Please retry shortly.' }
+  if (status >= 500) return { kind: 'server_error', message: 'Server error. Please retry.' }
+  return { kind: 'request_error', message: error?.response?.data?.detail || error?.message || 'Request failed' }
 }
 
 export const apiClient = axios.create({
@@ -86,18 +104,24 @@ apiClient.interceptors.response.use(
   response => response,
   error => {
     const status = error.response?.status
+    const path = String(error.config?.url || '')
+    const classification = classifyApiError(error)
     if (status === 401) {
       clearStoredToken()
-      window.dispatchEvent(new CustomEvent('aegis-auth-unauthorized'))
+      const isAuthEndpoint = AUTH_ENDPOINTS.has(path)
+      const now = Date.now()
+      if (!isAuthEndpoint && now - lastUnauthorizedEventAt > UNAUTHORIZED_EVENT_COOLDOWN_MS) {
+        lastUnauthorizedEventAt = now
+        window.dispatchEvent(new CustomEvent('aegis-auth-unauthorized'))
+      }
     }
     const message =
       error.response?.data?.detail ||
       error.response?.data?.error ||
-      (status === 403 ? 'Access denied' : null) ||
-      error.message ||
-      'Backend request failed'
+      classification.message
     throw new ApiError(message, {
       status,
+      kind: classification.kind,
       url: error.config?.url,
       method: error.config?.method,
       payload: error.response?.data,
@@ -136,5 +160,6 @@ export function normalizeError(error) {
   if (error instanceof ApiError) {
     return error.message
   }
+  if (!error?.status) return 'Backend unavailable. Check that the API is running.'
   return error?.message || 'Request failed'
 }

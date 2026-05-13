@@ -87,10 +87,10 @@ export default function App() {
 function AuthenticatedApp() {
   const auth = useAuth()
   const [currentPage, setCurrentPage] = useState(pageFromHash())
-  const alertState = useAlerts()
-  const incidentState = useIncidents()
+  const alertState = useAlerts({ enabled: auth.authenticated })
+  const incidentState = useIncidents({ enabled: auth.authenticated })
   const caseState = useCases({ enabled: auth.hasPermission('case:read') })
-  const metricsState = useMetrics()
+  const metricsState = useMetrics({ enabled: auth.authenticated })
   const websocketState = useWebSocketAlerts()
   const health = useSystemHealth(metricsState.metrics, metricsState.error, metricsState.stale)
 

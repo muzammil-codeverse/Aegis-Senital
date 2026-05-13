@@ -5,7 +5,7 @@ import { DASHBOARD_POLL_MS } from '../config'
 import { incidentStore } from '../state/incidentStore'
 import { compareSeverity } from '../utils/severity'
 
-export function useIncidents({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
+export function useIncidents({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
   const [incidents, setIncidents] = useState([])
   const [selectedIncident, setSelectedIncident] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -17,6 +17,11 @@ export function useIncidents({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
   const hasDataRef = useRef(false)
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     try {
       const response = await getIncidents({ limit })
       setIncidents(response.items)
@@ -31,7 +36,7 @@ export function useIncidents({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
     } finally {
       setLoading(false)
     }
-  }, [limit])
+  }, [enabled, limit])
 
   const selectIncident = useCallback(async incidentId => {
     if (!incidentId) {
@@ -54,10 +59,14 @@ export function useIncidents({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
   }, [])
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      return undefined
+    }
     refresh()
     const timer = window.setInterval(refresh, pollMs)
     return () => window.clearInterval(timer)
-  }, [pollMs, refresh])
+  }, [enabled, pollMs, refresh])
 
   const sortedIncidents = useMemo(() => (
     [...incidents].sort((a, b) => {

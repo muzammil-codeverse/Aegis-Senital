@@ -4,7 +4,7 @@ import { normalizeError } from '../api/client'
 import { DASHBOARD_POLL_MS } from '../config'
 import { runtimeStore } from '../state/runtimeStore'
 
-export function useMetrics({ pollMs = DASHBOARD_POLL_MS } = {}) {
+export function useMetrics({ enabled = true, pollMs = DASHBOARD_POLL_MS } = {}) {
   const [metrics, setMetrics] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -13,6 +13,11 @@ export function useMetrics({ pollMs = DASHBOARD_POLL_MS } = {}) {
   const hasDataRef = useRef(false)
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     try {
       const payload = await getCoreMetrics()
       setMetrics(payload)
@@ -27,13 +32,17 @@ export function useMetrics({ pollMs = DASHBOARD_POLL_MS } = {}) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      return undefined
+    }
     refresh()
     const timer = window.setInterval(refresh, pollMs)
     return () => window.clearInterval(timer)
-  }, [pollMs, refresh])
+  }, [enabled, pollMs, refresh])
 
   return { metrics, loading, error, stale, updatedAt, refresh }
 }

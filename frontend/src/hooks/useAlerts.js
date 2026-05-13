@@ -12,7 +12,7 @@ import { DASHBOARD_POLL_MS } from '../config'
 import { alertStore } from '../state/alertStore'
 import { compareSeverity } from '../utils/severity'
 
-export function useAlerts({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
+export function useAlerts({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
   const [alerts, setAlerts] = useState([])
   const [selectedAlert, setSelectedAlert] = useState(null)
   const [history, setHistory] = useState([])
@@ -26,6 +26,11 @@ export function useAlerts({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
   const hasDataRef = useRef(false)
 
   const refresh = useCallback(async () => {
+    if (!enabled) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     try {
       const response = await getLiveAlerts({ limit })
       setAlerts(response.items)
@@ -40,7 +45,7 @@ export function useAlerts({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
     } finally {
       setLoading(false)
     }
-  }, [limit])
+  }, [enabled, limit])
 
   const selectAlert = useCallback(async alertId => {
     if (!alertId) {
@@ -87,10 +92,14 @@ export function useAlerts({ pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
   }, [refresh, selectAlert])
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      return undefined
+    }
     refresh()
     const timer = window.setInterval(refresh, pollMs)
     return () => window.clearInterval(timer)
-  }, [pollMs, refresh])
+  }, [enabled, pollMs, refresh])
 
   const sortedAlerts = useMemo(() => (
     [...alerts].sort((a, b) => {

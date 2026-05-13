@@ -7,7 +7,7 @@ const SLOW_AFTER_MS = 90_000
 const MAX_BACKOFF_MS = 30_000
 
 export function useWebSocketAlerts() {
-  const { token, authRequired } = useAuth()
+  const { token, authRequired, authenticated } = useAuth()
   const [alertsById, setAlertsById] = useState({})
   const [status, setStatus] = useState('connecting')
   const [lastMessageAt, setLastMessageAt] = useState(null)
@@ -18,6 +18,10 @@ export function useWebSocketAlerts() {
   const reconnectTimerRef = useRef(null)
 
   useEffect(() => {
+    if (!authenticated) {
+      setStatus('unauthenticated')
+      return undefined
+    }
     if (authRequired && !token && !authUsesCookieMode()) {
       setStatus('auth_error')
       return undefined
@@ -90,7 +94,7 @@ export function useWebSocketAlerts() {
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current)
       socketRef.current?.close()
     }
-  }, [authRequired, token])
+  }, [authRequired, authenticated, token])
 
   useEffect(() => {
     const slowTimer = window.setInterval(() => {
