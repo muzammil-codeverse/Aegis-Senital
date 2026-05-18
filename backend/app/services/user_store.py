@@ -298,9 +298,19 @@ class UserStore:
             if env_name in {"prod", "production"}:
                 logger.warning("Bootstrap admin skipped: %s is not set", password_env)
                 return None
-            password = "ChangeMe123"
+            import secrets, string
+            alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+            password = (
+                secrets.choice(string.ascii_uppercase)
+                + secrets.choice(string.ascii_lowercase)
+                + secrets.choice(string.digits)
+                + secrets.choice("!@#$%^&*")
+                + "".join(secrets.choice(alphabet) for _ in range(12))
+            )
             logger.warning(
-                "Bootstrap admin using local development fallback password; set %s for real deployments",
+                "Bootstrap admin created with generated password: %s  "
+                "(set %s env var to use a fixed password)",
+                password,
                 password_env,
             )
 

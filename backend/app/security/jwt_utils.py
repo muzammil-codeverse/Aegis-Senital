@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -40,12 +39,9 @@ def decode_access_token(token: str) -> dict:
         decode_kwargs["audience"] = str(auth_cfg["token_audience"])
     if auth_cfg.get("token_issuer"):
         decode_kwargs["issuer"] = str(auth_cfg["token_issuer"])
-    payload = jwt.decode(
+    return jwt.decode(
         token,
         auth_cfg["_jwt_secret"],
         algorithms=[str(auth_cfg.get("algorithm") or "HS256")],
         **decode_kwargs,
     )
-    if int(payload.get("exp", 0)) < int(time.time()):
-        raise jwt.ExpiredSignatureError("Token expired")
-    return payload

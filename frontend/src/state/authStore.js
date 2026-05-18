@@ -1,4 +1,5 @@
 import { clearStoredToken, getStoredToken, setStoredToken } from '../api/client'
+import { allowClientTokenStorage } from '../config'
 
 let state = {
   user: null,
@@ -30,7 +31,6 @@ export const authStore = {
     emit()
   },
   setSession({ token, user, permissions = [], authRequired = true }) {
-    if (token) setStoredToken(token)
     state = {
       ...state,
       token: token || getStoredToken(),
@@ -77,6 +77,7 @@ export const authStore = {
 }
 
 window.addEventListener('aegis-auth-change', () => {
+  if (!allowClientTokenStorage()) return
   const token = getStoredToken()
   if (token !== state.token) {
     authStore.setState({ token })

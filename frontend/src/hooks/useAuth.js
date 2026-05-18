@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { changePassword as changePasswordRequest, getMe, login as loginRequest, logout as logoutRequest } from '../api/authApi'
 import { clearStoredToken, getStoredToken, setStoredToken } from '../api/client'
-import { authUsesCookieMode } from '../config'
+import { authUsesCookieMode, readCookie, CSRF_COOKIE_NAME } from '../config'
 import { authStore } from '../state/authStore'
 
 let bootstrapped = false
@@ -12,15 +12,8 @@ export function useAuth() {
 
   const refreshMe = useCallback(async () => {
     if (refreshPromise) return refreshPromise
-    if (authUsesCookieMode() && !getStoredToken()) {
-      authStore.setState({
-        user: null,
-        token: null,
-        permissions: [],
-        authenticated: false,
-        loading: false,
-        error: null,
-      })
+    if (authUsesCookieMode() && !getStoredToken() && !readCookie(CSRF_COOKIE_NAME)) {
+      authStore.setState({ user: null, token: null, permissions: [], authenticated: false, loading: false, error: null })
       return null
     }
     authStore.setState({ loading: true, error: null })
@@ -42,7 +35,7 @@ export function useAuth() {
           permissions: [],
           authenticated: false,
           loading: false,
-          error: error?.status === 401 ? null : null,
+          error: null,
         })
         return null
       })

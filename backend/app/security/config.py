@@ -18,6 +18,7 @@ SECURITY_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "security.yaml"
 UPLOAD_SECURITY_CONFIG_PATH = PROJECT_ROOT / "configs" / "runtime" / "upload_security.yaml"
 PRODUCTION_ENVS = {"prod", "production"}
 _DEV_JWT_SECRET: str | None = None
+_DEV_SECRET_FILE = PROJECT_ROOT / ".dev_jwt_secret"
 
 load_project_env()
 
@@ -61,13 +62,42 @@ def _resolve_jwt_secret(config: dict[str, Any]) -> str:
         )
 
     if _DEV_JWT_SECRET is None:
-        _DEV_JWT_SECRET = secrets.token_urlsafe(48)
-        logger.warning(
-            "%s is not set; using an ephemeral local development JWT secret",
-            secret_env,
-        )
+        _DEV_JWT_SECRET = _load_or_create_dev_secret(secret_env)
     auth_cfg["_jwt_secret"] = _DEV_JWT_SECRET
     return _DEV_JWT_SECRET
+
+
+def _load_or_create_dev_secret(secret_env: str) -> str:
+    try:
+        if _DEV_SECRET_FILE.exists():
+            stored = _DEV_SECRET_FILE.read_text(encoding="utf-8").strip()
+            if stored:
+                logger.info(
+                    "%s is not set; reusing persistent dev JWT secret from %s",
+                    secret_env,
+                    _DEV_SECRET_FILE.name,
+                )
+                return stored
+    except OSError:
+        pass
+    new_secret = secrets.token_urlsafe(48)
+    try:
+        _DEV_SECRET_FILE.write_text(new_secret, encoding="utf-8")
+        logger.warning(
+            "%s is not set; generated a persistent dev JWT secret at %s "
+            "(sessions survive restarts; set %s for production)",
+            secret_env,
+            _DEV_SECRET_FILE.name,
+            secret_env,
+        )
+    except OSError:
+        logger.warning(
+            "%s is not set; using an ephemeral dev JWT secret "
+            "(could not persist to %s — all sessions invalidated on restart)",
+            secret_env,
+            _DEV_SECRET_FILE.name,
+        )
+    return new_secret
 
 
 def get_auth_config() -> dict[str, Any]:

@@ -138,3 +138,6 @@ DerivedDataCache/
 storage/drone_sim/
 storage/drone_frames/
 storage/drone_telemetry/
+
+# Dev-only JWT secret (auto-generated, persists across restarts to avoid instant session expiry)
+.dev_jwt_secret
