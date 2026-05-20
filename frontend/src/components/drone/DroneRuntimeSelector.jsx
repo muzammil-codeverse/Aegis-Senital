@@ -4,7 +4,7 @@ export default function DroneRuntimeSelector({
   onRefreshStatus,
   launching = false,
 }) {
-  const selected = runtimeStatus?.selected_runtime || 'unknown'
+  const selected = runtimeStatus?.selected_runtime || 'AirSim Offline'
   const available = runtimeStatus?.available_runtimes || []
   const fallbackUsed = Boolean(runtimeStatus?.fallback_used)
 

@@ -35,8 +35,8 @@ describe('ExhibitionPreflightPanel', () => {
       />,
     )
 
-    expect(screen.getByText(/OPENAI_API_KEY is not present/i)).toBeInTheDocument()
-    expect(screen.getByText('LLM / OSINT')).toBeInTheDocument()
+    expect(screen.getByText(/OPENAI_API_KEY is absent/i)).toBeInTheDocument()
+    expect(screen.getByText(/OSINT \/ LLM enrichment provider not configured/i)).toBeInTheDocument()
   })
 
   it('calls run actions', () => {

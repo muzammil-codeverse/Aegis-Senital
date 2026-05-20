@@ -71,18 +71,25 @@ _VISUAL_JSON = (
     / "bank_robbery_visual.json"
 )
 _SNAPSHOT_DIR = _PROJECT_ROOT / "runtime_state" / "visual_snapshots"
+_VISUAL_ENGINE_YAML = (
+    _PROJECT_ROOT / "configs" / "simulation_visual" / "visual_engine.yaml"
+)
 
 # Asset name hints we look for in simListAssets() output. None of these are
 # guaranteed to exist; the controller treats absence as "no real mesh".
 _HUMAN_MESH_HINTS = (
     "SK_Mannequin",
     "Mannequin",
+    "human_ai",
+    "GroupedAI",
     "Character",
     "Pedestrian",
     "MetaHuman",
     "Crowd",
 )
 _VEHICLE_MESH_HINTS = (
+    "BoxCar",
+    "Vehicle_SkelMesh",
     "SUV",
     "Sedan",
     "Car",
@@ -98,6 +105,36 @@ _PROP_MESH_HINTS = (
     "Sign",
     "Bollard",
 )
+
+# Phase XVII: ExternalCamera IDs defined in AirSim settings.json
+_EXTERNAL_CAMERA_IDS = (
+    "CAM-BANK-01",
+    "CAM-BANK-02",
+    "CAM-BANK-03",
+    "CAM-MARKET-01",
+    "CAM-ROAD-01",
+    "CAM-PARKING-01",
+    "CAM-ALLEY-01",
+    "CAM-GATE-01",
+)
+
+
+def _load_visual_engine_config() -> dict[str, Any]:
+    """Load visual_engine.yaml. Returns empty dict if not found or yaml missing."""
+    try:
+        import yaml  # type: ignore[import]
+        if _VISUAL_ENGINE_YAML.exists():
+            return yaml.safe_load(_VISUAL_ENGINE_YAML.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    try:
+        import json as _json  # fallback: try JSON
+        json_path = _VISUAL_ENGINE_YAML.with_suffix(".json")
+        if json_path.exists():
+            return _json.loads(json_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +246,8 @@ class AegisVisualScenarioController:
         self._animation_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._client_lock = threading.Lock()
+        self._engine_config: dict[str, Any] = _load_visual_engine_config()
+        self._active_engine: str = self._engine_config.get("active_engine", "airsimnh_proxy")
 
         self._load_config()
         self._build_actors()
@@ -538,6 +577,21 @@ class AegisVisualScenarioController:
             "last_sync_offset_seconds": self._state.last_sync_offset_seconds,
             "snapshot_dir": str(self._snapshot_dir),
             "available_asset_count": len(self._available_assets or []),
+            "active_engine": self._active_engine,
+            "phase_xvii": {
+                "project_path": r"C:\AegisExternalTools\drone_sim\AegisVisualSim\AegisVisualSim.uproject",
+                "spawner_script": r"C:\AegisExternalTools\drone_sim\AegisVisualSim\Scripts\aegis_bank_robbery_spawner.py",
+                "setup_content_bat": r"C:\AegisExternalTools\drone_sim\AegisVisualSim\setup_content.bat",
+                "blueprint_guide": r"C:\AegisExternalTools\drone_sim\AegisVisualSim\BLUEPRINT_SETUP.md",
+                "external_cameras": list(_EXTERNAL_CAMERA_IDS),
+                "human_asset_source": "DynamicObjects/GroupedAI/Character/Mesh/SK_Mannequin",
+                "vehicle_asset_source": "VehicleAdv/BoxCar/BoxCar",
+                "animation_assets": [
+                    "DynamicObjects/GroupedAI/Animations/ThirdPersonIdle",
+                    "DynamicObjects/GroupedAI/Animations/ThirdPersonRun",
+                    "DynamicObjects/GroupedAI/Animations/ThirdPersonWalk",
+                ],
+            },
         }
 
     # ------------------------------------------------------------------
@@ -1034,20 +1088,34 @@ class AegisVisualScenarioController:
     # ------------------------------------------------------------------
 
     def _capture_png_bytes(self, camera_id: str) -> bytes | None:
-        """Capture a PNG snapshot for camera_id by teleporting the drone to
-        the camera's viewpoint (downward gimbal) and using simGetImages.
+        """Capture a PNG snapshot for camera_id.
 
-        Returns None if AirSim is connected but returns no image."""
+        Phase XVII: If camera_id is a known ExternalCamera ID (from settings.json)
+        and active_engine is aegis_unreal_real, use simGetImages with the
+        ExternalCamera name directly. Otherwise, fall back to teleporting the
+        drone to the camera's viewpoint.
+
+        Returns None if AirSim is connected but returns no image.
+        """
         cam_cfg = self._find_camera_marker(camera_id)
         if cam_cfg is None and camera_id not in {"DRONE-ALPHA", "Drone1"}:
             logger.info("[VisualCtrl] camera_id %s not in visual config", camera_id)
             return None
         with self._client_lock:
+            # Phase XVII — try ExternalCamera capture first
+            if camera_id in _EXTERNAL_CAMERA_IDS:
+                result = self._fetch_external_camera_png(camera_id)
+                if result:
+                    return result
+                logger.debug(
+                    "[VisualCtrl] ExternalCamera %s returned no data — falling back to drone teleport",
+                    camera_id,
+                )
+            # Fallback: teleport drone to camera position
             if cam_cfg is not None:
                 cx = float(cam_cfg["pose"]["x"])
                 cy = float(cam_cfg["pose"]["y"])
                 cz = float(cam_cfg["pose"].get("z", 8.0))
-                # Aim camera downward at 65 degrees so the ground is visible
                 pitch = math.radians(-65.0)
                 try:
                     self._client.simSetVehiclePose(
@@ -1061,6 +1129,25 @@ class AegisVisualScenarioController:
                 except Exception as exc:
                     logger.debug("[VisualCtrl] vehicle pose for camera %s failed: %s", camera_id, exc)
             return self._fetch_scene_png()
+
+    def _fetch_external_camera_png(self, camera_id: str) -> bytes | None:
+        """Try to capture from an ExternalCamera registered in AirSim settings.json."""
+        try:
+            request = self._module.ImageRequest(
+                camera_id,
+                self._module.ImageType.Scene,
+                False,
+                True,
+            )
+            responses = self._client.simGetImages([request])
+            if not responses:
+                return None
+            data = getattr(responses[0], "image_data_uint8", None)
+            if data:
+                return bytes(data)
+        except Exception as exc:
+            logger.debug("[VisualCtrl] ExternalCamera capture(%s) failed: %s", camera_id, exc)
+        return None
 
     def _find_camera_marker(self, camera_id: str) -> dict[str, Any] | None:
         for cam in self._config.get("camera_markers", []):

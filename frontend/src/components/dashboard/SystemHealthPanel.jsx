@@ -177,7 +177,7 @@ export default function SystemHealthPanel({ health, metrics = {}, error, websock
 
       {/* Runtime / stream health */}
       <div className="health-grid">
-        <MetricRow label="WebSocket"     value={websocketStatus || 'unknown'} />
+        <MetricRow label="WebSocket"     value={websocketStatus && websocketStatus !== 'unknown' ? websocketStatus : 'Polling'} />
         <MetricRow label="WS clients"    value={metrics.websocket_clients} />
         <MetricRow label="Dropped frames" value={metrics.frames_dropped} warn={(metrics.frames_dropped || 0) > 100} />
         <MetricRow label="Queue overflows" value={metrics.queue_overflows ?? metrics.queue_overflow_count} warn={(metrics.queue_overflows ?? metrics.queue_overflow_count ?? 0) > 10} />

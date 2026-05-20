@@ -135,6 +135,7 @@ class UploadedVideoProcessingStatus(UploadedVideoBaseModel):
     last_error: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    last_progress_at: str | None = None
     active: bool = False
     report_ready: bool = False
     event_count: int = 0

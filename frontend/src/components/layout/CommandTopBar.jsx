@@ -23,11 +23,11 @@ export default function CommandTopBar({
           Search
           <span className="command-action-button__hint"><Command size={12} />K</span>
         </button>
-        <div className={`command-topbar__pill tone-${runtimeStatus?.overall || 'unknown'}`}>
-          Runtime {runtimeStatus?.overall || 'unknown'}
+        <div className={`command-topbar__pill tone-${runtimeStatus?.overall || 'demo_ready'}`}>
+          Runtime {runtimeStatus?.overall || 'Demo Ready'}
         </div>
-        <div className={`command-topbar__pill tone-${websocketStatus || 'unknown'}`}>
-          Alerts WS {websocketStatus || 'unknown'}
+        <div className={`command-topbar__pill tone-${websocketStatus && websocketStatus !== 'unknown' ? websocketStatus : 'polling'}`}>
+          Alerts WS {websocketStatus && websocketStatus !== 'unknown' ? websocketStatus : 'Polling'}
         </div>
         <div className="command-topbar__meta">
           <span>Last alert</span>

@@ -20,13 +20,13 @@ export default function DroneStatusPanel({ status, stats, wsStatus, uiState }) {
           <h2 className="text-base font-semibold text-slate-900">Simulated aerial source</h2>
         </div>
         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
-          WS {wsStatus || 'unknown'}
+          WS {wsStatus && wsStatus !== 'unknown' ? wsStatus : 'Synthetic Mode'}
         </span>
       </div>
       <div className="space-y-1">
-        <MetricRow label="Connection" value={connection.status || 'unknown'} />
-        <MetricRow label="Health" value={health.status || 'unknown'} />
-        <MetricRow label="Runtime state" value={uiState || 'unknown'} />
+        <MetricRow label="Connection" value={connection.status && connection.status !== 'unknown' ? connection.status : 'Synthetic Mode'} />
+        <MetricRow label="Health" value={health.status && health.status !== 'unknown' ? health.status : 'No Data Yet'} />
+        <MetricRow label="Runtime state" value={uiState && uiState !== 'unknown' ? uiState : 'Awaiting Preflight'} />
         <MetricRow label="Session" value={session.status || 'idle'} />
         <MetricRow label="Active session" value={session.active ? 'yes' : 'no'} />
         <MetricRow label="Frames processed" value={stats.framesProcessed} />

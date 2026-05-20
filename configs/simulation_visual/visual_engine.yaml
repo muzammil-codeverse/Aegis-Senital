@@ -1,0 +1,130 @@
+# Phase XVII — Visual Engine Configuration
+# Controls which simulation runtime the visual scenario system uses.
+#
+# active_engine options:
+#   airsimnh_proxy      — original AirSimNH packaged binary (proxy overlays, no real humans)
+#   blocks_proxy        — Blocks.exe packaged binary (proxy overlays + vehicle mesh)
+#   aegis_unreal_real   — AegisVisualSim editable project / packaged binary (real human actors)
+#
+# To switch engines:
+#   1. Change active_engine below
+#   2. Restart the Aegis backend
+#   3. Start the chosen binary (or open in UE Editor and press Play)
+
+active_engine: airsimnh_proxy   # Switch to aegis_unreal_real after packaging AegisVisualSim
+
+fallback_enabled: true
+fallback_engine: airsimnh_proxy
+
+# ---------------------------------------------------------------------------
+# Engine paths
+# ---------------------------------------------------------------------------
+
+engines:
+  airsimnh_proxy:
+    description: "AirSimNH packaged binary — proxy overlay mode, no real humans"
+    packaged_binary_path: "C:/AegisExternalTools/drone_sim/runtime/environments/AirSimNH/AirSimNH/WindowsNoEditor/AirSimNH.exe"
+    airsim_endpoint: "127.0.0.1:41451"
+    actor_mode: proxy_overlay
+    camera_mode: drone_teleport
+    supports_real_actors: false
+    supports_external_cameras: false
+
+  blocks_proxy:
+    description: "Blocks packaged binary — proxy overlays + BoxCar vehicle mesh"
+    packaged_binary_path: "C:/AegisExternalTools/drone_sim/runtime/environments/Blocks/Blocks_packaged_Windows_55_33/Windows/Blocks/Binaries/Win64/Blocks.exe"
+    airsim_endpoint: "127.0.0.1:41451"
+    actor_mode: spawned_mesh
+    camera_mode: drone_teleport
+    supports_real_actors: false     # SK_Mannequin not packaged into Blocks.exe
+    supports_external_cameras: false
+
+  aegis_unreal_real:
+    description: "AegisVisualSim — real SK_Mannequin + BoxCar actors, 8 ExternalCameras"
+    unreal_project_path: "C:/AegisExternalTools/drone_sim/AegisVisualSim/AegisVisualSim.uproject"
+    packaged_binary_path: "C:/AegisExternalTools/drone_sim/AegisVisualSim/Packaged/Windows/AegisVisualSim.exe"
+    airsim_endpoint: "127.0.0.1:41451"
+    actor_mode: real_mesh
+    camera_mode: external_cameras
+    supports_real_actors: true
+    supports_external_cameras: true
+    human_asset_hint: "SK_Mannequin"
+    vehicle_asset_hint: "BoxCar"
+    python_spawner: "C:/AegisExternalTools/drone_sim/AegisVisualSim/Scripts/aegis_bank_robbery_spawner.py"
+
+# ---------------------------------------------------------------------------
+# AirSim connection settings (shared)
+# ---------------------------------------------------------------------------
+
+airsim:
+  host: "127.0.0.1"
+  port: 41451
+  vehicle_name: "Drone1"
+  timeout_seconds: 5.0
+  reconnect_interval_seconds: 10.0
+
+# ---------------------------------------------------------------------------
+# Camera configuration
+# ---------------------------------------------------------------------------
+
+cameras:
+  mode: external_cameras      # external_cameras | drone_teleport
+  capture_width: 1280
+  capture_height: 720
+  fov_degrees: 90
+  external_cameras:
+    - camera_id: CAM-BANK-01
+      zone: zone_financial
+      pose_scenario: {x: 118.0, y:  77.0, z: 4.5, pitch: -65, yaw:  45}
+    - camera_id: CAM-BANK-02
+      zone: zone_financial
+      pose_scenario: {x: 148.0, y: 103.0, z: 4.5, pitch: -65, yaw: 135}
+    - camera_id: CAM-BANK-03
+      zone: zone_financial
+      pose_scenario: {x: 162.0, y: 118.0, z: 4.5, pitch: -65, yaw:  45}
+    - camera_id: CAM-MARKET-01
+      zone: zone_market
+      pose_scenario: {x: 198.0, y: 142.0, z: 5.0, pitch: -65, yaw: 135}
+    - camera_id: CAM-ROAD-01
+      zone: zone_roads
+      pose_scenario: {x: 255.0, y: 175.0, z: 5.0, pitch: -65, yaw:  90}
+    - camera_id: CAM-PARKING-01
+      zone: zone_parking
+      pose_scenario: {x: 305.0, y: 196.0, z: 5.0, pitch: -65, yaw:  45}
+    - camera_id: CAM-ALLEY-01
+      zone: zone_alley
+      pose_scenario: {x: 325.0, y: 226.0, z: 4.5, pitch: -65, yaw:  90}
+    - camera_id: CAM-GATE-01
+      zone: zone_alley
+      pose_scenario: {x: 378.0, y: 258.0, z: 4.5, pitch: -65, yaw:  45}
+
+# ---------------------------------------------------------------------------
+# Asset discovery hints
+# ---------------------------------------------------------------------------
+
+asset_discovery:
+  human_mesh_hints:
+    - SK_Mannequin
+    - Mannequin
+    - human_ai
+    - GroupedAI
+    - Character
+    - Pedestrian
+    - MetaHuman
+    - Crowd
+  vehicle_mesh_hints:
+    - BoxCar
+    - Vehicle_SkelMesh
+    - SUV
+    - Sedan
+    - Car
+    - Vehicle
+    - Hatchback
+    - Pickup
+    - Truck
+  prop_mesh_hints:
+    - Cone
+    - Barrier
+    - TrafficSign
+    - Sign
+    - Bollard

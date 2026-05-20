@@ -314,7 +314,7 @@ export default function VisualScenarioPanel({
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 12, flexWrap: 'wrap' }}>
         <div>
           <p className="eyebrow" style={{ margin: 0, fontSize: 10, letterSpacing: '0.1em', color: '#6b7280', textTransform: 'uppercase' }}>
-            Phase XII
+            Phase XVII
           </p>
           <h2 style={{ margin: '2px 0 4px', fontSize: 15, color: '#e5e7eb' }}>Visual Simulation Bridge</h2>
         </div>
@@ -323,6 +323,47 @@ export default function VisualScenarioPanel({
           <ModeBadge mode={realActorMode} />
         </div>
       </header>
+
+      {/* Phase XVII: Real Visual Sim status */}
+      <div
+        data-testid="visual-phase17-notice"
+        style={{
+          background: '#0d1f12', border: '1px solid #15803d',
+          borderRadius: 4, padding: 10, marginBottom: 10,
+          color: '#86efac', fontSize: 11,
+        }}
+      >
+        <strong style={{ color: '#4ade80' }}>Phase XVII — AegisVisualSim Project Ready</strong>
+        <p style={{ margin: '4px 0 2px' }}>
+          <strong>Project:</strong>{' '}
+          <code style={{ fontSize: 10, background: '#0f2e1a', padding: '1px 5px', borderRadius: 3 }}>
+            C:\AegisExternalTools\drone_sim\AegisVisualSim\AegisVisualSim.uproject
+          </code>
+        </p>
+        <p style={{ margin: '2px 0 0' }}>
+          Assets available: <strong>SK_Mannequin</strong> (idle/walk/run anims), <strong>BoxCar vehicle</strong>,
+          <strong> GroupedAI spawner</strong>, <strong>SplineAnimationAnimated</strong>.
+          Run <code style={{ fontSize: 10, background: '#0f2e1a', padding: '1px 4px', borderRadius: 3 }}>setup_content.bat</code> then
+          open in UE 5.4 Editor and follow <code style={{ fontSize: 10, background: '#0f2e1a', padding: '1px 4px', borderRadius: 3 }}>BLUEPRINT_SETUP.md</code>.
+          8 ExternalCamera viewpoints configured in <code style={{ fontSize: 10, background: '#0f2e1a', padding: '1px 4px', borderRadius: 3 }}>Documents/AirSim/settings.json</code>.
+        </p>
+      </div>
+
+      {/* Active engine badge */}
+      {syncStatus?.controller?.active_engine && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Active Engine:</span>
+          <span style={{
+            fontSize: 11, fontWeight: 700,
+            color: syncStatus.controller.active_engine === 'aegis_unreal_real' ? '#4ade80' : '#fa8c16',
+            background: syncStatus.controller.active_engine === 'aegis_unreal_real' ? '#0d1f1222' : '#1f130022',
+            border: `1px solid ${syncStatus.controller.active_engine === 'aegis_unreal_real' ? '#15803d' : '#92400e'}`,
+            padding: '2px 8px', borderRadius: 4, letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+            {syncStatus.controller.active_engine}
+          </span>
+        </div>
+      )}
 
       {/* Fidelity warning */}
       {(realActorMode === 'proxy_overlay' || realActorMode === 'unavailable') && (
@@ -375,6 +416,22 @@ export default function VisualScenarioPanel({
         <ActionButton label="Refresh Mode"          onClick={handleRefreshMode}  busy={busyAction === 'mode-refresh'}                  testId="visual-action-refresh-mode" />
         <ActionButton label="Stop Animation"        onClick={handleStopDemo}     busy={busyAction === 'stop'}         tone="warning" testId="visual-action-stop" />
         <ActionButton label="Flush Visual Scene"    onClick={handleFlush}        busy={busyAction === 'flush'}        tone="danger"  testId="visual-action-flush" />
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <button
+          type="button"
+          onClick={() => { window.location.hash = 'camera-grid' }}
+          style={{ fontSize: 11, color: '#60a5fa', background: 'none', border: '1px solid #1d4ed8', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' }}
+        >
+          Open Camera Grid
+        </button>
+        <button
+          type="button"
+          onClick={() => { window.open('https://cosys-airsim.github.io/AirSim/', '_blank', 'noopener') }}
+          style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: '1px solid #374151', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' }}
+        >
+          AirSim Documentation
+        </button>
       </div>
 
       {/* Cameras grid */}

@@ -178,11 +178,12 @@ class UploadedVideoService:
         last_error: str | None = None,
     ) -> UploadedVideoProcessingStatus:
         session.status = status_value
+        now = _now_iso()
         if last_error:
             session.metadata = {
                 **(session.metadata or {}),
                 "last_error": last_error,
-                "last_error_at": _now_iso(),
+                "last_error_at": now,
             }
         self._write_session(session)
         status = UploadedVideoProcessingStatus(
@@ -191,6 +192,7 @@ class UploadedVideoService:
             progress=session.progress,
             started_at=started_at,
             completed_at=session.completed_at,
+            last_progress_at=now if active else None,
             active=active,
             report_ready=report_ready,
             event_count=event_count,
@@ -778,10 +780,14 @@ class UploadedVideoService:
                             )
                         )
                 processed_frames += 1
+                # Use frame_index (video position) not processed_frames so stride
+                # does not cap the display at 1/stride of total progress.
+                # Frame loop covers 0–85% of overall pipeline progress.
+                frame_pos_pct = (frame_index / max(1, total_frames)) * 85.0
                 session.progress = UploadedVideoProgress(
                     frames_processed=processed_frames,
                     total_frames=total_frames or processed_frames,
-                    percent=round((processed_frames / max(1, total_frames or processed_frames)) * 100.0, 2),
+                    percent=round(min(85.0, frame_pos_pct), 2),
                 )
                 self._write_session(session)
                 self._write_status(
@@ -791,6 +797,7 @@ class UploadedVideoService:
                         status="inference",
                         progress=session.progress,
                         started_at=started_at,
+                        last_progress_at=_now_iso(),
                         active=True,
                         report_ready=False,
                         event_count=len(generated_events),
@@ -800,6 +807,12 @@ class UploadedVideoService:
                 frame_index += 1
             was_cancelled = session.status == "cancelled" or cancel_event.is_set()
             if not was_cancelled:
+                # Event generation: 85–90%
+                session.progress = UploadedVideoProgress(
+                    frames_processed=processed_frames,
+                    total_frames=total_frames or processed_frames,
+                    percent=90.0,
+                )
                 self._write_processing_status(
                     session,
                     "event_generation",
@@ -828,6 +841,12 @@ class UploadedVideoService:
                     generated_timeline,
                     source_video_path,
                     video_duration_cap,
+                )
+                # Report generation: 90–95%
+                session.progress = UploadedVideoProgress(
+                    frames_processed=processed_frames,
+                    total_frames=total_frames or processed_frames,
+                    percent=95.0,
                 )
                 self._write_processing_status(
                     session,
@@ -863,6 +882,13 @@ class UploadedVideoService:
             self._write_json(self._timeline_path(session_id), [item.model_dump(mode="json") for item in generated_timeline])
             self._write_json(self._report_path(session_id), report.model_dump(mode="json"))
             session.status = "cancelled" if was_cancelled else "completed"
+            # Advance to 100% on terminal state so the bar completes
+            if not was_cancelled:
+                session.progress = UploadedVideoProgress(
+                    frames_processed=processed_frames,
+                    total_frames=total_frames or processed_frames,
+                    percent=100.0,
+                )
             self._write_session(session)
             self._write_status(
                 session_id,
@@ -872,6 +898,7 @@ class UploadedVideoService:
                     progress=session.progress,
                     started_at=started_at,
                     completed_at=session.completed_at,
+                    last_progress_at=None,
                     active=False,
                     report_ready=True,
                     event_count=len(generated_events),

@@ -93,6 +93,7 @@ class DroneSimulationService:
             allowed_cameras=list(self._allowed_cameras),
         )
         self._last_status: DroneConnectionStatus | None = None
+        self._last_connect_at: float = 0.0
         self._last_frame: DroneCameraFrame | None = None
         self._latest_frames: dict[str, DroneCameraFrame] = {}
         self._last_telemetry: DroneTelemetry | None = None
@@ -170,8 +171,20 @@ class DroneSimulationService:
             default_fov=90.0,
         )
 
-    def connect(self) -> DroneConnectionStatus:
+    # Minimum seconds between actual AirSim probe attempts when disconnected.
+    # Prevents thread-pool exhaustion from back-to-back blocking socket calls.
+    _CONNECT_COOLDOWN_S: float = 15.0
+
+    def connect(self, force: bool = False) -> DroneConnectionStatus:
+        now = time.time()
+        if (
+            not force
+            and self._last_status is not None
+            and (now - self._last_connect_at) < self._CONNECT_COOLDOWN_S
+        ):
+            return self._last_status
         _metric_increment("drone_sim_connection_attempts_total")
+        self._last_connect_at = now
         self.ensure_registered()
         status = self._client.connect()
         self._last_status = status

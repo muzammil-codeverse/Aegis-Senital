@@ -105,7 +105,9 @@ export default function ExhibitionPreflightPanel({
 
       {error && <p className="error-text">{error}</p>}
       {openAiMissing && (
-        <p className="warning-text">LLM / OSINT provider key missing: OPENAI_API_KEY is not present in the backend local environment.</p>
+        <p className="warning-text">
+          OSINT / LLM enrichment provider not configured — OPENAI_API_KEY is absent. Core demo, camera tracking, fusion, and drone mission continue normally. Only LLM-generated case summaries and OSINT enrichment are affected.
+        </p>
       )}
 
       <div className="metric-strip" style={{ marginBottom: 12 }}>

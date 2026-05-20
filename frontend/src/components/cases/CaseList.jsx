@@ -24,7 +24,9 @@ export default function CaseList({
       </div>
       {loading && <LoadingState label="Loading cases" />}
       {error && <ErrorState message={error} onRetry={onRetry} />}
-      {!loading && !error && cases.length === 0 && <EmptyState message="No cases available for the current filters." />}
+      {!loading && !error && cases.length === 0 && (
+        <EmptyState message="No cases created yet. Cases are generated automatically from high-severity incidents or can be created manually from an uploaded video analysis or incident event." />
+      )}
       <div className="stack-list">
         {cases.map(item => (
           <article

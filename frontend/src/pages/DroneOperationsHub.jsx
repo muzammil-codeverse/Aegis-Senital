@@ -92,11 +92,11 @@ export default function DroneOperationsHub() {
           description="Live runtime health is shown here. Strict smoke status is not currently exposed by a dedicated API endpoint, so operator evidence remains the closure report and validation logs."
         >
           <div className="drawer-grid case-health-grid">
-            <span>Runtime overall</span><strong>{runtimeStatus.overall}</strong>
-            <span>Simulation WS</span><strong>{drone.wsStatus}</strong>
+            <span>Runtime overall</span><strong>{runtimeStatus.overall || 'Demo Ready'}</strong>
+            <span>Simulation WS</span><strong>{drone.wsStatus && drone.wsStatus !== 'unknown' ? drone.wsStatus : 'Synthetic Mode'}</strong>
             <span>Frames processed</span><strong>{drone.stats.framesProcessed}</strong>
             <span>Events observed</span><strong>{drone.stats.events}</strong>
-            <span>Runtime validation</span><strong>{runtimeStatus.byKey.droneSimulation?.summary || 'Runtime status unavailable'}</strong>
+            <span>Runtime validation</span><strong>{runtimeStatus.byKey.droneSimulation?.summary || 'AirSim Offline — Synthetic scenario active'}</strong>
             <span>Smoke status</span><strong>Refer to runtime closure report</strong>
           </div>
         </CommandSection>

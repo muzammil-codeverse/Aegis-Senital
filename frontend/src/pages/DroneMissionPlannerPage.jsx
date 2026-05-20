@@ -236,10 +236,66 @@ export default function DroneMissionPlannerPage() {
 
         {/* Right column: canvas, controls, status, telemetry, events, report */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Exhibition card: shown when no mission is selected and no missions exist */}
+          {!selectedMission && missions.length === 0 && !loading && (
+            <div className="panel" style={{ border: '1px solid #1d4ed8', background: '#0f172a' }}>
+              <div className="panel-header" style={{ borderBottom: '1px solid #1d4ed8' }}>
+                <div>
+                  <p className="eyebrow" style={{ color: '#60a5fa' }}>DRONE-ALPHA</p>
+                  <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>Bank Robbery Response Mission — Demo Route</h3>
+                </div>
+                <span style={{ background: '#1d4ed8', borderRadius: 4, padding: '2px 8px', fontSize: 10, fontWeight: 700, color: '#93c5fd', textTransform: 'uppercase' }}>
+                  Synthetic
+                </span>
+              </div>
+              <div className="panel-body" style={{ padding: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12, fontSize: 12 }}>
+                  <div><span style={{ color: '#6b7280' }}>Vehicle</span> <strong>DRONE-ALPHA</strong></div>
+                  <div><span style={{ color: '#6b7280' }}>Provider</span> <strong>Synthetic / AirSim</strong></div>
+                  <div><span style={{ color: '#6b7280' }}>Route type</span> <strong>Linear — Bank to Parking Zone</strong></div>
+                  <div><span style={{ color: '#6b7280' }}>Waypoints</span> <strong>5</strong></div>
+                  <div><span style={{ color: '#6b7280' }}>Mission status</span> <strong style={{ color: '#f59e0b' }}>Awaiting Import</strong></div>
+                  <div><span style={{ color: '#6b7280' }}>AirSim</span> <strong style={{ color: '#6b7280' }}>Offline — Synthetic active</strong></div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Demo Waypoints</div>
+                  {[
+                    { id: 'WP-1', label: 'Bank Entrance (launch point)', lat: 48.8566, lon: 2.3522 },
+                    { id: 'WP-2', label: 'Market Street intersection', lat: 48.8570, lon: 2.3530 },
+                    { id: 'WP-3', label: 'Road corridor observation', lat: 48.8575, lon: 2.3545 },
+                    { id: 'WP-4', label: 'Alley junction sweep', lat: 48.8578, lon: 2.3558 },
+                    { id: 'WP-5', label: 'Parking Zone (target intercept)', lat: 48.8582, lon: 2.3570 },
+                  ].map((wp, i) => (
+                    <div key={wp.id} style={{ display: 'flex', gap: 8, padding: '3px 0', borderBottom: '1px solid #1e293b', fontSize: 12 }}>
+                      <span style={{ color: '#60a5fa', fontWeight: 600, width: 40, flexShrink: 0 }}>{wp.id}</span>
+                      <span style={{ flex: 1, color: '#d1d5db' }}>{wp.label}</span>
+                      <span style={{ color: '#374151', fontSize: 10 }}>{wp.lat.toFixed(4)}, {wp.lon.toFixed(4)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 8 }}>
+                  Import the bank robbery response preset from the left panel to activate this mission route for real simulation.
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ fontSize: 11 }}
+                  onClick={() => {
+                    setSelectedPreset('fixed_camera_handoff_demo')
+                    onImportPreset()
+                  }}
+                  disabled={presetLoading || cityPresets.length === 0}
+                >
+                  {presetLoading ? 'Importing...' : 'Import Bank Robbery Response Mission'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Route visualisation */}
           <div className="panel">
             <div className="panel-header">
-              {selectedMission ? selectedMission.name : 'No mission selected'}
+              {selectedMission ? selectedMission.name : (missions.length > 0 ? 'Select a mission from the list' : 'No mission selected')}
             </div>
             <div className="panel-body" style={{ padding: 8 }}>
               <MissionPlannerCanvas

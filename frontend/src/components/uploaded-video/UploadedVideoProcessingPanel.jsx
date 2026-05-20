@@ -3,6 +3,7 @@ export default function UploadedVideoProcessingPanel({
   status,
   connectionStatus,
   error,
+  stalled = false,
   busy = false,
   onStart,
   onCancel,
@@ -126,6 +127,24 @@ export default function UploadedVideoProcessingPanel({
         </button>
         <span className="muted">{session.hash_sha256?.slice(0, 20)}...</span>
       </div>
+      {stalled && runningStates.has(statusValue) ? (
+        <div className="preflight-alert" style={{ borderColor: '#f59e0b', background: '#f59e0b11' }}>
+          <strong>Processing appears stalled</strong>
+          <p>
+            No progress has been reported for over 60 seconds. The backend job may be waiting on a model load,
+            a large video segment, or may have silently crashed. Cancel and retry, or check backend logs.
+          </p>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ marginTop: 8 }}
+            disabled={!canCancel}
+            onClick={() => onCancel(session.session_id)}
+          >
+            Cancel stalled job
+          </button>
+        </div>
+      ) : null}
       {error ? <p className="error-text">Processing status error: {error}</p> : null}
       {statusValue === 'failed' ? (
         <div className="preflight-alert status-error">

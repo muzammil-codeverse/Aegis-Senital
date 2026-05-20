@@ -7,7 +7,7 @@ export default function ExternalSourceList({ items = [], busy, canWrite, onDelet
   const [draftReliability, setDraftReliability] = useState({})
 
   if (!items.length) {
-    return <EmptyState message="No analyst-provided enrichment sources yet." />
+    return <EmptyState message="No analyst-provided enrichment sources yet. Add external links, upload documents, or record analyst notes using the forms above. OSINT provider not configured — local demo enrichment continues without LLM summaries." />
   }
 
   return (

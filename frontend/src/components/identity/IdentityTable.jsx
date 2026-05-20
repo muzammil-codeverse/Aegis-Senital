@@ -106,7 +106,8 @@ export default function IdentityTable({
       <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
         {identities.length === 0 && !loading ? (
           <div style={{ padding: '24px', color: '#8b949e', fontSize: '13px', textAlign: 'center' }}>
-            No identities registered
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>No identity candidates generated in current demo</div>
+            <div style={{ fontSize: 11 }}>Identity candidates are generated automatically from face embeddings during video analysis or live camera inference. Run the exhibition scenario or process an uploaded video to populate this view.</div>
           </div>
         ) : (
           identities.map((identity) => {

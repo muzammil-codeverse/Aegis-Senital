@@ -66,6 +66,15 @@ export default function DroneFusionPage() {
             <button type="button" className="command-action-button" onClick={fusion.fetchAll} disabled={fusion.loading}>
               Refresh
             </button>
+            {fusion.observations.length === 0 && (
+              <button
+                type="button"
+                className="command-action-button"
+                onClick={() => { window.location.hash = 'exhibition-demo' }}
+              >
+                Start Exhibition Demo
+              </button>
+            )}
             <button type="button" className="command-action-button" onClick={() => { window.location.hash = 'map-operations' }}>
               Open map overlays
             </button>
@@ -77,7 +86,7 @@ export default function DroneFusionPage() {
         <article className="command-summary-card">
           <span>Source-pair summary</span>
           <strong>{fusion.observations.length}</strong>
-          <p>{sourceSummary || 'No authorized observations are currently visible.'}</p>
+          <p>{sourceSummary || (fusion.observations.length === 0 ? 'Synthetic scenario fusion ready — start exhibition demo to generate live observations.' : 'No authorized observations are currently visible.')}</p>
         </article>
         <article className="command-summary-card">
           <span>Pending reviews</span>

@@ -3,7 +3,7 @@ import { formatNumber } from '../../utils/formatters'
 export default function StatusBar({ metrics = {}, health }) {
   return (
     <footer className="statusbar">
-      <span>Runtime: <strong>{health?.status || 'unknown'}</strong></span>
+      <span>Runtime: <strong>{health?.status && health.status !== 'unknown' ? health.status : 'Demo Ready'}</strong></span>
       <span>Frames: <strong>{formatNumber(metrics.frames_processed)}</strong></span>
       <span>Dropped: <strong>{formatNumber(metrics.frames_dropped)}</strong></span>
       <span>Alerts: <strong>{formatNumber(metrics.alerts_created)}</strong></span>

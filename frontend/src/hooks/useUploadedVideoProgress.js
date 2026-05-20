@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildWebSocketProtocols, buildWebSocketUrl } from '../config'
 import { getStoredToken } from '../api/client'
 import { getUploadedVideoStatus } from '../api/uploadedVideoApi'
@@ -7,6 +7,8 @@ import { useAuth } from './useAuth'
 
 const POLL_MS = 2000
 const MAX_BACKOFF_MS = 30000
+const STALL_THRESHOLD_MS = 60_000
+const RUNNING_STATES = new Set(['queued', 'processing', 'frame_extraction', 'inference', 'event_generation', 'report_generation'])
 
 export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
   const auth = useAuth()
@@ -14,12 +16,42 @@ export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
   const [status, setStatus] = useState(null)
   const [connectionStatus, setConnectionStatus] = useState('idle')
   const [error, setError] = useState(null)
+  const [stalled, setStalled] = useState(false)
+
+  // Track last time we saw progress change to detect stall
+  const lastProgressRef = useRef({ percent: -1, at: Date.now() })
+  const stallTimerRef = useRef(null)
+
+  const updateStallTracker = useCallback((next) => {
+    if (!next) return
+    const pct = next?.progress?.percent ?? -1
+    const statusVal = String(next?.status || '').toLowerCase()
+    if (!RUNNING_STATES.has(statusVal)) {
+      setStalled(false)
+      if (stallTimerRef.current) {
+        window.clearTimeout(stallTimerRef.current)
+        stallTimerRef.current = null
+      }
+      return
+    }
+    if (pct !== lastProgressRef.current.percent) {
+      lastProgressRef.current = { percent: pct, at: Date.now() }
+      setStalled(false)
+    }
+    // Use backend heartbeat timestamp if available
+    const backendTs = next?.last_progress_at ? new Date(next.last_progress_at).getTime() : null
+    const referenceTs = backendTs && Number.isFinite(backendTs) ? backendTs : lastProgressRef.current.at
+    if (Date.now() - referenceTs > STALL_THRESHOLD_MS) {
+      setStalled(true)
+    }
+  }, [])
 
   useEffect(() => {
     if (!authReady || !auth.authenticated || !enabled || !sessionId) {
       const resetTimer = window.setTimeout(() => {
         setStatus(null)
         setConnectionStatus('idle')
+        setStalled(false)
       }, 0)
       return () => window.clearTimeout(resetTimer)
     }
@@ -30,12 +62,14 @@ export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
     let reconnectTimer = null
     let reconnectAttempts = 0
     let terminal = false
+    lastProgressRef.current = { percent: -1, at: Date.now() }
 
     async function poll() {
       try {
         const next = await getUploadedVideoStatus(sessionId)
         if (!closed) {
           setStatus(next)
+          updateStallTracker(next)
           setConnectionStatus(current => (current === 'auth_error' ? current : 'polling'))
           setError(null)
           terminal = Boolean(next?.status && ['completed', 'failed', 'cancelled'].includes(next.status))
@@ -64,6 +98,7 @@ export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
         try {
           const payload = JSON.parse(event.data)
           setStatus(payload)
+          updateStallTracker(payload)
           setConnectionStatus('open')
           setError(null)
           if (payload?.status && ['completed', 'failed', 'cancelled'].includes(payload.status)) {
@@ -103,9 +138,10 @@ export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
       closed = true
       if (pollTimer) window.clearTimeout(pollTimer)
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      if (stallTimerRef.current) window.clearTimeout(stallTimerRef.current)
       socket?.close()
     }
-  }, [auth.authenticated, auth.token, authReady, enabled, sessionId])
+  }, [auth.authenticated, auth.token, authReady, enabled, sessionId, updateStallTracker])
 
-  return { status, connectionStatus, error }
+  return { status, connectionStatus, error, stalled }
 }
