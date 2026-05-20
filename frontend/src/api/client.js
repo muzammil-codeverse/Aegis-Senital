@@ -59,9 +59,35 @@ export class ApiError extends Error {
   }
 }
 
-const AUTH_ENDPOINTS = new Set(['/api/auth/login', '/api/auth/me'])
-let lastUnauthorizedEventAt = 0
-const UNAUTHORIZED_EVENT_COOLDOWN_MS = 2500
+const SESSION_VALIDATION_ENDPOINT = '/api/auth/me'
+let lastScopedAuthEventAt = 0
+const SCOPED_AUTH_EVENT_COOLDOWN_MS = 2500
+
+function responseErrorMessage(data) {
+  if (!data || typeof data !== 'object') return null
+  if (typeof data.detail === 'string') return data.detail
+  if (data.detail && typeof data.detail === 'object') {
+    if (typeof data.detail.detail === 'string') return data.detail.detail
+    if (typeof data.detail.message === 'string') return data.detail.message
+    if (typeof data.detail.error === 'string') return data.detail.error
+  }
+  if (typeof data.error === 'string') return data.error
+  if (typeof data.message === 'string') return data.message
+  return null
+}
+
+function requestPath(config = {}) {
+  const rawUrl = String(config.url || '')
+  try {
+    return new URL(rawUrl, API_BASE_URL).pathname
+  } catch {
+    return rawUrl.split('?')[0]
+  }
+}
+
+function dispatchApiEvent(name, detail = {}) {
+  window.dispatchEvent(new CustomEvent(name, { detail }))
+}
 
 export function classifyApiError(error) {
   const status = error?.response?.status
@@ -73,7 +99,7 @@ export function classifyApiError(error) {
   if (status === 404) return { kind: 'not_found', message: 'This endpoint is unavailable in the current runtime.' }
   if (status === 503) return { kind: 'unavailable', message: 'Service is currently degraded. Please retry shortly.' }
   if (status >= 500) return { kind: 'server_error', message: 'Server error. Please retry.' }
-  return { kind: 'request_error', message: error?.response?.data?.detail || error?.message || 'Request failed' }
+  return { kind: 'request_error', message: responseErrorMessage(error?.response?.data) || error?.message || 'Request failed' }
 }
 
 export const apiClient = axios.create({
@@ -104,21 +130,37 @@ apiClient.interceptors.response.use(
   response => response,
   error => {
     const status = error.response?.status
-    const path = String(error.config?.url || '')
+    const path = requestPath(error.config)
     const classification = classifyApiError(error)
     if (status === 401) {
-      clearStoredToken()
-      const isAuthEndpoint = AUTH_ENDPOINTS.has(path)
-      const now = Date.now()
-      if (!isAuthEndpoint && now - lastUnauthorizedEventAt > UNAUTHORIZED_EVENT_COOLDOWN_MS) {
-        lastUnauthorizedEventAt = now
-        window.dispatchEvent(new CustomEvent('aegis-auth-unauthorized'))
+      if (path === SESSION_VALIDATION_ENDPOINT) {
+        clearStoredToken()
+        dispatchApiEvent('aegis-session-expired', { url: path })
+      } else {
+        const now = Date.now()
+        if (now - lastScopedAuthEventAt > SCOPED_AUTH_EVENT_COOLDOWN_MS) {
+          lastScopedAuthEventAt = now
+          dispatchApiEvent('aegis-api-unauthorized', {
+            url: path,
+            method: error.config?.method,
+            status,
+          })
+        }
       }
+    } else if (status === 403) {
+      dispatchApiEvent('aegis-access-denied', {
+        url: path,
+        method: error.config?.method,
+        status,
+      })
+    } else if (!status) {
+      dispatchApiEvent('aegis-service-unavailable', {
+        url: path,
+        method: error.config?.method,
+        kind: classification.kind,
+      })
     }
-    const message =
-      error.response?.data?.detail ||
-      error.response?.data?.error ||
-      classification.message
+    const message = responseErrorMessage(error.response?.data) || classification.message
     throw new ApiError(message, {
       status,
       kind: classification.kind,

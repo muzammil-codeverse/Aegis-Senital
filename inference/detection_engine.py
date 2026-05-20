@@ -72,10 +72,11 @@ class DetectionEngine:
         device: str = "auto",
         model_pool: "ModelPool | None" = None,
     ) -> None:
-        system_boot_check()
         self._model_pool = model_pool
 
         if model_pool is not None:
+            if not getattr(model_pool, "is_loaded", False):
+                raise RuntimeError("DetectionEngine requires a loaded ModelPool in pool mode")
             # Pool mode: borrow shared weights; no per-stream YOLO allocation.
             self._weapon_path = ""
             self._phone_path = ""
@@ -85,6 +86,7 @@ class DetectionEngine:
             self._phone_model = None
             self._model_status = dict(model_pool.model_status)
         else:
+            system_boot_check()
             # Standalone mode: load private YOLO instances (original behaviour).
             router = ModelRouter()
             weapon_model = router.get_model("weapon") if weapon_model_path is None else None

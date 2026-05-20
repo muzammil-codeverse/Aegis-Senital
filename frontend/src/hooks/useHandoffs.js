@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getActiveHandoffs, getRecentHandoffs } from '../api/handoffsApi'
+import { useAuthGate } from './useAuthenticatedQuery'
 
 const POLL_MS = 4000
 
-export function useHandoffs({ pollMs = POLL_MS } = {}) {
+export function useHandoffs({ pollMs = POLL_MS, enabled = true } = {}) {
+  const gate = useAuthGate('map:read', { enabled })
   const [activeHandoffs, setActiveHandoffs] = useState([])
   const [recentHandoffs, setRecentHandoffs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -11,6 +13,14 @@ export function useHandoffs({ pollMs = POLL_MS } = {}) {
   const mountedRef = useRef(true)
 
   const fetch = useCallback(async () => {
+    if (!gate.enabled) {
+      if (!mountedRef.current) return
+      setLoading(gate.reason === 'checking')
+      setError(gate.reason && gate.reason !== 'disabled' && gate.reason !== 'checking' ? gate.message : null)
+      setActiveHandoffs([])
+      setRecentHandoffs([])
+      return
+    }
     try {
       const [active, recent] = await Promise.all([
         getActiveHandoffs(200),
@@ -25,17 +35,24 @@ export function useHandoffs({ pollMs = POLL_MS } = {}) {
     } finally {
       if (mountedRef.current) setLoading(false)
     }
-  }, [])
+  }, [gate.enabled, gate.message, gate.reason])
 
   useEffect(() => {
     mountedRef.current = true
-    fetch()
+    const initialTimer = window.setTimeout(fetch, 0)
+    if (!gate.enabled) {
+      return () => {
+        mountedRef.current = false
+        window.clearTimeout(initialTimer)
+      }
+    }
     const id = setInterval(fetch, pollMs)
     return () => {
       mountedRef.current = false
+      window.clearTimeout(initialTimer)
       clearInterval(id)
     }
-  }, [fetch, pollMs])
+  }, [fetch, gate.enabled, pollMs])
 
   const mergeWebSocketHandoff = useCallback((wsHandoff) => {
     const id = wsHandoff?.handoff_id
@@ -67,5 +84,5 @@ export function useHandoffs({ pollMs = POLL_MS } = {}) {
     })
   }, [])
 
-  return { activeHandoffs, recentHandoffs, loading, error, refresh: fetch, mergeWebSocketHandoff }
+  return { activeHandoffs, recentHandoffs, loading, error, authGate: gate, refresh: fetch, mergeWebSocketHandoff }
 }

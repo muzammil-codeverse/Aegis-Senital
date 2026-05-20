@@ -20,10 +20,43 @@ import { getStreams } from '../api/camerasApi'
 import { compareSeverity } from '../utils/severity'
 import { DASHBOARD_POLL_MS } from '../config'
 import { useDroneSimulation } from '../hooks/useDroneSimulation'
+import { useSimulationSources } from '../hooks/useSimulationSources'
+import { useScenario } from '../hooks/useScenario'
+import ExhibitionDemoPanel from '../components/exhibition/ExhibitionDemoPanel'
 
 export default function Dashboard({ alertState, incidentState, caseState, metricsState, websocketState, health }) {
   const auth = useAuth()
-  const drone = useDroneSimulation({ enabled: auth.hasPermission('drone:read'), pollMs: DASHBOARD_POLL_MS })
+  const authReady = Boolean(auth.ready ?? !auth.loading)
+  const dashboardReady = authReady && auth.authenticated
+  const canDroneRead = dashboardReady && auth.hasPermission('drone:read')
+  const canSystemRead = dashboardReady && auth.hasPermission('system:read')
+  const canMapRead = dashboardReady && auth.hasPermission('map:read')
+  const canCameraRead = dashboardReady && auth.hasPermission('camera:read')
+  const canStreamRead = dashboardReady && auth.hasPermission('stream:read')
+  const canAlertRead = dashboardReady && auth.hasPermission('alert:read')
+  const canAnalyticsRead = dashboardReady && auth.hasPermission('analytics:read')
+  const drone = useDroneSimulation({ enabled: canDroneRead, pollMs: DASHBOARD_POLL_MS })
+  const sim = useSimulationSources({ enabled: canSystemRead, pollMs: DASHBOARD_POLL_MS })
+  const refreshSimulationSources = sim.refresh
+  const scenario = useScenario({ enabled: canSystemRead })
+
+  // Hash-based scroll: handles #exhibition-demo and #scenario-tracking/{runId}
+  useEffect(() => {
+    function handleHashChange() {
+      const hash = window.location.hash
+      if (hash === '#exhibition-demo') {
+        const el = document.getElementById('exhibition-demo')
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      if (!hash.startsWith('#scenario-tracking/')) return
+      const el = document.querySelector('[data-tracking-panel]')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    handleHashChange()
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
   const [anomalies, setAnomalies] = useState([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(true)
   const [anomaliesError, setAnomaliesError] = useState(null)
@@ -36,13 +69,12 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
     error: mapError,
     refresh: refreshMap,
     setSelectedCameraId: setMapSelectedCameraId,
-  } = useMapState({ pollMs: DASHBOARD_POLL_MS })
+  } = useMapState({ enabled: canMapRead, pollMs: DASHBOARD_POLL_MS })
 
   const {
     activeHandoffs: polledActiveHandoffs,
     recentHandoffs,
-    mergeWebSocketHandoff,
-  } = useHandoffs({ pollMs: DASHBOARD_POLL_MS })
+  } = useHandoffs({ enabled: canMapRead, pollMs: DASHBOARD_POLL_MS })
 
   const { handoffList: wsHandoffList, status: handoffWsStatus } = useWebSocketHandoffs()
 
@@ -59,8 +91,8 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
   }, [polledActiveHandoffs, wsHandoffList])
 
   // Camera state — managed here, passed down to avoid duplicate fetching
-  const { cameras, loading: camerasLoading, error: camerasError, refresh: refreshCameras, selectedCamera, setSelectedCamera } = useCameras()
-  const { framesByCameraId: polledFrames, refresh: refreshFrames } = useLatestFrames()
+  const { cameras, loading: camerasLoading, error: camerasError, refresh: refreshCameras, selectedCamera, setSelectedCamera } = useCameras({ enabled: canCameraRead })
+  const { framesByCameraId: polledFrames, refresh: refreshFrames } = useLatestFrames({ enabled: canCameraRead })
   const { framesByCameraId: wsFrames } = useFrameUpdates()
   // Merge WS frame updates (lower latency) with polling fallback
   const framesByCameraId = useMemo(
@@ -71,6 +103,7 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
 
   // Fetch stream session states
   const refreshStreamStates = useCallback(async () => {
+    if (!canStreamRead) return {}
     try {
       const res = await getStreams()
       const byId = {}
@@ -78,56 +111,96 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
         if (s?.camera_id) byId[s.camera_id] = s
       }
       setStreamStatesByCameraId(byId)
-    } catch (_) {}
-  }, [])
+      return byId
+    } catch {
+      // Stream state is advisory on the dashboard; camera and alert panels still render without it.
+      return {}
+    }
+  }, [canStreamRead])
 
   useEffect(() => {
-    refreshStreamStates()
+    const load = () => { refreshStreamStates() }
+    const initial = window.setTimeout(load, 0)
+    if (!canStreamRead) return undefined
     const t = window.setInterval(refreshStreamStates, DASHBOARD_POLL_MS)
-    return () => window.clearInterval(t)
-  }, [refreshStreamStates])
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(t)
+    }
+  }, [canStreamRead, refreshStreamStates])
+
+  const dashboardCameras = useMemo(
+    () => (sim.cameras.length > 0 ? sim.cameras : cameras),
+    [cameras, sim.cameras],
+  )
+  const dashboardCamerasLoading = sim.loading && dashboardCameras.length === 0 ? sim.loading : camerasLoading
+  const dashboardCamerasError = sim.cameras.length > 0 ? sim.error : camerasError
 
   // Auto-select first camera when cameras load
   useEffect(() => {
-    if (!selectedCamera && cameras.length > 0) {
-      setSelectedCamera(cameras[0])
+    if (!selectedCamera && dashboardCameras.length > 0) {
+      setSelectedCamera(dashboardCameras[0])
     }
-  }, [cameras, selectedCamera, setSelectedCamera])
+  }, [dashboardCameras, selectedCamera, setSelectedCamera])
 
   const refreshAnomalies = useCallback(async () => {
+    if (!canAlertRead) {
+      setAnomaliesLoading(false)
+      setAnomaliesError(null)
+      setAnomalies([])
+      return []
+    }
     setAnomaliesLoading(true)
     try {
       const response = await getLiveAnomalies()
       setAnomalies(response.items)
       setAnomaliesError(null)
+      return response.items
     } catch (err) {
       setAnomaliesError(normalizeError(err))
+      return []
     } finally {
       setAnomaliesLoading(false)
     }
-  }, [])
+  }, [canAlertRead])
 
   useEffect(() => {
-    refreshAnomalies()
+    const load = () => { refreshAnomalies() }
+    const initial = window.setTimeout(load, 0)
+    if (!canAlertRead) return undefined
     const timer = window.setInterval(refreshAnomalies, 15000)
-    return () => window.clearInterval(timer)
-  }, [refreshAnomalies])
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(timer)
+    }
+  }, [canAlertRead, refreshAnomalies])
 
   const refreshAnalyticsPreview = useCallback(async () => {
+    if (!canAnalyticsRead) {
+      setAnalyticsPreviewError(null)
+      return null
+    }
     try {
       const response = await getDashboardOverview({ bucket: '1h' })
       setAnalyticsPreview(response.item)
       setAnalyticsPreviewError(null)
+      return response.item
     } catch (err) {
       setAnalyticsPreviewError(normalizeError(err))
+      return null
     }
-  }, [])
+  }, [canAnalyticsRead])
 
   useEffect(() => {
-    refreshAnalyticsPreview()
+    const load = () => { refreshAnalyticsPreview() }
+    const initial = window.setTimeout(load, 0)
+    if (!canAnalyticsRead) return undefined
     const timer = window.setInterval(refreshAnalyticsPreview, 30000)
-    return () => window.clearInterval(timer)
-  }, [refreshAnalyticsPreview])
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(timer)
+    }
+  }, [canAnalyticsRead, refreshAnalyticsPreview])
 
   const mergedAlerts = useMemo(() => mergeAlerts(alertState.alerts, websocketState.alerts), [alertState.alerts, websocketState.alerts])
   const selectedAlertEventId = alertState.selectedAlert?.event_ids?.[0]
@@ -162,7 +235,8 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
     refreshCameras()
     refreshFrames()
     refreshStreamStates()
-  }, [refreshCameras, refreshFrames, refreshStreamStates])
+    refreshSimulationSources()
+  }, [refreshCameras, refreshFrames, refreshSimulationSources, refreshStreamStates])
 
   return (
     <>
@@ -197,9 +271,13 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
           <p>{health?.reasons?.[0] || 'Runtime telemetry is flowing through the dashboard.'}</p>
         </article>
         <article className="command-summary-card">
-          <span>Camera health summary</span>
-          <strong>{cameras.length}</strong>
-          <p>{analyticsPreview?.summary?.degraded_streams ?? 0} degraded stream(s) reported in the current overview.</p>
+          <span>City surveillance network</span>
+          <strong>{sim.cameras.length || cameras.length}</strong>
+          <p>
+            {sim.cameras.length > 0
+              ? `${sim.cameras.length} simulated city camera${sim.cameras.length !== 1 ? 's' : ''} · ${sim.drones.length} drone${sim.drones.length !== 1 ? 's' : ''} registered`
+              : `${analyticsPreview?.summary?.degraded_streams ?? 0} degraded stream(s) reported`}
+          </p>
         </article>
         <article className="command-summary-card">
           <span>Drone status summary</span>
@@ -211,6 +289,19 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
           <strong>{caseState?.requiringReviewCount || 0}</strong>
           <p>Cases and cross-source observations remain operator-reviewed workflows.</p>
         </article>
+        <article className="command-summary-card">
+          <span>Uploaded-video intelligence</span>
+          <strong>{analyticsPreview?.summary?.uploaded_video_alerts_generated ?? 0}</strong>
+          <p>
+            {(analyticsPreview?.summary?.uploaded_video_processed_videos ?? 0) > 0
+              ? `${analyticsPreview.summary.uploaded_video_processed_videos} processed video(s), ${analyticsPreview.summary.uploaded_video_detection_count ?? 0} normalized event(s).`
+              : 'No processed uploaded-video intelligence yet.'}
+          </p>
+        </article>
+      </div>
+
+      <div style={{ marginBottom: 16 }} id="exhibition-demo">
+        <ExhibitionDemoPanel />
       </div>
 
       <div className="command-two-column" style={{ marginBottom: 16 }}>
@@ -229,6 +320,9 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
             <h2>Supervisor Snapshot</h2>
           </div>
           <div className="button-row">
+            <button type="button" className="text-button" onClick={() => { window.location.hash = 'exhibition-demo'; document.getElementById('exhibition-demo')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>
+              Exhibition Demo
+            </button>
             <button type="button" className="text-button" onClick={() => { window.location.hash = 'analytics' }}>
               Open Analytics
             </button>
@@ -254,6 +348,12 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
           <article className="metric-tile"><span>Cases requiring review</span><strong>{analyticsPreview?.summary?.cases_requiring_review ?? 0}</strong></article>
           <article className="metric-tile"><span>Degraded streams</span><strong>{analyticsPreview?.summary?.degraded_streams ?? 0}</strong></article>
         </div>
+        <div className="metric-strip" style={{ marginTop: 12 }}>
+          <article className="metric-tile"><span>Processed videos</span><strong>{analyticsPreview?.summary?.uploaded_video_processed_videos ?? 0}</strong></article>
+          <article className="metric-tile"><span>Upload alerts</span><strong>{analyticsPreview?.summary?.uploaded_video_alerts_generated ?? 0}</strong></article>
+          <article className="metric-tile"><span>Severe upload detections</span><strong>{analyticsPreview?.summary?.uploaded_video_high_severity_detections ?? 0}</strong></article>
+          <article className="metric-tile"><span>Upload evidence refs</span><strong>{analyticsPreview?.summary?.uploaded_video_evidence_artifacts_created ?? 0}</strong></article>
+        </div>
         {auth.hasPermission('drone:read') ? (
           <div className="metric-strip" style={{ marginTop: 12 }}>
             <article className="metric-tile"><span>Drone status</span><strong>{drone.status?.health?.status || 'unknown'}</strong></article>
@@ -265,9 +365,9 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
       </section>
       <CommandOverview
         // Camera props
-        cameras={cameras}
-        camerasLoading={camerasLoading}
-        camerasError={camerasError}
+        cameras={dashboardCameras}
+        camerasLoading={dashboardCamerasLoading}
+        camerasError={dashboardCamerasError}
         selectedCamera={selectedCamera}
         framesByCameraId={framesByCameraId}
         streamStatesByCameraId={streamStatesByCameraId}
@@ -275,6 +375,14 @@ export default function Dashboard({ alertState, incidentState, caseState, metric
         selectedCameraAlerts={selectedCameraAlerts}
         onCameraSelect={handleCameraSelect}
         onCameraRefresh={handleCameraRefresh}
+        // Simulation source network
+        simCameras={[]}
+        simDrones={sim.drones}
+        simLoading={sim.loading}
+        simError={sim.error}
+        onSimRefresh={sim.refresh}
+        // Scenario engine (Phase 6)
+        scenario={scenario}
         // Alert props
         alerts={mergedAlerts}
         alertState={alertState}

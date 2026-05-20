@@ -285,7 +285,8 @@ select {
 }
 
 .muted,
-.error-text {
+.error-text,
+.warning-text {
   margin: 0;
 }
 
@@ -295,6 +296,31 @@ select {
 
 .error-text {
   color: var(--red);
+}
+
+.warning-text {
+  color: var(--amber);
+}
+
+.preflight-alert {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.preflight-alert strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-strong);
+}
+
+.preflight-alert ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .page-grid {
@@ -350,6 +376,13 @@ select {
   height: 100%;
   background: linear-gradient(90deg, var(--cyan), var(--green));
   border-radius: inherit;
+}
+
+.uploaded-video-status-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .uploaded-video-session-list,
@@ -666,6 +699,14 @@ select {
   border: 1px solid rgba(255, 92, 108, 0.35);
   background: rgba(255, 92, 108, 0.08);
   color: var(--red);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.form-warning {
+  border: 1px solid rgba(242, 184, 75, 0.4);
+  background: rgba(242, 184, 75, 0.08);
+  color: var(--amber);
   border-radius: 6px;
   padding: 8px 10px;
 }

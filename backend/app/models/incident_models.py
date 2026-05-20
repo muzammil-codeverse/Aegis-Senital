@@ -8,7 +8,15 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-IncidentSourceType = Literal["live_stream", "uploaded_video", "drone_simulation", "file_simulation"]
+IncidentSourceType = Literal[
+    "live_stream",
+    "uploaded_video",
+    "simulation_cctv",
+    "drone_camera",
+    "scenario_observation",
+    "drone_simulation",
+    "file_simulation",
+]
 
 
 def _now_iso() -> str:

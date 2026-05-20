@@ -18,7 +18,7 @@ from app.api.security_dependencies import (
     get_current_user_from_request,
     require_permission as require_api_permission,
 )
-from app.api.websocket_security import authenticate_websocket, reject_ws
+from app.api.websocket_security import accepted_ws_subprotocol, authenticate_websocket, reject_ws
 from app.models.drone_mission_models import (
     DroneMissionCreateRequest,
     DroneMissionPlan,
@@ -535,7 +535,7 @@ async def drone_mission_telemetry_ws(session_id: str, websocket: WebSocket):
         await reject_ws(websocket, reason="gis:read permission is required")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
     repo = get_drone_mission_repository()
     exec_svc = get_drone_mission_execution_service()
 

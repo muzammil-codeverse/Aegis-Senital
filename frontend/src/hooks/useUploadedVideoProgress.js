@@ -10,15 +10,18 @@ const MAX_BACKOFF_MS = 30000
 
 export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
   const auth = useAuth()
+  const authReady = Boolean(auth.ready ?? !auth.loading)
   const [status, setStatus] = useState(null)
   const [connectionStatus, setConnectionStatus] = useState('idle')
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    if (!enabled || !sessionId) {
-      setStatus(null)
-      setConnectionStatus('idle')
-      return undefined
+    if (!authReady || !auth.authenticated || !enabled || !sessionId) {
+      const resetTimer = window.setTimeout(() => {
+        setStatus(null)
+        setConnectionStatus('idle')
+      }, 0)
+      return () => window.clearTimeout(resetTimer)
     }
 
     let closed = false
@@ -102,7 +105,7 @@ export function useUploadedVideoProgress(sessionId, { enabled = true } = {}) {
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       socket?.close()
     }
-  }, [auth.token, enabled, sessionId])
+  }, [auth.authenticated, auth.token, authReady, enabled, sessionId])
 
   return { status, connectionStatus, error }
 }

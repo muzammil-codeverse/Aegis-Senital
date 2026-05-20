@@ -65,4 +65,26 @@ test.describe('Uploaded Video Analysis', () => {
   test('no forbidden wording on uploaded video page', async ({ page }) => {
     await assertNoForbiddenWording(page)
   })
+
+  test('controlled upload/process/report/dashboard/alert smoke', async ({ page }) => {
+    const sample = process.env.AEGIS_E2E_UPLOAD_SAMPLE
+    test.skip(!sample, 'Set AEGIS_E2E_UPLOAD_SAMPLE to a small local video to run the full browser upload smoke.')
+
+    const fileInput = page.locator('input[aria-label="Upload video file"]')
+    await fileInput.setInputFiles(sample)
+    await page.getByRole('button', { name: /upload selected file/i }).click()
+    await expect(page.getByText(/Session ID/i)).toBeVisible({ timeout: 30000 })
+
+    await page.getByRole('button', { name: /start processing/i }).click()
+    await expect(page.getByText(/Report/i)).toBeVisible({ timeout: 30000 })
+
+    const terminal = page.getByText(/COMPLETED|FAILED|CANCELLED/i).first()
+    await expect(terminal).toBeVisible({ timeout: 240000 })
+    await expect(page.getByText(/Analysis Summary|Processing failed/i).first()).toBeVisible({ timeout: 30000 })
+
+    await goTo(page, ROUTES.dashboard)
+    await expect(page.getByText(/Uploaded-video intelligence/i)).toBeVisible({ timeout: 30000 })
+    await goTo(page, 'alerts')
+    await expect(page.getByText(/Live Alert Feed|No active alerts/i).first()).toBeVisible({ timeout: 30000 })
+  })
 })

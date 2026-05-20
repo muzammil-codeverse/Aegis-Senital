@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.websocket_security import accepted_ws_subprotocol
 from app.api.object_authorization import can_access_camera
 from app.models.security_models import AuditAction
 from app.services.audit_log_service import get_audit_log_service
@@ -162,7 +163,7 @@ class WebSocketFrameService:
         logger.debug("ws/frames client connected id=%s total=%s", client_id, self.client_count())
 
         try:
-            await websocket.accept()
+            await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
             last_hb = time.monotonic()
 
             while True:

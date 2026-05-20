@@ -1,87 +1,93 @@
 /**
- * API client for the Drone Patrol Mission Planner (Phase 45).
- * All missions are simulated-only. Operator review required.
+ * API client for the Drone Patrol Mission Planner.
+ * All calls go through the shared authenticated API client.
  */
+
+import { normalizeItemResponse, normalizeListResponse, request } from './client'
 
 const BASE = '/api/drone-missions'
 
-async function _request(path, options = {}) {
-  const res = await fetch(path, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || `Request failed: ${res.status}`)
-  }
-  return res.json()
-}
-
 export async function listMissions({ status, limit = 50, offset = 0 } = {}) {
-  const params = new URLSearchParams({ limit, offset })
-  if (status) params.set('status', status)
-  return _request(`${BASE}?${params}`)
+  const params = { limit, offset }
+  if (status) params.status = status
+  return normalizeListResponse(await request({ url: BASE, method: 'GET', params }))
 }
 
 export async function getMission(missionId) {
-  return _request(`${BASE}/${missionId}`)
+  return normalizeItemResponse(await request({ url: `${BASE}/${encodeURIComponent(missionId)}`, method: 'GET' }))
 }
 
 export async function createMission(payload) {
-  return _request(BASE, { method: 'POST', body: JSON.stringify(payload) })
+  return normalizeItemResponse(await request({ url: BASE, method: 'POST', data: payload }))
 }
 
 export async function listCityMissionPresets() {
-  return _request(`${BASE}/presets/city`)
+  return normalizeListResponse(await request({ url: `${BASE}/presets/city`, method: 'GET' }))
 }
 
 export async function importCityMissionPreset(presetName) {
-  return _request(`${BASE}/presets/${encodeURIComponent(presetName)}/import`, { method: 'POST' })
+  return normalizeItemResponse(await request({
+    url: `${BASE}/presets/${encodeURIComponent(presetName)}/import`,
+    method: 'POST',
+  }))
 }
 
 export async function updateMission(missionId, payload) {
-  return _request(`${BASE}/${missionId}`, { method: 'PATCH', body: JSON.stringify(payload) })
+  return normalizeItemResponse(await request({
+    url: `${BASE}/${encodeURIComponent(missionId)}`,
+    method: 'PATCH',
+    data: payload,
+  }))
 }
 
 export async function deleteMission(missionId) {
-  return _request(`${BASE}/${missionId}`, { method: 'DELETE' })
+  return request({ url: `${BASE}/${encodeURIComponent(missionId)}`, method: 'DELETE' })
 }
 
 export async function startMission(missionId, payload = {}) {
-  return _request(`${BASE}/${missionId}/start`, { method: 'POST', body: JSON.stringify({ mission_id: missionId, ...payload }) })
+  return normalizeItemResponse(await request({
+    url: `${BASE}/${encodeURIComponent(missionId)}/start`,
+    method: 'POST',
+    data: { mission_id: missionId, ...payload },
+  }))
 }
 
 export async function pauseSession(sessionId) {
-  return _request(`${BASE}/sessions/${sessionId}/pause`, { method: 'POST' })
+  return normalizeItemResponse(await request({ url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/pause`, method: 'POST' }))
 }
 
 export async function resumeSession(sessionId) {
-  return _request(`${BASE}/sessions/${sessionId}/resume`, { method: 'POST' })
+  return normalizeItemResponse(await request({ url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/resume`, method: 'POST' }))
 }
 
 export async function cancelSession(sessionId) {
-  return _request(`${BASE}/sessions/${sessionId}/cancel`, { method: 'POST' })
+  return normalizeItemResponse(await request({ url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/cancel`, method: 'POST' }))
 }
 
 export async function getSessionStatus(sessionId) {
-  return _request(`${BASE}/sessions/${sessionId}/status`)
+  return normalizeItemResponse(await request({ url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/status`, method: 'GET' }))
 }
 
 export async function getSessionTelemetry(sessionId, { limit = 500, offset = 0 } = {}) {
-  const params = new URLSearchParams({ limit, offset })
-  return _request(`${BASE}/sessions/${sessionId}/telemetry?${params}`)
+  return normalizeListResponse(await request({
+    url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/telemetry`,
+    method: 'GET',
+    params: { limit, offset },
+  }))
 }
 
 export async function getSessionEvents(sessionId, { limit = 200, offset = 0 } = {}) {
-  const params = new URLSearchParams({ limit, offset })
-  return _request(`${BASE}/sessions/${sessionId}/events?${params}`)
+  return normalizeListResponse(await request({
+    url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/events`,
+    method: 'GET',
+    params: { limit, offset },
+  }))
 }
 
 export async function getSessionReport(sessionId) {
-  return _request(`${BASE}/sessions/${sessionId}/report`)
+  return normalizeItemResponse(await request({ url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/report`, method: 'GET' }))
 }
 
 export async function getSessionEvidenceBundle(sessionId) {
-  return _request(`${BASE}/sessions/${sessionId}/evidence-bundle`)
+  return request({ url: `${BASE}/sessions/${encodeURIComponent(sessionId)}/evidence-bundle`, method: 'GET' })
 }

@@ -1,7 +1,7 @@
 auth:
   jwt_secret_env: AEGIS_JWT_SECRET
   algorithm: HS256
-  access_token_minutes: 480
+  access_token_minutes: 720
   require_auth: true
   token_issuer: aegis-sentinel
   token_audience: aegis-operators

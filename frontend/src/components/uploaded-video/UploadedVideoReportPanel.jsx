@@ -1,4 +1,15 @@
 export default function UploadedVideoReportPanel({ report }) {
+  const summary = report?.detections_summary || {}
+  const eventTypes = summary.event_types || {}
+  const eventEntries = Object.entries(eventTypes)
+  const detectedClasses = Array.isArray(summary.detected_classes) ? summary.detected_classes : eventEntries.map(([key]) => key)
+  const confidence = summary.confidence_summary || {}
+  const totalEvents = Number(summary.total_events || summary.detection_count || 0)
+  const commandCenter = report?.metadata?.command_center || {}
+  const alertIds = Array.isArray(commandCenter.alert_ids) ? commandCenter.alert_ids : []
+  const incidentIds = Array.isArray(commandCenter.incident_ids) ? commandCenter.incident_ids : []
+  const evidenceRefs = Array.isArray(commandCenter.evidence_refs) ? commandCenter.evidence_refs : []
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -13,11 +24,29 @@ export default function UploadedVideoReportPanel({ report }) {
         <>
           <div className="drawer-grid case-health-grid">
             <span>Source</span><strong>{report.video_metadata?.original_filename || 'N/A'}</strong>
-            <span>Total Events</span><strong>{report.detections_summary?.total_events || 0}</strong>
+            <span>Processed Frames</span><strong>{report.video_metadata?.frames_processed ?? 0}</strong>
+            <span>Total Events</span><strong>{totalEvents}</strong>
             <span>Integrity</span><strong>{report.integrity?.status || 'pending'}</strong>
             <span>Models Used</span><strong>{(report.models_used || []).length}</strong>
+            <span>Max Confidence</span><strong>{Number(confidence.max || 0).toFixed(2)}</strong>
+            <span>Promoted Alerts</span><strong>{alertIds.length}</strong>
+            <span>Evidence Refs</span><strong>{evidenceRefs.length}</strong>
           </div>
+          {totalEvents === 0 ? <p className="muted">No detections found.</p> : null}
           <div className="uploaded-video-report-grid">
+            <article className="timeline-card">
+              <strong>Detection Summary</strong>
+              <div className="drawer-grid case-health-grid">
+                <span>Classes</span><strong>{detectedClasses.length ? detectedClasses.join(', ') : 'None'}</strong>
+                <span>Average Confidence</span><strong>{Number(confidence.average || 0).toFixed(2)}</strong>
+                <span>Event Classes</span><strong>{eventEntries.length}</strong>
+              </div>
+              {eventEntries.length > 0 ? (
+                <ul className="uploaded-video-inline-list">
+                  {eventEntries.map(([name, count]) => <li key={name}>{name}: {count}</li>)}
+                </ul>
+              ) : null}
+            </article>
             <article className="timeline-card">
               <strong>Model Caveats</strong>
               <ul className="uploaded-video-inline-list">
@@ -27,6 +56,36 @@ export default function UploadedVideoReportPanel({ report }) {
             <article className="timeline-card">
               <strong>Chain of Custody</strong>
               <pre>{JSON.stringify(report.chain_of_custody || {}, null, 2)}</pre>
+            </article>
+            <article className="timeline-card">
+              <strong>Command-Center Linkage</strong>
+              {commandCenter.status ? (
+                <>
+                  <div className="drawer-grid case-health-grid">
+                    <span>Status</span><strong>{commandCenter.status}</strong>
+                    <span>Alerts</span><strong>{alertIds.length}</strong>
+                    <span>Incidents</span><strong>{incidentIds.length}</strong>
+                    <span>Evidence</span><strong>{evidenceRefs.length}</strong>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" className="text-button" onClick={() => { window.location.hash = 'alerts' }}>
+                      Open Alerts
+                    </button>
+                    <button type="button" className="text-button" onClick={() => { window.location.hash = 'dashboard' }}>
+                      Open Dashboard
+                    </button>
+                  </div>
+                  {alertIds.length > 0 ? (
+                    <ul className="uploaded-video-inline-list">
+                      {alertIds.slice(0, 5).map(alertId => <li key={alertId}>{alertId}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="muted">No threat alerts were promoted from this report.</p>
+                  )}
+                </>
+              ) : (
+                <p className="muted">Command-center promotion has not linked this report yet.</p>
+              )}
             </article>
             <article className="timeline-card">
               <strong>Replay clips</strong>

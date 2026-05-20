@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.websocket_security import accepted_ws_subprotocol
 from app.api.object_authorization import can_access_camera, can_access_event_payload, can_access_incident
 from core.event_bus import EventType, EventRecord, get_event_bus
 from app.models.security_models import AuditAction
@@ -80,7 +81,7 @@ class WebSocketOpenVocabService:
     # ── connection lifecycle ───────────────────────────────────────────────────
 
     async def connect(self, websocket: WebSocket, user: Any = None) -> None:
-        await websocket.accept()
+        await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
         client = _Client(
             websocket=websocket,
             queue=asyncio.Queue(maxsize=self._queue_size),

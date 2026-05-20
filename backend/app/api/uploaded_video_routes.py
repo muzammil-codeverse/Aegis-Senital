@@ -12,7 +12,7 @@ from app.api.object_authorization import (
     ensure_uploaded_video_session_access,
 )
 from app.api.security_dependencies import require_permission
-from app.api.websocket_security import authenticate_websocket, reject_ws
+from app.api.websocket_security import accepted_ws_subprotocol, authenticate_websocket, reject_ws
 from app.models.security_models import AuditAction, UserAccount
 from app.models.uploaded_video_models import UploadedVideoCaseCreationRequest, UploadedVideoProcessingOptions
 from app.services.audit_log_service import get_audit_log_service
@@ -52,6 +52,13 @@ def _parse_options(raw: str | None) -> UploadedVideoProcessingOptions:
     return UploadedVideoProcessingOptions.model_validate(payload)
 
 
+def _uploaded_video_error(status_code: int, detail: str, *, code: str = "uploaded_video_error") -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"status": "error", "code": code, "detail": detail},
+    )
+
+
 @router.get("/api/uploaded-videos")
 def list_uploaded_videos_api(
     request: Request,
@@ -78,7 +85,12 @@ async def upload_video_api(
     current_user: UserAccount = Depends(require_permission("uploaded_video:write")),
 ):
     service = get_uploaded_video_service()
-    response = service.upload_video(file, _parse_options(options), current_user)
+    try:
+        response = service.upload_video(file, _parse_options(options), current_user)
+    except ValueError as exc:
+        raise _uploaded_video_error(400, str(exc), code="invalid_upload") from exc
+    except RuntimeError as exc:
+        raise _uploaded_video_error(503, str(exc), code="uploaded_video_unavailable") from exc
     _audit(
         request,
         AuditAction.UPLOADED_VIDEO_UPLOADED,
@@ -110,7 +122,12 @@ def process_uploaded_video_api(
     current_user: UserAccount = Depends(require_permission("uploaded_video:process")),
 ):
     ensure_uploaded_video_session_access(request, current_user, session_id)
-    status = get_uploaded_video_service().start_processing(session_id, current_user)
+    try:
+        status = get_uploaded_video_service().start_processing(session_id, current_user)
+    except KeyError as exc:
+        raise _uploaded_video_error(404, f"Uploaded-video session '{session_id}' not found", code="session_not_found") from exc
+    except RuntimeError as exc:
+        raise _uploaded_video_error(503, str(exc), code="processing_unavailable") from exc
     _audit(
         request,
         AuditAction.UPLOADED_VIDEO_PROCESSING_STARTED,
@@ -152,6 +169,17 @@ def uploaded_video_events_api(
     ensure_uploaded_video_session_access(request, current_user, session_id)
     items = get_uploaded_video_service().get_events(session_id, current_user)
     return {"items": [item.model_dump(mode="json") for item in items], "count": len(items), "status": "ok" if items else "empty"}
+
+
+@router.get("/api/uploaded-videos/{session_id}/command-center")
+def uploaded_video_command_center_links_api(
+    session_id: str,
+    request: Request,
+    current_user: UserAccount = Depends(require_permission("uploaded_video:read")),
+):
+    ensure_uploaded_video_session_access(request, current_user, session_id)
+    links = get_uploaded_video_service().get_command_center_links(session_id, current_user)
+    return {"item": links, "status": "ok" if links else "empty"}
 
 
 @router.post("/api/uploaded-videos/{session_id}/cancel")
@@ -267,7 +295,7 @@ async def uploaded_video_progress_ws(websocket: WebSocket, session_id: str):
     if not can_access_uploaded_video_session(user, session_id):
         await reject_ws(websocket, reason="Access denied for uploaded-video session")
         return
-    await websocket.accept()
+    await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
     service = get_uploaded_video_service()
     try:
         while True:

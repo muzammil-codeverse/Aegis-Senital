@@ -198,6 +198,12 @@ class DashboardSummary(AnalyticsBaseModel):
     uploaded_video_replay_clips_generated_total: int = 0
     uploaded_video_events_with_clips: int = 0
     uploaded_video_events_without_clips: int = 0
+    uploaded_video_processed_videos: int = 0
+    uploaded_video_detection_count: int = 0
+    uploaded_video_alerts_generated: int = 0
+    uploaded_video_high_severity_detections: int = 0
+    uploaded_video_average_confidence: float = 0.0
+    uploaded_video_evidence_artifacts_created: int = 0
     # Phase 45 — drone patrol mission analytics (all simulated)
     drone_missions_today: int = 0
     active_simulated_patrols: int = 0

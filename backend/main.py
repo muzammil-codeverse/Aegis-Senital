@@ -17,7 +17,6 @@ from app.services.auth_service import get_auth_service
 from app.security.config import get_auth_config
 from app.core.logging_config import logger
 from inference.logging_setup import configure_logging
-from ml.runtime import system_boot_check
 from app.services.websocket_alert_service import websocket_alert_service
 
 
@@ -36,6 +35,11 @@ def _get_allowed_cors_origins() -> list[str]:
     if not raw_value.strip():
         return list(_DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in raw_value.split(",") if origin.strip()]
+
+
+def _startup_warm_capabilities_enabled() -> bool:
+    raw_value = os.getenv("AEGIS_STARTUP_WARM_CAPABILITIES", "").strip().lower()
+    return raw_value in {"1", "true", "yes", "on"}
 
 
 app = FastAPI(title="Sentinel AI System", version="1.0.0")
@@ -107,18 +111,64 @@ async def websocket_alerts(websocket: WebSocket):
 
 @app.on_event("startup")
 async def startup():
+    from app.core.capabilities import (
+        CapabilityState,
+        get_capability_registry,
+        refresh_all_capability_statuses,
+        register_default_capabilities,
+    )
     from app.models.database import init_db
     from app.services.case_service import get_case_service
-    from app.services.llm_service import get_llm_service
-    from app.services.video_service import bootstrap_inference_runtime
 
     configure_logging()
+    capability_registry = register_default_capabilities(get_capability_registry())
+    refresh_all_capability_statuses(capability_registry)
     auth_cfg = get_auth_config()
     if (os.getenv("APP_ENV") or "").lower() in {"prod", "production"} and not bool(auth_cfg.get("cookie_secure", False)):
         logger.warning("APP_ENV=prod with auth.cookie_secure=false; set cookie_secure=true behind HTTPS")
-    get_auth_service().bootstrap()
-    system_boot_check()
-    bootstrap_inference_runtime()
+    try:
+        get_auth_service().bootstrap()
+        capability_registry.mark_ready("auth_session", "Authentication service bootstrapped.")
+        capability_registry.mark_ready("rbac_permissions", "RBAC configuration loaded.")
+    except Exception as exc:
+        capability_registry.mark_faulted("auth_session", exc)
+        raise
+
+    if _startup_warm_capabilities_enabled():
+        for capability_id in (
+            "yolo_weapon_detector",
+            "yolo_phone_detector",
+            "tracking_engine",
+            "event_engine",
+            "scenario_engine",
+        ):
+            capability_registry.update_status(
+                capability_id,
+                CapabilityState.WARMING,
+                "Startup managed activation requested by deployment configuration.",
+            )
+        try:
+            from app.services.video_service import bootstrap_inference_runtime
+
+            bootstrap_inference_runtime()
+            for capability_id in (
+                "yolo_weapon_detector",
+                "yolo_phone_detector",
+                "tracking_engine",
+                "event_engine",
+                "scenario_engine",
+            ):
+                capability_registry.mark_ready(
+                    capability_id,
+                    "Inference runtime warmed by startup managed activation.",
+                )
+        except Exception as exc:
+            logger.warning("Startup managed activation for inference runtime failed: %s", exc)
+            for capability_id in ("yolo_weapon_detector", "yolo_phone_detector"):
+                capability_registry.mark_faulted(capability_id, exc)
+    else:
+        logger.info("Heavy ML capability warmup deferred; capabilities remain registered for managed activation.")
+
     init_db()
     # Initialize camera registry from config
     try:
@@ -129,19 +179,13 @@ async def startup():
     except Exception as exc:
         logger.warning("Camera registry init failed: %s", exc)
     try:
-        from app.services.drone.drone_simulation_service import get_drone_simulation_service
-
-        get_drone_simulation_service()
-    except Exception as exc:
-        logger.warning("Drone simulation init failed: %s", exc)
-    try:
         get_case_service()
+        capability_registry.mark_ready("cases", "Case service initialized and subscribed to event bus.")
+        capability_registry.mark_ready("evidence", "Evidence management is available through case service.")
+        capability_registry.mark_ready("reports", "Report export service is available through case service.")
     except Exception as exc:
+        capability_registry.mark_degraded("cases", f"Case service initialization failed: {exc}")
         logger.warning("Case service init failed: %s", exc)
-    try:
-        get_llm_service()
-    except Exception as exc:
-        logger.warning("LLM service init failed: %s", exc)
     try:
         from app.services.identity_candidate_service import register_identity_candidate_event_consumer
 

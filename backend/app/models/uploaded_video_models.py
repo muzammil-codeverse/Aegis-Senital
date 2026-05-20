@@ -8,7 +8,19 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-UploadedVideoStatus = Literal["uploaded", "queued", "processing", "completed", "failed", "cancelled"]
+UploadedVideoStatus = Literal[
+    "created",
+    "uploaded",
+    "queued",
+    "processing",
+    "frame_extraction",
+    "inference",
+    "event_generation",
+    "report_generation",
+    "completed",
+    "failed",
+    "cancelled",
+]
 UploadedVideoSourceType = Literal["uploaded_video"]
 
 

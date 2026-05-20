@@ -1,15 +1,23 @@
-import client from './client';
+import { request } from './client';
 
 export const anomalyApi = {
   getRecentEvents: (params = {}) =>
-    client.get('/api/anomaly/events', { params }),
+    request({ url: '/api/anomaly/events', method: 'GET', params }),
 
   getHealth: () =>
-    client.get('/api/anomaly/health'),
+    request({ url: '/api/anomaly/health', method: 'GET' }),
 
   getCameraEvents: (cameraId, params = {}) =>
-    client.get(`/api/anomaly/events/${cameraId}`, { params }),
+    request({
+      url: `/api/anomaly/events/${encodeURIComponent(cameraId)}`,
+      method: 'GET',
+      params,
+    }),
 
   submitFeedback: (eventId, isFalseAlarm) =>
-    client.post(`/api/anomaly/feedback/${eventId}`, { is_false_alarm: isFalseAlarm }),
+    request({
+      url: `/api/anomaly/feedback/${encodeURIComponent(eventId)}`,
+      method: 'POST',
+      data: { is_false_alarm: isFalseAlarm },
+    }),
 };

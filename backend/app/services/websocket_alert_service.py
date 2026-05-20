@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.websocket_security import accepted_ws_subprotocol
 from app.api.object_authorization import can_access_alert, can_access_event_payload
 from core.event_bus import EventType, EventRecord, get_event_bus
 from app.models.security_models import AuditAction
@@ -37,7 +38,7 @@ class WebSocketAlertService:
         get_event_bus().subscribe(EventType.ALERT_EVENT, self._on_alert_event)
 
     async def connect(self, websocket: WebSocket, user: Any = None) -> None:
-        await websocket.accept()
+        await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
         client = _Client(
             websocket=websocket,
             queue=asyncio.Queue(maxsize=self._queue_size),

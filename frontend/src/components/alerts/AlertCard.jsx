@@ -13,6 +13,7 @@ export default function AlertCard({
   busy,
 }) {
   const updatedAt = alert.updated_at || alert.created_at
+  const uploadedVideo = alert.metadata?.uploaded_video
   return (
     <article className={`alert-card ${selected ? 'selected' : ''}`} onClick={() => onSelect(alert.alert_id)}>
       <div className="alert-card-header">
@@ -31,6 +32,22 @@ export default function AlertCard({
         <span>Cameras: <strong>{compactList(alert.camera_ids)}</strong></span>
         <span>Tracks: <strong>{compactList(alert.track_ids)}</strong></span>
       </div>
+      {uploadedVideo ? (
+        <div className="alert-context">
+          <span>Source: <strong>Uploaded video</strong></span>
+          <span>Frame: <strong>{uploadedVideo.frame_index ?? 'N/A'}</strong></span>
+          <button
+            type="button"
+            className="text-button"
+            onClick={event => {
+              event.stopPropagation()
+              window.location.hash = 'uploaded-video-analysis'
+            }}
+          >
+            Open Report
+          </button>
+        </div>
+      ) : null}
       {/* Phase 20 — identity / watchlist signals */}
       {alert.metadata?.identity_id && (
         <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: '0.72rem' }}>
@@ -64,6 +81,30 @@ export default function AlertCard({
               match: <strong>{formatPercent(alert.metadata.match_confidence)}</strong>
             </span>
           )}
+        </div>
+      )}
+      {/* Phase 7 — scenario tracking link */}
+      {alert.metadata?.has_tracking_view && alert.metadata?.run_id && (
+        <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.68rem' }}>
+          <span style={{ color: '#4b5563' }}>
+            Scenario: <strong style={{ color: '#9ca3af', fontFamily: 'monospace' }}>
+              {String(alert.metadata.run_id).slice(0, 14)}
+            </strong>
+          </span>
+          {alert.metadata.actor_id && (
+            <span style={{ color: '#fa8c16' }}>{alert.metadata.actor_id}</span>
+          )}
+          <button
+            type="button"
+            className="text-button"
+            style={{ color: '#1890ff' }}
+            onClick={event => {
+              event.stopPropagation()
+              window.location.hash = `scenario-tracking/${alert.metadata.run_id}`
+            }}
+          >
+            View Tracking
+          </button>
         </div>
       )}
       <AlertControls

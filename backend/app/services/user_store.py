@@ -307,10 +307,11 @@ class UserStore:
                 + secrets.choice("!@#$%^&*")
                 + "".join(secrets.choice(alphabet) for _ in range(12))
             )
+            password_file = self._persist_bootstrap_password(username, password)
             logger.warning(
-                "Bootstrap admin created with generated password: %s  "
-                "(set %s env var to use a fixed password)",
-                password,
+                "Bootstrap admin created with generated local password stored at %s "
+                "(set %s env var to use an intentional password).",
+                password_file,
                 password_env,
             )
 
@@ -325,6 +326,26 @@ class UserStore:
         except ValueError as exc:
             logger.warning("Bootstrap admin skipped: %s", exc)
             return None
+
+    def _persist_bootstrap_password(self, username: str, password: str) -> str:
+        path = project_path("storage/security/bootstrap_admin_password.txt")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            backup = path.with_name(f"{path.stem}.{int(time.time())}.txt")
+            path.replace(backup)
+        path.write_text(
+            "\n".join(
+                [
+                    "Aegis local exhibition bootstrap admin",
+                    f"username={username}",
+                    f"password={password}",
+                    "Rotate this password after first login. This file is under ignored local storage.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        return str(path)
 
     def counts(self) -> dict[str, int]:
         with self._lock:

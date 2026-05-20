@@ -27,7 +27,6 @@ from inference.event_engine import EventEngine
 from inference.metrics import metrics
 from inference.model_pool import ModelPool
 from inference.monitoring.metrics import register_stream, get_stream_metrics, get_metrics
-from inference.runtime import get_intelligence_runtime
 from inference.scenario_engine import ScenarioEngine
 from inference.schemas import FramePacket
 from inference.tracker import MultiObjectTracker
@@ -208,7 +207,14 @@ class StreamProcessor:
         proc.stop()
     """
 
-    def __init__(self, stream_id: str, source: str, model_pool: ModelPool) -> None:
+    def __init__(
+        self,
+        stream_id: str,
+        source: str,
+        model_pool: ModelPool,
+        *,
+        enable_advanced_runtime: bool = True,
+    ) -> None:
         if not model_pool.is_loaded:
             raise RuntimeError(
                 f"StreamProcessor '{stream_id}': ModelPool must be loaded before creating streams"
@@ -242,23 +248,41 @@ class StreamProcessor:
         self._last_pipeline_latency_ms: float = 0.0
         self._preview_clients_active = 0
         self._processed_frame_times: deque[float] = deque(maxlen=180)
+        self._enable_advanced_runtime = bool(enable_advanced_runtime)
 
         # ── per-stream inference components (isolated, no shared state) ───────
         self._engine = DetectionEngine(model_pool=model_pool)
 
-        from inference.identity_db import get_db
-        from inference.identity_fusion_engine import IdentityFusionEngine
         from inference.model_fusion_engine import ModelFusionEngine
 
-        _db = get_db()
-        _fusion = IdentityFusionEngine(db=_db)
-        self._tracker = MultiObjectTracker(db=_db, identity_fusion=_fusion)
+        if self._enable_advanced_runtime:
+            from inference.identity_db import get_db
+            from inference.identity_fusion_engine import IdentityFusionEngine
+
+            _db = get_db()
+            _fusion = IdentityFusionEngine(db=_db)
+            self._tracker = MultiObjectTracker(db=_db, identity_fusion=_fusion)
+        else:
+            _db = None
+            self._tracker = MultiObjectTracker(enable_identity=False)
         self._buffer = EventBuffer(maxlen=60, window=10, min_consecutive=3)
-        self._event_engine = EventEngine(db=_db)
+        self._event_engine = EventEngine(
+            db=_db,
+            enable_persistence=self._enable_advanced_runtime,
+        )
         self._fusion_engine = ModelFusionEngine()
-        self._scenario_engine = ScenarioEngine(db=_db)
-        self._context_engine = ContextEngine()
-        self._intelligence_runtime = get_intelligence_runtime()
+        self._scenario_engine = ScenarioEngine(
+            db=_db,
+            enable_persistence=self._enable_advanced_runtime,
+            require_persisted_events=self._enable_advanced_runtime,
+        )
+        self._context_engine = ContextEngine() if self._enable_advanced_runtime else None
+        if self._enable_advanced_runtime:
+            from inference.runtime import get_intelligence_runtime
+
+            self._intelligence_runtime = get_intelligence_runtime()
+        else:
+            self._intelligence_runtime = None
         self._runtime_supervisor = get_runtime_supervisor()
 
         # ── 3-thread pipeline queues ──────────────────────────────────────────
@@ -295,11 +319,14 @@ class StreamProcessor:
         self._recent_pipeline_ms: deque[float] = deque(maxlen=20)
 
         # ── Phase 28: anomaly service (fail-open) ────────────────────────────
-        try:
-            from inference.anomaly.anomaly_service import get_anomaly_service
-            self._anomaly_service = get_anomaly_service()
-        except Exception as _exc:
-            logger.warning("Phase 28 anomaly service unavailable: %s", _exc)
+        if self._enable_advanced_runtime:
+            try:
+                from inference.anomaly.anomaly_service import get_anomaly_service
+                self._anomaly_service = get_anomaly_service()
+            except Exception as _exc:
+                logger.warning("Phase 28 anomaly service unavailable: %s", _exc)
+                self._anomaly_service = None
+        else:
             self._anomaly_service = None
 
         # ── per-stream metrics ────────────────────────────────────────────────
@@ -769,6 +796,41 @@ class StreamProcessor:
         # Stage 3: per-stream tracking
         packet.tracks = self._tracker.update(packet)
         ts_float = _packet_timestamp_float(packet)
+
+        if not self._enable_advanced_runtime:
+            self._buffer.add(packet)
+            events = self._event_engine.evaluate(self._buffer)
+            scenarios = self._scenario_engine.aggregate(events)
+            validate_frame_result(packet, packet.tracks, events)
+            intelligence_packet = {"incidents": [], "alerts": []}
+            packet.metadata["intelligence"] = intelligence_packet
+            now = time.monotonic()
+            for event in events:
+                bus.publish_event(event, stream_id=self.stream_id)
+                self._cb_event_times.append(now)
+            logger.debug(
+                json.dumps({
+                    "event": "stream_frame_processed",
+                    "stream_id": self.stream_id,
+                    "frame_id": packet.frame_id,
+                    "detections": len(packet.detections),
+                    "tracks": len(packet.tracks),
+                    "events": len(events),
+                    "advanced_runtime": False,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                })
+            )
+            return {
+                "packet": packet,
+                "trajectories": [],
+                "anomalies": [],
+                "events": events,
+                "segmentation": None,
+                "incidents": [],
+                "alerts": [],
+                "intelligence": intelligence_packet,
+                "scenarios": scenarios,
+            }
 
         # Stage 3a: trajectory intelligence and anomaly analysis
         trajectories = [

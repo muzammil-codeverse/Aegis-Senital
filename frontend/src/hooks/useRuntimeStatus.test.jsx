@@ -4,7 +4,7 @@ import { useRuntimeStatus } from './useRuntimeStatus'
 
 const getSystemHealth = vi.fn()
 const getPublicHealth = vi.fn()
-const authState = { authenticated: false, hasPermission: () => false }
+const authState = { ready: true, loading: false, authenticated: false, hasPermission: () => false }
 
 vi.mock('../api/metricsApi', () => ({
   getSystemHealth: (...args) => getSystemHealth(...args),
@@ -17,6 +17,8 @@ vi.mock('./useAuth', () => ({
 
 describe('useRuntimeStatus auth gating', () => {
   it('does not poll protected runtime endpoints while unauthenticated', async () => {
+    authState.ready = true
+    authState.loading = false
     authState.authenticated = false
     const { result } = renderHook(() => useRuntimeStatus({ pollMs: 5 }))
     await act(async () => {})
@@ -24,7 +26,9 @@ describe('useRuntimeStatus auth gating', () => {
     expect(result.current.items).toEqual([])
   })
 
-  it('maps 401 protected health to sign-in state instead of backend unavailable', async () => {
+  it('maps 401 protected health to session validation state instead of backend unavailable', async () => {
+    authState.ready = true
+    authState.loading = false
     authState.authenticated = true
     getSystemHealth.mockResolvedValue({ status: 'error', error: 'Authentication required' })
     const { result } = renderHook(() => useRuntimeStatus({ pollMs: 5 }))
@@ -32,11 +36,13 @@ describe('useRuntimeStatus auth gating', () => {
       await result.current.refresh()
     })
     const summaries = result.current.items.map(item => String(item.summary || '').toLowerCase())
-    expect(summaries.some(summary => summary.includes('sign in'))).toBe(true)
+    expect(summaries.some(summary => summary.includes('session validation'))).toBe(true)
     expect(summaries.some(summary => summary.includes('backend unavailable'))).toBe(false)
   })
 
   it('maps 503 readiness failures to degraded status once in runtime strip data', async () => {
+    authState.ready = true
+    authState.loading = false
     authState.authenticated = true
     getSystemHealth.mockResolvedValue({ status: 'degraded', checks: { database: { status: 'degraded', detail: 'Database not configured' } } })
     const { result } = renderHook(() => useRuntimeStatus({ pollMs: 5 }))
@@ -48,6 +54,8 @@ describe('useRuntimeStatus auth gating', () => {
   })
 
   it('does not create unknown subsystem spam before data is available', async () => {
+    authState.ready = true
+    authState.loading = false
     authState.authenticated = true
     getSystemHealth.mockResolvedValue({ status: 'ok', checks: {} })
     const { result } = renderHook(() => useRuntimeStatus({ pollMs: 5 }))
@@ -58,9 +66,11 @@ describe('useRuntimeStatus auth gating', () => {
   })
 
   it('uses non-production degraded wording for temporary runtime health issues', async () => {
+    authState.ready = true
+    authState.loading = false
     authState.authenticated = true
-    getSystemHealth.mockResolvedValueOnce({ status: 'error', error: 'Health endpoint unavailable' })
-    getPublicHealth.mockResolvedValueOnce({ status: 'ok' })
+    getSystemHealth.mockResolvedValue({ status: 'error', error: 'Health endpoint unavailable' })
+    getPublicHealth.mockResolvedValue({ status: 'ok' })
     const { result } = renderHook(() => useRuntimeStatus({ pollMs: 5 }))
     await act(async () => {
       await result.current.refresh()

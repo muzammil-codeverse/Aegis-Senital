@@ -113,8 +113,10 @@ class EventEngine:
         db: IdentityDB | None = None,
         loitering_threshold_seconds: float = 30.0,
         restricted_zones: list | None = None,
+        enable_persistence: bool = True,
     ) -> None:
-        self._db = db or get_db()
+        self._db = db if db is not None else (get_db() if enable_persistence else None)
+        self._enable_persistence = bool(enable_persistence)
         cfg = _event_engine_config()
         self._class_weights = dict(cfg.get("class_weights", _CLASS_WEIGHTS))
         self._default_class_weight = float(cfg.get("default_class_weight", _DEFAULT_CLASS_WEIGHT))
@@ -179,7 +181,13 @@ class EventEngine:
             for track_id in event.track_ids:
                 if track_id not in active_tracks:
                     logger.error("Invalid event: track not found")
-            self._db.persist_event(event, frame_id=packet.frame_id)
+            if self._db is not None:
+                self._db.persist_event(event, frame_id=packet.frame_id)
+            else:
+                event.metadata = {
+                    **(event.metadata or {}),
+                    "persistence": "disabled_for_uploaded_video_job",
+                }
             self._recent_event_scores.append(event.risk_score)
             get_event_bus().publish(EventType.THREAT_EVENT, event, source=packet.camera_id, priority=_event_priority_value(event))
 

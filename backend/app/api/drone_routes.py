@@ -13,7 +13,7 @@ from app.api.security_dependencies import (
     get_current_user_from_request,
     require_permission as require_api_permission,
 )
-from app.api.websocket_security import authenticate_websocket, reject_ws
+from app.api.websocket_security import accepted_ws_subprotocol, authenticate_websocket, reject_ws
 from app.models.drone_simulation_models import DroneCommandRequest
 from app.models.security_models import AuditAction, UserAccount
 from app.security.config import get_rbac_config
@@ -554,7 +554,7 @@ async def drone_simulation_ws(websocket: WebSocket):
     if not can_access_camera(user, service.drone_id):
         await reject_ws(websocket, reason="Access denied for simulated drone stream")
         return
-    await websocket.accept()
+    await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
     manager = get_drone_simulation_session_manager()
     mission_repo = get_drone_mission_repository()
     fusion_repo = get_drone_fusion_repository()

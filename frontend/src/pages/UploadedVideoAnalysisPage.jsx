@@ -15,20 +15,25 @@ export default function UploadedVideoAnalysisPage() {
   const progress = useUploadedVideoProgress(uploadedVideo.currentSession?.session_id, {
     enabled: Boolean(uploadedVideo.currentSession?.session_id),
   })
+  const currentSessionId = uploadedVideo.currentSession?.session_id
+  const refreshSessionDetail = uploadedVideo.refreshSessionDetail
+  const effectiveStatus = progress.status || uploadedVideo.currentStatus || {
+    status: uploadedVideo.currentSession?.status,
+    progress: uploadedVideo.currentSession?.progress,
+  }
 
   useEffect(() => {
-    const sessionId = uploadedVideo.currentSession?.session_id
-    if (!sessionId) return
+    if (!currentSessionId) return
     if (!progress.status) return
-    uploadedVideo.refreshSessionDetail(sessionId)
-  }, [progress.status?.status, uploadedVideo.currentSession?.session_id, uploadedVideo.refreshSessionDetail])
+    refreshSessionDetail(currentSessionId)
+  }, [currentSessionId, progress.status, refreshSessionDetail])
 
   return (
     <div className="page-grid uploaded-video-page">
       <UploadedVideoDropzone onUpload={file => uploadedVideo.upload(file)} busy={uploadedVideo.actionLoading} />
       <UploadedVideoProcessingPanel
         session={uploadedVideo.currentSession}
-        status={progress.status}
+        status={effectiveStatus}
         connectionStatus={progress.connectionStatus}
         error={progress.error}
         busy={uploadedVideo.actionLoading}
@@ -51,36 +56,47 @@ export default function UploadedVideoAnalysisPage() {
           </div>
         </div>
         {uploadedVideo.error ? <p className="error-text">{uploadedVideo.error}</p> : null}
-        <div className="uploaded-video-session-list">
-          {uploadedVideo.sessions.map(session => (
-            <button
-              key={session.session_id}
-              type="button"
-              className={`timeline-card session-card ${uploadedVideo.currentSession?.session_id === session.session_id ? 'active' : ''}`}
-              onClick={() => uploadedVideo.selectSession(session.session_id)}
-            >
-              <div className="button-row">
-                <strong>{session.original_filename}</strong>
-                <span className={`count-pill ${session.status === 'completed' ? 'status-open' : ''}`}>{session.status}</span>
-              </div>
-              <p>{session.session_id}</p>
-              <div className="button-row">
-                <span>{Number(session.duration_seconds || 0).toFixed(1)}s</span>
-                <span>{session.frame_count || 0} frames</span>
-              </div>
-            </button>
-          ))}
-        </div>
+        {uploadedVideo.loading ? (
+          <p className="muted">Loading uploaded-video sessions...</p>
+        ) : uploadedVideo.sessions.length === 0 && !uploadedVideo.error ? (
+          <p className="muted">No uploaded-video sessions yet.</p>
+        ) : (
+          <div className="uploaded-video-session-list">
+            {uploadedVideo.sessions.map(session => (
+              <button
+                key={session.session_id}
+                type="button"
+                className={`timeline-card session-card ${uploadedVideo.currentSession?.session_id === session.session_id ? 'active' : ''}`}
+                onClick={() => uploadedVideo.selectSession(session.session_id)}
+              >
+                <div className="button-row">
+                  <strong>{session.original_filename}</strong>
+                  <span className={`count-pill ${session.status === 'completed' ? 'status-open' : ''}`}>{session.status}</span>
+                </div>
+                <p>{session.session_id}</p>
+                <div className="button-row">
+                  <span>{Number(session.duration_seconds || 0).toFixed(1)}s</span>
+                  <span>{session.frame_count || 0} frames</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </section>
-      <UploadedVideoTimeline items={uploadedVideo.timeline} sessionId={uploadedVideo.currentSession?.session_id} />
+      <UploadedVideoTimeline
+        items={uploadedVideo.timeline}
+        sessionId={uploadedVideo.currentSession?.session_id}
+        status={effectiveStatus?.status}
+      />
       <UploadedVideoEventsTable
         events={uploadedVideo.events}
         sessionId={uploadedVideo.currentSession?.session_id}
+        status={effectiveStatus?.status}
       />
       <UploadedVideoReportPanel report={uploadedVideo.report} />
       <CreateCaseFromVideoButton
         session={uploadedVideo.currentSession}
-        disabled={uploadedVideo.actionLoading || !uploadedVideo.currentSession || !['completed'].includes(progress.status?.status || uploadedVideo.currentSession?.status)}
+        disabled={uploadedVideo.actionLoading || !uploadedVideo.currentSession || !['completed'].includes(effectiveStatus?.status || uploadedVideo.currentSession?.status)}
         onCreate={uploadedVideo.createCase}
       />
     </div>

@@ -13,7 +13,7 @@ const WS_MAX_RECONNECT_ATTEMPTS = 10
  * Never surfaces raw frames or embeddings.
  */
 export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
-  const { token, authRequired } = useAuth()
+  const { token, authRequired, ready, authenticated } = useAuth()
   const [connected, setConnected] = useState(false)
   const [transport, setTransport] = useState('disconnected') // 'websocket' | 'polling_fallback' | 'disconnected'
   const [lastResult, setLastResult] = useState(null)
@@ -26,6 +26,7 @@ export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
   const reconnectCount = useRef(0)
   const reconnectTimer = useRef(null)
   const mountedRef = useRef(true)
+  const connectRef = useRef(null)
 
   const handleMessage = useCallback((event) => {
     try {
@@ -70,8 +71,18 @@ export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
 
   const connect = useCallback(() => {
     if (!enabled || !mountedRef.current) return
+    if (!ready) {
+      setTransport('disconnected')
+      setStreamError(null)
+      return
+    }
+    if (!authenticated && authRequired) {
+      setStreamError('Sign in required for Open-Vocab stream')
+      setTransport('disconnected')
+      return
+    }
     if (authRequired && !token && !authUsesCookieMode()) {
-      setStreamError('Authentication required for Open-Vocab stream')
+      setStreamError('Session expired for Open-Vocab stream')
       setTransport('disconnected')
       return
     }
@@ -102,21 +113,24 @@ export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
 
       if (reconnectCount.current < WS_MAX_RECONNECT_ATTEMPTS) {
         reconnectCount.current += 1
-        reconnectTimer.current = setTimeout(connect, WS_RECONNECT_DELAY_MS)
+        reconnectTimer.current = setTimeout(() => connectRef.current?.(), WS_RECONNECT_DELAY_MS)
       } else {
         setTransport('disconnected')
         setStreamError('WebSocket unavailable — using polling fallback')
       }
     }
-  }, [authRequired, enabled, handleMessage, token])
+  }, [authRequired, authenticated, enabled, handleMessage, ready, token])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   useEffect(() => {
     mountedRef.current = true
-    if (enabled) {
-      connect()
-    }
+    const connectTimer = enabled && ready ? window.setTimeout(connect, 0) : null
     return () => {
       mountedRef.current = false
+      if (connectTimer) window.clearTimeout(connectTimer)
       clearTimeout(reconnectTimer.current)
       if (wsRef.current) {
         wsRef.current.onclose = null
@@ -124,7 +138,7 @@ export function useOpenVocabStream({ enabled = true, onScanResult } = {}) {
         wsRef.current = null
       }
     }
-  }, [enabled, connect])
+  }, [enabled, ready, connect])
 
   const getCameraEntry = useCallback((cameraId) => {
     return cameraState[cameraId] || null

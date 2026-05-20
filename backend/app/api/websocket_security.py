@@ -17,6 +17,19 @@ def extract_ws_token(websocket) -> str | None:
     return token
 
 
+def accepted_ws_subprotocol(websocket) -> str | None:
+    """Return the non-sensitive protocol name to echo during WebSocket accept."""
+    protocol = websocket.headers.get("sec-websocket-protocol") or ""
+    protocols = [part.strip() for part in protocol.split(",") if part.strip()]
+    if "aegis.v1" in protocols:
+        return "aegis.v1"
+    for value in protocols:
+        lowered = value.lower()
+        if not lowered.startswith(("bearer.", "token.")):
+            return value
+    return None
+
+
 def _extract_ws_auth(websocket) -> tuple[str | None, str | None, str | None]:
     auth_cfg = get_auth_config()
     token = websocket.query_params.get("token")

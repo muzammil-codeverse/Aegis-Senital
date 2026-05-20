@@ -11,8 +11,10 @@ import { normalizeError } from '../api/client'
 import { DASHBOARD_POLL_MS } from '../config'
 import { alertStore } from '../state/alertStore'
 import { compareSeverity } from '../utils/severity'
+import { useAuthGate } from './useAuthenticatedQuery'
 
 export function useAlerts({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
+  const gate = useAuthGate('alert:read', { enabled })
   const [alerts, setAlerts] = useState([])
   const [selectedAlert, setSelectedAlert] = useState(null)
   const [history, setHistory] = useState([])
@@ -26,9 +28,11 @@ export function useAlerts({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 
   const hasDataRef = useRef(false)
 
   const refresh = useCallback(async () => {
-    if (!enabled) {
-      setLoading(false)
-      setError(null)
+    if (!gate.enabled) {
+      setLoading(gate.reason === 'checking')
+      setError(gate.reason && gate.reason !== 'disabled' && gate.reason !== 'checking' ? gate.message : null)
+      setAlerts([])
+      alertStore.setAlerts([])
       return
     }
     try {
@@ -45,7 +49,7 @@ export function useAlerts({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 
     } finally {
       setLoading(false)
     }
-  }, [enabled, limit])
+  }, [gate.enabled, gate.message, gate.reason, limit])
 
   const selectAlert = useCallback(async alertId => {
     if (!alertId) {
@@ -92,14 +96,16 @@ export function useAlerts({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 
   }, [refresh, selectAlert])
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false)
-      return undefined
+    const initialTimer = window.setTimeout(refresh, 0)
+    if (!gate.enabled) {
+      return () => window.clearTimeout(initialTimer)
     }
-    refresh()
     const timer = window.setInterval(refresh, pollMs)
-    return () => window.clearInterval(timer)
-  }, [enabled, pollMs, refresh])
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
+  }, [gate.enabled, pollMs, refresh])
 
   const sortedAlerts = useMemo(() => (
     [...alerts].sort((a, b) => {
@@ -120,6 +126,7 @@ export function useAlerts({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 
     actionError,
     stale,
     updatedAt,
+    authGate: gate,
     refresh,
     selectAlert,
     acknowledge: (alertId, operatorId) => runAction(alertId, 'acknowledge', { operatorId }),

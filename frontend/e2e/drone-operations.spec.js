@@ -45,7 +45,6 @@ test.describe('Drone Operations', () => {
   test('disconnected simulator state handled honestly', async ({ page }) => {
     // When simulator is offline, the page should show an honest state
     // (not fake success or "connected" when not connected)
-    const bodyText = await page.locator('body').innerText()
     // Should NOT claim connected/active drone when simulator is offline
     // The page is valid as long as it doesn't show forbidden wording
     await assertNoForbiddenWording(page)

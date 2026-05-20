@@ -22,6 +22,13 @@ class IntelligenceResponseBuilder:
                 "updated_at": item.get("updated_at", 0.0),
                 "summary": _incident_summary(item),
                 "risk_score": float(item.get("risk_score", 0.0)),
+                "incident_type": item.get("incident_type"),
+                "event_ids": [
+                    str(event.get("event_id"))
+                    for event in item.get("events", [])
+                    if isinstance(event, dict) and event.get("event_id")
+                ],
+                "metadata": dict(item.get("metadata", {})) if isinstance(item.get("metadata"), dict) else {},
             }
             for item in incidents
         ]
@@ -135,6 +142,8 @@ def _alert_feed_item(alert: dict, now: float) -> dict:
     created_at = float(alert.get("created_at", now) or now)
     return {
         "alert_id": str(alert.get("alert_id", "")),
+        "incident_id": alert.get("incident_id"),
+        "event_ids": list(alert.get("event_ids", [])),
         "severity": str(alert.get("severity", "info")),
         "state": str(alert.get("state", "new")),
         "title": str(alert.get("title", "")),
@@ -147,4 +156,5 @@ def _alert_feed_item(alert: dict, now: float) -> dict:
         "created_at": created_at,
         "updated_at": float(alert.get("updated_at", created_at) or created_at),
         "age_seconds": max(0.0, round(now - created_at, 3)),
+        "metadata": dict(alert.get("metadata", {})) if isinstance(alert.get("metadata"), dict) else {},
     }

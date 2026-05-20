@@ -18,6 +18,7 @@ import {
   getSystemPerformance,
 } from '../api/analyticsApi'
 import { normalizeError } from '../api/client'
+import { useAuthGate } from './useAuthenticatedQuery'
 
 const DEFAULT_FILTERS = {
   window: '24h',
@@ -68,6 +69,7 @@ function buildExportPayload(filters, sections, format) {
 }
 
 export function useAnalytics({ enabled = true, pollMs = 30000, initialFilters = {} } = {}) {
+  const gate = useAuthGate('analytics:read', { enabled })
   const [overview, setOverview] = useState(null)
   const [eventTimeseries, setEventTimeseries] = useState([])
   const [eventsByType, setEventsByType] = useState([])
@@ -91,8 +93,9 @@ export function useAnalytics({ enabled = true, pollMs = 30000, initialFilters = 
   const query = useMemo(() => buildQuery(deferredFilters), [deferredFilters])
 
   const refresh = useCallback(async (overrideFilters = null) => {
-    if (!enabled) {
-      setLoading(false)
+    if (!gate.enabled) {
+      setLoading(gate.reason === 'checking')
+      setError(gate.reason && gate.reason !== 'disabled' && gate.reason !== 'checking' ? gate.message : null)
       return
     }
     const activeFilters = overrideFilters ? { ...filters, ...overrideFilters } : deferredFilters
@@ -142,7 +145,7 @@ export function useAnalytics({ enabled = true, pollMs = 30000, initialFilters = 
       setSystemPerformance(readItem(13))
       setLoading(false)
     })
-  }, [deferredFilters, enabled, filters])
+  }, [deferredFilters, filters, gate.enabled, gate.message, gate.reason])
 
   const exportData = useCallback(async ({ sections, format }) => {
     setExporting(true)
@@ -160,14 +163,15 @@ export function useAnalytics({ enabled = true, pollMs = 30000, initialFilters = 
   }, [filters])
 
   useEffect(() => {
-    refresh()
+    const initialTimer = window.setTimeout(() => { refresh() }, 0)
+    return () => window.clearTimeout(initialTimer)
   }, [query, refresh])
 
   useEffect(() => {
-    if (!enabled) return undefined
+    if (!gate.enabled) return undefined
     const timer = window.setInterval(() => refresh(), pollMs)
     return () => window.clearInterval(timer)
-  }, [enabled, pollMs, refresh])
+  }, [gate.enabled, pollMs, refresh])
 
   return {
     overview,
@@ -191,5 +195,6 @@ export function useAnalytics({ enabled = true, pollMs = 30000, initialFilters = 
     refresh,
     exportData,
     exporting,
+    authGate: gate,
   }
 }

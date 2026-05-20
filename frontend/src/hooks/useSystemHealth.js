@@ -11,7 +11,7 @@ export function useSystemHealth(metrics = {}, apiError = null, stale = false) {
     const segmentationUnavailable = Number(metrics.segmentation_provider_unavailable_total ?? 0)
     const websocketClients = Number(metrics.websocket_clients ?? 0)
 
-    if (apiError) reasons.push('metrics api unavailable')
+    if (apiError) reasons.push('metrics service unavailable')
     if (stale) reasons.push('metrics are stale')
     if (queueOverflows > 0) reasons.push('queue overflow observed')
     if (circuitTrips > 0) reasons.push('circuit breaker activity')
@@ -31,7 +31,7 @@ export function useSystemHealth(metrics = {}, apiError = null, stale = false) {
       status,
       reasons,
       websocketClients,
-      generatedAt: Date.now(),
+      generatedAt: metrics.generated_at ?? metrics.generatedAt ?? null,
     }
 
     return health

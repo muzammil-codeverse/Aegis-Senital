@@ -8,6 +8,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [localError, setLocalError] = useState(null)
+  const runtimeWarning = !localError && error ? error : null
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -55,7 +56,12 @@ export default function LoginPage() {
           />
           <span>Keep session on this workstation</span>
         </label>
-        {(localError || error) && <div className="form-error">{localError || error}</div>}
+        {runtimeWarning && (
+          <div className="form-warning">
+            Session status check is temporarily unavailable. You can still sign in.
+          </div>
+        )}
+        {localError && <div className="form-error">{localError}</div>}
         <button className="primary-button" type="submit" disabled={loading}>
           {loading ? 'Signing in...' : 'Sign in'}
         </button>

@@ -7,6 +7,7 @@ let state = {
   permissions: [],
   authenticated: false,
   authRequired: true,
+  ready: false,
   loading: true,
   error: null,
   sessionExpired: false,
@@ -38,6 +39,7 @@ export const authStore = {
       permissions,
       authenticated: Boolean(user),
       authRequired,
+      ready: true,
       loading: false,
       error: null,
       sessionExpired: false,
@@ -52,6 +54,7 @@ export const authStore = {
       user: null,
       permissions: [],
       authenticated: false,
+      ready: true,
       loading: false,
       sessionExpired: false,
     }
@@ -65,6 +68,7 @@ export const authStore = {
       user: null,
       permissions: [],
       authenticated: false,
+      ready: true,
       loading: false,
       sessionExpired: true,
     }

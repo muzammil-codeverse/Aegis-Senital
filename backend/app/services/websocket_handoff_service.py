@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.api.websocket_security import accepted_ws_subprotocol
 from app.api.object_authorization import can_access_camera, can_access_identity
 from app.models.security_models import AuditAction
 from app.services.audit_log_service import get_audit_log_service
@@ -145,7 +146,7 @@ class WebSocketHandoffService:
         logger.debug("ws/handoffs client connected id=%s", client_id)
 
         try:
-            await websocket.accept()
+            await websocket.accept(subprotocol=accepted_ws_subprotocol(websocket))
             last_hb = time.monotonic()
 
             while True:

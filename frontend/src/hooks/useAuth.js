@@ -12,11 +12,17 @@ export function useAuth() {
 
   const refreshMe = useCallback(async () => {
     if (refreshPromise) return refreshPromise
-    if (authUsesCookieMode() && !getStoredToken() && !readCookie(CSRF_COOKIE_NAME)) {
-      authStore.setState({ user: null, token: null, permissions: [], authenticated: false, loading: false, error: null })
+    // Token mode: no stored token means not logged in yet — show login, not "session expired".
+    if (!authUsesCookieMode() && !getStoredToken()) {
+      authStore.setState({ user: null, token: null, permissions: [], authenticated: false, ready: true, loading: false, error: null, sessionExpired: false })
       return null
     }
-    authStore.setState({ loading: true, error: null })
+    // Cookie mode: no token AND no CSRF cookie means no session.
+    if (authUsesCookieMode() && !getStoredToken() && !readCookie(CSRF_COOKIE_NAME)) {
+      authStore.setState({ user: null, token: null, permissions: [], authenticated: false, ready: true, loading: false, error: null })
+      return null
+    }
+    authStore.setState({ loading: true, ready: false, error: null })
     refreshPromise = getMe()
       .then(payload => {
         authStore.setSession({
@@ -28,15 +34,20 @@ export function useAuth() {
         return payload.user
       })
       .catch(error => {
-        clearStoredToken()
-        authStore.setState({
-          user: null,
-          token: null,
-          permissions: [],
-          authenticated: false,
-          loading: false,
-          error: null,
-        })
+        if (error?.status === 401 || error?.details?.status === 401) {
+          // Only mark session as truly expired if we had a stored token that was rejected.
+          if (getStoredToken()) {
+            authStore.expireSession()
+          } else {
+            authStore.setState({ user: null, token: null, permissions: [], authenticated: false, ready: true, loading: false, error: null, sessionExpired: false })
+          }
+        } else {
+          authStore.setState({
+            loading: false,
+            ready: true,
+            error: error?.message || 'Session validation temporarily unavailable',
+          })
+        }
         return null
       })
       .finally(() => {
@@ -50,16 +61,16 @@ export function useAuth() {
       bootstrapped = true
       refreshMe()
     }
-    function handleUnauthorized() {
+    function handleSessionExpired() {
       authStore.expireSession()
       window.location.hash = 'login'
     }
-    window.addEventListener('aegis-auth-unauthorized', handleUnauthorized)
-    return () => window.removeEventListener('aegis-auth-unauthorized', handleUnauthorized)
+    window.addEventListener('aegis-session-expired', handleSessionExpired)
+    return () => window.removeEventListener('aegis-session-expired', handleSessionExpired)
   }, [refreshMe])
 
   const login = useCallback(async (username, password, { remember = true } = {}) => {
-    authStore.setState({ loading: true, error: null })
+    authStore.setState({ loading: true, ready: false, error: null })
     try {
       const payload = await loginRequest(username, password)
       if (payload.access_token) {
@@ -81,6 +92,7 @@ export function useAuth() {
         token: null,
         permissions: [],
         authenticated: false,
+        ready: true,
         loading: false,
         error: error?.message || 'Login failed',
       })
@@ -117,6 +129,8 @@ export function useAuth() {
 
   return {
     ...snapshot,
+    ready: snapshot.ready || !snapshot.loading,
+    isAuthenticated: snapshot.authenticated,
     login,
     logout,
     refreshMe,

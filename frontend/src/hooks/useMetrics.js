@@ -3,8 +3,10 @@ import { getCoreMetrics } from '../api/metricsApi'
 import { normalizeError } from '../api/client'
 import { DASHBOARD_POLL_MS } from '../config'
 import { runtimeStore } from '../state/runtimeStore'
+import { useAuthGate } from './useAuthenticatedQuery'
 
 export function useMetrics({ enabled = true, pollMs = DASHBOARD_POLL_MS } = {}) {
+  const gate = useAuthGate('metrics:read', { enabled })
   const [metrics, setMetrics] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -13,9 +15,10 @@ export function useMetrics({ enabled = true, pollMs = DASHBOARD_POLL_MS } = {}) 
   const hasDataRef = useRef(false)
 
   const refresh = useCallback(async () => {
-    if (!enabled) {
-      setLoading(false)
-      setError(null)
+    if (!gate.enabled) {
+      setLoading(gate.reason === 'checking')
+      setError(gate.reason && gate.reason !== 'disabled' && gate.reason !== 'checking' ? gate.message : null)
+      setMetrics({})
       return
     }
     try {
@@ -32,17 +35,19 @@ export function useMetrics({ enabled = true, pollMs = DASHBOARD_POLL_MS } = {}) 
     } finally {
       setLoading(false)
     }
-  }, [enabled])
+  }, [gate.enabled, gate.message, gate.reason])
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false)
-      return undefined
+    const initialTimer = window.setTimeout(refresh, 0)
+    if (!gate.enabled) {
+      return () => window.clearTimeout(initialTimer)
     }
-    refresh()
     const timer = window.setInterval(refresh, pollMs)
-    return () => window.clearInterval(timer)
-  }, [enabled, pollMs, refresh])
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
+  }, [gate.enabled, pollMs, refresh])
 
-  return { metrics, loading, error, stale, updatedAt, refresh }
+  return { metrics, loading, error, stale, updatedAt, authGate: gate, refresh }
 }

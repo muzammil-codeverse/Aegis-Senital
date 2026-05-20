@@ -1,9 +1,10 @@
 import logging
-import os
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
-_LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
-os.makedirs(_LOG_DIR, exist_ok=True)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_LOG_DIR = _PROJECT_ROOT / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _build_logger() -> logging.Logger:
@@ -18,7 +19,7 @@ def _build_logger() -> logging.Logger:
     ch = logging.StreamHandler()
     ch.setFormatter(fmt)
     fh = RotatingFileHandler(
-        os.path.join(_LOG_DIR, "sentinel.log"),
+        _LOG_DIR / "sentinel.log",
         maxBytes=10 * 1024 * 1024,
         backupCount=5,
     )

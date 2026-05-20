@@ -9,6 +9,8 @@ const CARD_CONFIG = [
   { key: 'cases_requiring_review', label: 'Require review', icon: ShieldAlert, tone: 'warning' },
   { key: 'active_streams', label: 'Active streams', icon: Activity },
   { key: 'degraded_streams', label: 'Degraded streams', icon: AlertTriangle, tone: 'warning' },
+  { key: 'uploaded_video_processed_videos', label: 'Processed videos', icon: Radar },
+  { key: 'uploaded_video_alerts_generated', label: 'Upload alerts', icon: Siren, tone: 'warning' },
   { key: 'avg_model_latency_ms', label: 'Avg inference latency', icon: Clock3, suffix: ' ms' },
 ]
 

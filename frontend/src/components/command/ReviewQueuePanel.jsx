@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listCases } from '../../api/caseApi'
 import { acceptCorrelation, listCorrelations, markCorrelationInconclusive, rejectCorrelation } from '../../api/droneFusionApi'
 import { acceptIdentityCandidate, getIdentityCandidates, rejectIdentityCandidate } from '../../api/identityApi'
@@ -12,22 +12,35 @@ function pendingOnly(items, field = 'review_status') {
 
 export default function ReviewQueuePanel({ limit = 12 }) {
   const auth = useAuth()
+  const { authenticated, loading: authLoading, ready, hasPermission } = auth
+  const authReady = Boolean(ready ?? !authLoading)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [busyKey, setBusyKey] = useState(null)
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
+    if (!authReady) {
+      setLoading(true)
+      setError(null)
+      return
+    }
+    if (!authenticated) {
+      setItems([])
+      setLoading(false)
+      setError('Sign in required')
+      return
+    }
     setLoading(true)
     setError(null)
     const next = []
     try {
       const tasks = []
-      if (auth.hasPermission('identity:read')) tasks.push(getIdentityCandidates({ limit: 8 }).then(result => ['identity', pendingOnly(result.items)]))
-      if (auth.hasPermission('drone_fusion:read')) tasks.push(listCorrelations({ limit: 8 }).then(result => ['fusion', pendingOnly(result.items)]))
-      if (auth.hasPermission('investigation:read')) tasks.push(investigationApi.listHypotheses({ limit: 8 }).then(result => ['investigation', pendingOnly(result.items)]))
-      if (auth.hasPermission('case:read')) tasks.push(listCases({ limit: 8 }).then(result => ['cases', (result.items || []).filter(item => item.requires_review)]))
-      if (auth.hasPermission('model:read')) {
+      if (hasPermission('identity:read')) tasks.push(getIdentityCandidates({ limit: 8 }).then(result => ['identity', pendingOnly(result.items)]))
+      if (hasPermission('drone_fusion:read')) tasks.push(listCorrelations({ limit: 8 }).then(result => ['fusion', pendingOnly(result.items)]))
+      if (hasPermission('investigation:read')) tasks.push(investigationApi.listHypotheses({ limit: 8 }).then(result => ['investigation', pendingOnly(result.items)]))
+      if (hasPermission('case:read')) tasks.push(listCases({ limit: 8 }).then(result => ['cases', (result.items || []).filter(item => item.requires_review)]))
+      if (hasPermission('model:read')) {
         tasks.push(Promise.all([fetchGovernanceLimitations(), fetchPromotionPolicy()]).then(([limitations, policy]) => ['governance', { limitations, policy }]))
       }
       const settled = await Promise.allSettled(tasks)
@@ -114,13 +127,19 @@ export default function ReviewQueuePanel({ limit = 12 }) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [authReady, authenticated, hasPermission, limit])
 
   useEffect(() => {
-    refresh()
+    const initialTimer = window.setTimeout(refresh, 0)
+    if (!authReady || !authenticated) {
+      return () => window.clearTimeout(initialTimer)
+    }
     const timer = window.setInterval(refresh, 30000)
-    return () => window.clearInterval(timer)
-  }, [auth.hasPermission, limit])
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
+  }, [authenticated, authReady, refresh])
 
   async function handleReview(item, action) {
     setBusyKey(`${item.key}:${action}`)

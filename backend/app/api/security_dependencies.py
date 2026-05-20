@@ -224,6 +224,10 @@ def permission_for_request(method: str, path: str) -> str | None:
         return "audit:read"
     if path.startswith("/api/system/"):
         return "system:read"
+    if path.startswith("/api/capabilities"):
+        return "system:read"
+    if path.startswith("/api/preflight"):
+        return "system:read"
     if path == "/api/analytics/export":
         return "analytics:export"
     if path.startswith("/api/analytics"):

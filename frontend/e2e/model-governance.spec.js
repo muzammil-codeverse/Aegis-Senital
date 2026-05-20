@@ -40,7 +40,6 @@ test.describe('Model Governance', () => {
 
   test('production blockers or degraded states shown honestly', async ({ page }) => {
     // If production is blocked, should show honest state — no fake "all OK"
-    const bodyText = await page.locator('body').innerText()
     // Page should render content without crashing
     await assertPageLoaded(page)
     // No forbidden wording

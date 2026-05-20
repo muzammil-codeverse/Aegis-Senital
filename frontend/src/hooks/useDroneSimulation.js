@@ -33,8 +33,9 @@ function mergeStatusPayload(item, setState) {
 
 export function useDroneSimulation({ enabled = true, pollMs = DEFAULT_POLL_MS } = {}) {
   const auth = useAuth()
-  const canRead = enabled && auth.hasPermission('drone:read')
-  const canControl = auth.hasPermission('drone:control')
+  const authReady = Boolean(auth.ready ?? !auth.loading)
+  const canRead = enabled && authReady && auth.authenticated && auth.hasPermission('drone:read')
+  const canControl = authReady && auth.authenticated && auth.hasPermission('drone:control')
   const [status, setStatus] = useState({
     session: null,
     connection: null,

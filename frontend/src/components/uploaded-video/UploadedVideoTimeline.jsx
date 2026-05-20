@@ -1,4 +1,8 @@
-export default function UploadedVideoTimeline({ items = [], sessionId = '' }) {
+export default function UploadedVideoTimeline({ items = [], sessionId = '', status = '' }) {
+  const emptyText = String(status || '').toLowerCase() === 'completed'
+    ? 'No event timeline items were generated for this completed session.'
+    : 'No timeline items yet. Process the session to populate this view.'
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -8,7 +12,7 @@ export default function UploadedVideoTimeline({ items = [], sessionId = '' }) {
         </div>
         <span className="count-pill">{items.length} items</span>
       </div>
-      {items.length === 0 ? <p className="muted">No timeline items yet. Process the session to populate this view.</p> : null}
+      {items.length === 0 ? <p className="muted">{emptyText}</p> : null}
       <div className="uploaded-video-timeline">
         {items.map(item => (
           <article key={item.timeline_id || `${item.event_id}-${item.frame_index}`} className="timeline-card">

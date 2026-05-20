@@ -4,8 +4,10 @@ import { normalizeError } from '../api/client'
 import { DASHBOARD_POLL_MS } from '../config'
 import { incidentStore } from '../state/incidentStore'
 import { compareSeverity } from '../utils/severity'
+import { useAuthGate } from './useAuthenticatedQuery'
 
 export function useIncidents({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit = 100 } = {}) {
+  const gate = useAuthGate('incident:read', { enabled })
   const [incidents, setIncidents] = useState([])
   const [selectedIncident, setSelectedIncident] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -17,9 +19,11 @@ export function useIncidents({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit
   const hasDataRef = useRef(false)
 
   const refresh = useCallback(async () => {
-    if (!enabled) {
-      setLoading(false)
-      setError(null)
+    if (!gate.enabled) {
+      setLoading(gate.reason === 'checking')
+      setError(gate.reason && gate.reason !== 'disabled' && gate.reason !== 'checking' ? gate.message : null)
+      setIncidents([])
+      incidentStore.setIncidents([])
       return
     }
     try {
@@ -36,7 +40,7 @@ export function useIncidents({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit
     } finally {
       setLoading(false)
     }
-  }, [enabled, limit])
+  }, [gate.enabled, gate.message, gate.reason, limit])
 
   const selectIncident = useCallback(async incidentId => {
     if (!incidentId) {
@@ -59,14 +63,16 @@ export function useIncidents({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit
   }, [])
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false)
-      return undefined
+    const initialTimer = window.setTimeout(refresh, 0)
+    if (!gate.enabled) {
+      return () => window.clearTimeout(initialTimer)
     }
-    refresh()
     const timer = window.setInterval(refresh, pollMs)
-    return () => window.clearInterval(timer)
-  }, [enabled, pollMs, refresh])
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
+  }, [gate.enabled, pollMs, refresh])
 
   const sortedIncidents = useMemo(() => (
     [...incidents].sort((a, b) => {
@@ -85,6 +91,7 @@ export function useIncidents({ enabled = true, pollMs = DASHBOARD_POLL_MS, limit
     detailError,
     stale,
     updatedAt,
+    authGate: gate,
     refresh,
     selectIncident,
   }

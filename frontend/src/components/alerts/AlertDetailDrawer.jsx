@@ -22,6 +22,7 @@ export default function AlertDetailDrawer({
   caseBusy,
 }) {
   if (!open) return null
+  const uploadedVideo = alert?.metadata?.uploaded_video
   return (
     <aside className="detail-drawer" aria-label="Alert details">
       <div className="drawer-header">
@@ -66,6 +67,45 @@ export default function AlertDetailDrawer({
             <span>Created</span><strong>{formatDateTime(alert.created_at)}</strong>
             <span>Updated</span><strong>{formatDateTime(alert.updated_at)}</strong>
           </div>
+          {uploadedVideo ? (
+            <section className="drawer-section">
+              <h3>Uploaded Video Source</h3>
+              <div className="drawer-grid">
+                <span>Session</span><strong>{uploadedVideo.session_id || 'N/A'}</strong>
+                <span>Video</span><strong>{uploadedVideo.original_filename || 'N/A'}</strong>
+                <span>Frame</span><strong>{uploadedVideo.frame_index ?? 'N/A'}</strong>
+                <span>Offset</span><strong>{uploadedVideo.time_offset_seconds != null ? `${Number(uploadedVideo.time_offset_seconds).toFixed(2)}s` : 'N/A'}</strong>
+              </div>
+              <div className="button-row">
+                <button type="button" className="text-button" onClick={() => { window.location.hash = 'uploaded-video-analysis' }}>
+                  Open Uploaded-Video Report
+                </button>
+              </div>
+            </section>
+          ) : null}
+          {/* Phase 7 — scenario tracking context */}
+          {alert.metadata?.has_tracking_view && alert.metadata?.run_id && (
+            <section className="drawer-section">
+              <h3>Scenario Tracking Context</h3>
+              <div className="drawer-grid">
+                <span>Scenario</span><strong style={{ fontFamily: 'monospace' }}>{alert.metadata.scenario_id || 'N/A'}</strong>
+                <span>Run ID</span><strong style={{ fontFamily: 'monospace', fontSize: '0.7rem' }}>{alert.metadata.run_id}</strong>
+                <span>Actor</span><strong>{alert.metadata.actor_id || 'N/A'}</strong>
+                <span>Camera</span><strong>{alert.metadata.camera_id || 'N/A'}</strong>
+                <span>Zone</span><strong>{alert.metadata.zone || 'N/A'}</strong>
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="text-button"
+                  style={{ color: '#1890ff' }}
+                  onClick={() => { window.location.hash = `scenario-tracking/${alert.metadata.run_id}` }}
+                >
+                  View Tracking
+                </button>
+              </div>
+            </section>
+          )}
           <AlertControls
             alert={alert}
             onAcknowledge={onAcknowledge}

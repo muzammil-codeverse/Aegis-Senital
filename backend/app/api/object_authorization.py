@@ -230,6 +230,13 @@ def _incident_scope_decision(user: UserAccount | None, incident_id: str) -> Obje
     except Exception:
         incident = None
     if not incident:
+        try:
+            from app.services.command_center_intelligence_service import get_command_center_intelligence_service
+
+            incident = get_command_center_intelligence_service().get_incident(incident_id)
+        except Exception:
+            incident = None
+    if not incident:
         return _deny_decision("incident_not_found")
     for camera_id in list(incident.get("camera_ids", [])) or []:
         decision = _camera_scope_decision(user, str(camera_id))
@@ -255,6 +262,13 @@ def _alert_scope_decision(user: UserAccount | None, alert_id: str) -> ObjectAcce
         alert = response.get("item") if isinstance(response, dict) else None
     except Exception:
         alert = None
+    if not alert:
+        try:
+            from app.services.command_center_intelligence_service import get_command_center_intelligence_service
+
+            alert = get_command_center_intelligence_service().get_alert(alert_id)
+        except Exception:
+            alert = None
     if not alert:
         return _deny_decision("alert_not_found")
     for camera_id in list(alert.get("camera_ids", [])) or []:

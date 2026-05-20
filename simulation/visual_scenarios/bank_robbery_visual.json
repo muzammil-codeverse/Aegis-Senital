@@ -1,0 +1,204 @@
+{
+  "schema_version": "1.0",
+  "phase": 11,
+  "scenario_id": "bank_robbery_visual",
+  "linked_scenario_id": "bank_robbery_demo",
+  "name": "Bank Robbery Visual Scenario",
+  "description": "Phase XI visual enrichment layer. Defines all actors, zones, camera markers, and drone route for the bank_robbery_demo AirSim world. Phase XII will synchronize this with live camera feeds and backend event timing.",
+  "fallback_proxy_mode": true,
+  "coordinate_system": "scenario_ned_positive_z_up",
+  "home": {
+    "latitude": 30.1575,
+    "longitude": 71.5249,
+    "altitude_meters": 0.0
+  },
+  "airsim": {
+    "host": "127.0.0.1",
+    "port": 41451,
+    "vehicle_name": "Drone1",
+    "timeout_seconds": 5.0
+  },
+  "zones": [
+    {
+      "zone_id": "zone_financial",
+      "name": "Financial District / Bank",
+      "center": {"x": 135.0, "y": 90.0, "z": 0.0},
+      "extents": {"dx": 40.0, "dy": 35.0},
+      "color_rgba": [1.0, 0.55, 0.0, 0.7],
+      "label": "BANK / FINANCIAL DISTRICT",
+      "label_height": 8.0
+    },
+    {
+      "zone_id": "zone_market",
+      "name": "Market District",
+      "center": {"x": 200.0, "y": 145.0, "z": 0.0},
+      "extents": {"dx": 45.0, "dy": 40.0},
+      "color_rgba": [0.6, 0.8, 0.0, 0.5],
+      "label": "MARKET DISTRICT",
+      "label_height": 8.0
+    },
+    {
+      "zone_id": "zone_roads",
+      "name": "Main Road",
+      "center": {"x": 260.0, "y": 180.0, "z": 0.0},
+      "extents": {"dx": 50.0, "dy": 30.0},
+      "color_rgba": [0.4, 0.4, 0.4, 0.5],
+      "label": "MAIN ROAD",
+      "label_height": 6.0
+    },
+    {
+      "zone_id": "zone_parking",
+      "name": "Parking Zone",
+      "center": {"x": 310.0, "y": 200.0, "z": 0.0},
+      "extents": {"dx": 40.0, "dy": 35.0},
+      "color_rgba": [0.2, 0.6, 1.0, 0.5],
+      "label": "PARKING ZONE",
+      "label_height": 6.0
+    },
+    {
+      "zone_id": "zone_alley",
+      "name": "Alley Sector",
+      "center": {"x": 330.0, "y": 230.0, "z": 0.0},
+      "extents": {"dx": 30.0, "dy": 25.0},
+      "color_rgba": [0.5, 0.1, 0.5, 0.5],
+      "label": "ALLEY SECTOR",
+      "label_height": 6.0
+    }
+  ],
+  "actors": [
+    {
+      "actor_id": "SUSPECT-001",
+      "aegis_id": "SUSPECT-001",
+      "name": "Primary Suspect",
+      "role": "suspect",
+      "proxy_color_rgba": [1.0, 0.0, 0.0, 1.0],
+      "proxy_label": "SUSPECT-001",
+      "proxy_size": 22.0,
+      "start_pose": {"x": 120.0, "y": 80.0, "z": 1.8},
+      "waypoints": [
+        {"waypoint_id": "wp-suspect-00", "offset_seconds": 0,  "pose": {"x": 120.0, "y": 80.0,  "z": 1.8}, "zone_id": "zone_financial", "camera_id": "CAM-BANK-01"},
+        {"waypoint_id": "wp-suspect-01", "offset_seconds": 5,  "pose": {"x": 130.0, "y": 85.0,  "z": 1.8}, "zone_id": "zone_financial", "camera_id": "CAM-BANK-01"},
+        {"waypoint_id": "wp-suspect-02", "offset_seconds": 15, "pose": {"x": 145.0, "y": 100.0, "z": 1.8}, "zone_id": "zone_financial", "camera_id": "CAM-BANK-02", "critical": true},
+        {"waypoint_id": "wp-suspect-03", "offset_seconds": 20, "pose": {"x": 160.0, "y": 115.0, "z": 1.8}, "zone_id": "zone_financial", "camera_id": "CAM-BANK-03"},
+        {"waypoint_id": "wp-suspect-04", "offset_seconds": 25, "pose": {"x": 200.0, "y": 145.0, "z": 1.8}, "zone_id": "zone_market",    "camera_id": "CAM-MARKET-01"},
+        {"waypoint_id": "wp-suspect-05", "offset_seconds": 30, "pose": {"x": 260.0, "y": 180.0, "z": 1.8}, "zone_id": "zone_roads",     "camera_id": "CAM-ROAD-01"},
+        {"waypoint_id": "wp-suspect-06", "offset_seconds": 35, "pose": {"x": 310.0, "y": 200.0, "z": 1.8}, "zone_id": "zone_parking",   "camera_id": "CAM-PARKING-01"},
+        {"waypoint_id": "wp-suspect-07", "offset_seconds": 40, "pose": {"x": 330.0, "y": 230.0, "z": 1.8}, "zone_id": "zone_alley",     "camera_id": "CAM-ALLEY-01"},
+        {"waypoint_id": "wp-suspect-08", "offset_seconds": 50, "pose": {"x": 380.0, "y": 260.0, "z": 1.8}, "zone_id": "zone_roads",     "camera_id": "CAM-ROAD-01"}
+      ]
+    },
+    {
+      "actor_id": "CIVILIAN-GROUP-001",
+      "aegis_id": "CIVILIAN-GROUP-001",
+      "name": "Bank Civilian Group",
+      "role": "civilian",
+      "proxy_color_rgba": [0.0, 0.5, 1.0, 1.0],
+      "proxy_label": "CIVILIANS",
+      "proxy_size": 16.0,
+      "group_members": [
+        {"pose": {"x": 136.0, "y": 88.0, "z": 1.8}},
+        {"pose": {"x": 139.0, "y": 92.0, "z": 1.8}},
+        {"pose": {"x": 133.0, "y": 91.0, "z": 1.8}},
+        {"pose": {"x": 141.0, "y": 86.0, "z": 1.8}},
+        {"pose": {"x": 137.0, "y": 95.0, "z": 1.8}}
+      ],
+      "scatter_trigger_offset_seconds": 15,
+      "scatter_radius": 18.0,
+      "scatter_direction": [1.0, -1.0]
+    },
+    {
+      "actor_id": "SECURITY-GUARD-001",
+      "aegis_id": "SECURITY-GUARD-001",
+      "name": "Bank Security Guard",
+      "role": "security",
+      "proxy_color_rgba": [1.0, 1.0, 0.0, 1.0],
+      "proxy_label": "SECURITY-GUARD",
+      "proxy_size": 20.0,
+      "start_pose": {"x": 127.0, "y": 83.0, "z": 1.8},
+      "waypoints": [
+        {"waypoint_id": "sg-wp-00", "offset_seconds": 0,  "pose": {"x": 127.0, "y": 83.0,  "z": 1.8}, "zone_id": "zone_financial"},
+        {"waypoint_id": "sg-wp-01", "offset_seconds": 16, "pose": {"x": 138.0, "y": 97.0,  "z": 1.8}, "zone_id": "zone_financial"},
+        {"waypoint_id": "sg-wp-02", "offset_seconds": 22, "pose": {"x": 144.0, "y": 104.0, "z": 1.8}, "zone_id": "zone_financial"}
+      ]
+    },
+    {
+      "actor_id": "ESCAPE-VEHICLE-001",
+      "aegis_id": "ESCAPE-VEHICLE-001",
+      "name": "Escape Vehicle",
+      "role": "vehicle",
+      "proxy_color_rgba": [0.15, 0.15, 0.15, 1.0],
+      "proxy_label": "ESCAPE-VEHICLE",
+      "proxy_size": 30.0,
+      "start_pose": {"x": 315.0, "y": 202.0, "z": 1.2},
+      "waypoints": [
+        {"waypoint_id": "ev-wp-00", "offset_seconds": 0,  "pose": {"x": 315.0, "y": 202.0, "z": 1.2}, "zone_id": "zone_parking"},
+        {"waypoint_id": "ev-wp-01", "offset_seconds": 38, "pose": {"x": 340.0, "y": 235.0, "z": 1.2}, "zone_id": "zone_alley"}
+      ]
+    }
+  ],
+  "camera_markers": [
+    {"camera_id": "CAM-BANK-01",    "pose": {"x": 118.0, "y":  77.0, "z": 4.5}, "zone_id": "zone_financial", "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-BANK-02",    "pose": {"x": 148.0, "y": 103.0, "z": 4.5}, "zone_id": "zone_financial", "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-BANK-03",    "pose": {"x": 162.0, "y": 118.0, "z": 4.5}, "zone_id": "zone_financial", "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-MARKET-01",  "pose": {"x": 198.0, "y": 142.0, "z": 5.0}, "zone_id": "zone_market",    "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-ROAD-01",    "pose": {"x": 255.0, "y": 175.0, "z": 5.0}, "zone_id": "zone_roads",     "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-PARKING-01", "pose": {"x": 305.0, "y": 196.0, "z": 5.0}, "zone_id": "zone_parking",   "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-ALLEY-01",   "pose": {"x": 325.0, "y": 226.0, "z": 4.5}, "zone_id": "zone_alley",     "color_rgba": [0.0, 1.0, 0.2, 1.0]},
+    {"camera_id": "CAM-GATE-01",    "pose": {"x": 378.0, "y": 258.0, "z": 4.5}, "zone_id": "zone_roads",     "color_rgba": [0.0, 1.0, 0.2, 1.0]}
+  ],
+  "crime_markers": [
+    {
+      "marker_id": "crime-bank-incident",
+      "type": "weapon_event",
+      "pose": {"x": 145.0, "y": 100.0, "z": 0.5},
+      "color_rgba": [1.0, 0.0, 0.8, 1.0],
+      "size": 25.0,
+      "label": "! ARMED ROBBERY !",
+      "trigger_offset_seconds": 15
+    },
+    {
+      "marker_id": "crime-escape-zone",
+      "type": "restricted_zone",
+      "pose": {"x": 315.0, "y": 202.0, "z": 0.5},
+      "color_rgba": [1.0, 0.3, 0.0, 0.8],
+      "size": 20.0,
+      "label": "! ESCAPE VEHICLE !",
+      "trigger_offset_seconds": 35
+    }
+  ],
+  "drone_route": {
+    "drone_id": "DRONE-ALPHA",
+    "path_color_rgba": [0.0, 1.0, 0.9, 1.0],
+    "dispatch_trigger_offset_seconds": 25,
+    "waypoints": [
+      {"waypoint_id": "drone-wp-00", "offset_seconds": 25, "pose": {"x": 120.0, "y":  80.0, "z": 40.0}, "zone_id": "zone_financial"},
+      {"waypoint_id": "drone-wp-01", "offset_seconds": 27, "pose": {"x": 135.0, "y":  90.0, "z": 35.0}, "zone_id": "zone_financial"},
+      {"waypoint_id": "drone-wp-02", "offset_seconds": 30, "pose": {"x": 200.0, "y": 145.0, "z": 30.0}, "zone_id": "zone_market"},
+      {"waypoint_id": "drone-wp-03", "offset_seconds": 35, "pose": {"x": 310.0, "y": 200.0, "z": 25.0}, "zone_id": "zone_parking"},
+      {"waypoint_id": "drone-wp-04", "offset_seconds": 42, "pose": {"x": 335.0, "y": 235.0, "z": 20.0}, "zone_id": "zone_alley"},
+      {"waypoint_id": "drone-wp-05", "offset_seconds": 50, "pose": {"x": 385.0, "y": 265.0, "z": 22.0}, "zone_id": "zone_roads"}
+    ]
+  },
+  "aegis_id_map": {
+    "SUSPECT-001":       {"type": "actor",  "role": "suspect",  "proxy_color": "red"},
+    "CIVILIAN-GROUP-001":{"type": "actor",  "role": "civilian", "proxy_color": "blue"},
+    "SECURITY-GUARD-001":{"type": "actor",  "role": "security", "proxy_color": "yellow"},
+    "ESCAPE-VEHICLE-001":{"type": "actor",  "role": "vehicle",  "proxy_color": "dark"},
+    "DRONE-ALPHA":       {"type": "drone",  "role": "aerial",   "proxy_color": "cyan"},
+    "CAM-BANK-01":       {"type": "camera", "zone": "zone_financial"},
+    "CAM-BANK-02":       {"type": "camera", "zone": "zone_financial"},
+    "CAM-BANK-03":       {"type": "camera", "zone": "zone_financial"},
+    "CAM-MARKET-01":     {"type": "camera", "zone": "zone_market"},
+    "CAM-ROAD-01":       {"type": "camera", "zone": "zone_roads"},
+    "CAM-PARKING-01":    {"type": "camera", "zone": "zone_parking"},
+    "CAM-ALLEY-01":      {"type": "camera", "zone": "zone_alley"},
+    "CAM-GATE-01":       {"type": "camera", "zone": "zone_roads"}
+  },
+  "phase_xii_injection_notes": {
+    "camera_feed_sync": "Map camera_id fields in camera_markers to live Cosys-AirSim camera feeds",
+    "backend_event_sync": "Subscribe to scenario_engine_service step callbacks to drive visual_action timeline",
+    "drone_feed_mapping": "DRONE-ALPHA visual position should match DroneRoute waypoints from run_drone_routes",
+    "event_timing_sync": "Use scenario_run.t_offset_seconds to advance animation clock in real-time",
+    "thumbnail_overlay": "Render camera_marker frustums into dashboard thumbnail overlays"
+  }
+}

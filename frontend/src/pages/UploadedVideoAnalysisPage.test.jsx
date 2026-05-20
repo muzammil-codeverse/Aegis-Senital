@@ -12,8 +12,10 @@ vi.mock('../hooks/useUploadedVideo', () => ({
   useUploadedVideo: () => ({
     actionLoading: false,
     currentSession: null,
+    currentStatus: null,
     sessions: [],
-    error: 'Session list unavailable: auth required',
+    loading: false,
+    error: null,
     timeline: [],
     events: [],
     report: null,
@@ -27,10 +29,11 @@ vi.mock('../hooks/useUploadedVideo', () => ({
 }))
 
 describe('UploadedVideoAnalysisPage', () => {
-  it('shows scoped session library error text', () => {
+  it('renders authenticated empty session state instead of stale auth errors', () => {
     render(<UploadedVideoAnalysisPage />)
-    expect(screen.getByText(/Session list unavailable: auth required/i)).toBeInTheDocument()
+
+    expect(screen.getByText(/No uploaded-video sessions yet/i)).toBeInTheDocument()
+    expect(screen.queryByText(/auth required/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Runtime data temporarily unavailable/i)).not.toBeInTheDocument()
   })
 })
-

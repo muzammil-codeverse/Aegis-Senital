@@ -24,6 +24,8 @@ from app.api.object_authorization import (
 from app.api.gis_routes import router as gis_router
 from app.api.investigation_routes import router as investigation_router
 from app.api.analytics_routes import router as analytics_router
+from app.api.capability_routes import router as capability_router
+from app.api.preflight_routes import router as preflight_router
 from app.api.case_routes import router as case_router
 from app.api.llm_routes import router as llm_router
 from app.api.model_governance_routes import router as model_governance_router
@@ -33,6 +35,12 @@ from app.api.uploaded_video_routes import router as uploaded_video_router
 from app.api.drone_routes import router as drone_router
 from app.api.drone_mission_routes import router as drone_mission_router
 from app.api.drone_fusion_routes import router as drone_fusion_router, ws_router as drone_fusion_ws_router
+from app.api.simulation_routes import router as simulation_router
+from app.api.scenario_routes import router as scenario_router
+from app.api.tracking_routes import router as tracking_router
+from app.api.drone_unified_routes import router as drone_unified_router
+from app.api.exhibition_demo_routes import router as exhibition_demo_router
+from app.api.visual_scenario_routes import router as visual_scenario_router
 from app.api.security_dependencies import (
     get_current_user_from_request,
     issue_csrf_token,
@@ -63,6 +71,8 @@ router = APIRouter()
 router.include_router(gis_router)
 router.include_router(investigation_router)
 router.include_router(analytics_router)
+router.include_router(capability_router)
+router.include_router(preflight_router)
 router.include_router(case_router)
 router.include_router(llm_router)
 router.include_router(model_governance_router)
@@ -73,6 +83,12 @@ router.include_router(drone_router)
 router.include_router(drone_mission_router)
 router.include_router(drone_fusion_router)
 router.include_router(drone_fusion_ws_router)
+router.include_router(simulation_router)
+router.include_router(scenario_router)
+router.include_router(tracking_router)
+router.include_router(drone_unified_router)
+router.include_router(exhibition_demo_router)
+router.include_router(visual_scenario_router)
 
 VALID_SCENARIOS = ("security", "classroom", "traffic")
 
@@ -230,6 +246,22 @@ def _filter_alert_response(payload: dict, request: Request) -> dict:
 
 def _filter_incident_response(payload: dict, request: Request) -> dict:
     return filter_incident_payload(payload, _request_user(request))
+
+
+def _command_center_intelligence():
+    from app.services.command_center_intelligence_service import get_command_center_intelligence_service
+
+    return get_command_center_intelligence_service()
+
+
+def _merge_by_id(items: list[dict], id_key: str) -> list[dict]:
+    merged: dict[str, dict] = {}
+    for item in items:
+        item_id = str(item.get(id_key) or item.get("id") or "").strip()
+        if not item_id:
+            continue
+        merged[item_id] = {**merged.get(item_id, {}), **item}
+    return list(merged.values())
 
 
 def _filter_identity_response(payload: dict, request: Request) -> dict:
@@ -564,11 +596,35 @@ def system_readiness_api():
     503 otherwise.  Suitable for load balancer / orchestrator probes.
     Increments system_readiness_failures metric on failure.
     """
-    from app.services.runtime_health_service import get_runtime_health_service
-    from inference.monitoring.metrics import get_metrics as get_mon
     from fastapi.responses import JSONResponse
-    svc = get_runtime_health_service()
-    result = svc.is_ready()
+    from app.core.capabilities import get_capability_registry, register_default_capabilities
+    from app.core.capabilities.lifecycle import utc_now_iso
+    from app.core.preflight.checks import evaluate_capability
+    from app.core.preflight.models import PreflightMode
+    from inference.monitoring.metrics import get_metrics as get_mon
+
+    registry = register_default_capabilities(get_capability_registry())
+    failures: list[str] = []
+    checks: dict[str, dict] = {}
+    for capability_id in ("backend_api", "auth_session", "rbac_permissions", "local_storage", "runtime_health"):
+        try:
+            check = evaluate_capability(registry, capability_id, PreflightMode.QUICK)
+            checks[capability_id] = {
+                "status": check.state.value,
+                "reason": check.reason,
+                "blocking": check.blocking,
+            }
+            if check.blocking and check.state.value in {"FAULTED", "DEGRADED", "UNKNOWN"}:
+                failures.append(f"{capability_id}: {check.reason}")
+        except Exception as exc:
+            failures.append(f"{capability_id}: {str(exc)[:120]}")
+    result = {
+        "ready": len(failures) == 0,
+        "failures": failures,
+        "checks": checks,
+        "generated_at": utc_now_iso(),
+        "health_layer": "readiness",
+    }
     if not result["ready"]:
         try:
             get_mon().increment("system_readiness_failures")
@@ -591,41 +647,23 @@ def system_liveness_api():
 
 @router.get("/health")
 def health_check():
-    from app.services.video_service import _engine, _runtime_db, _identity_fusion
-    from app.services.identity_service import get_identity_service
-    from inference.stream.stream_manager import get_stream_manager
+    from app.core.capabilities import aggregate_capability_health, get_capability_registry, register_default_capabilities
+    from app.core.capabilities.lifecycle import utc_now_iso
 
-    models_loaded = _engine is not None and getattr(_engine, "is_loaded", False)
-
-    db_connected = False
-    if _runtime_db is not None:
-        try:
-            db_connected = _runtime_db.db_healthy
-        except Exception as exc:
-            logger.warning("DB health check failed: %s", exc)
-
-    identity_status: dict = {}
-    if _identity_fusion is not None:
-        try:
-            identity_status = _identity_fusion.get_status()
-        except Exception as exc:
-            logger.warning("Identity status check failed: %s", exc)
-    identity_health = get_identity_service().get_health()
-
-    stream_health = get_stream_manager().health_summary()
-    intelligence_health = _get_intelligence_runtime().get_health()
-
+    registry = register_default_capabilities(get_capability_registry())
+    summary = aggregate_capability_health(registry.list())
     return {
         "status": "ok",
-        "models_loaded": models_loaded,
-        "db_connected": db_connected,
-        "identity": identity_health,
-        "identity_fusion": identity_status,
-        "metrics": get_metrics().snapshot(),
-        "active_streams": stream_health["active_streams"],
-        "total_streams": stream_health["total_streams"],
-        "stream_metrics": stream_health["stream_metrics"],
-        "intelligence_runtime": intelligence_health,
+        "alive": True,
+        "health_layer": "liveness",
+        "generated_at": utc_now_iso(),
+        "capability_overall_state": summary.get("overall_state"),
+        "registered_capabilities": summary.get("total", 0),
+        "models_loaded": False,
+        "db_connected": None,
+        "active_streams": None,
+        "total_streams": None,
+        "detail": "Lightweight liveness only. Use /api/system/readiness for readiness and /api/preflight for exhibition readiness.",
     }
 
 
@@ -885,9 +923,11 @@ def remove_stream(body: StreamRemoveRequest, request: Request):
 @router.get("/incidents")
 def list_incidents_api(request: Request):
     user = _request_user(request)
+    runtime_incidents = _get_intelligence_runtime().get_incidents()
+    promoted_incidents = _command_center_intelligence().list_incidents(limit=100)
     incidents = [
         incident
-        for incident in _get_intelligence_runtime().get_incidents()
+        for incident in _merge_by_id([*runtime_incidents, *promoted_incidents], "incident_id")
         if can_access_incident(user, str(incident.get("incident_id") or incident.get("id") or ""))
         or can_access_event_payload(user, incident)
     ]
@@ -900,6 +940,8 @@ def get_incident_api(incident_id: str, request: Request):
     _require_object_access(request, "incident", incident_id, can_access_incident(_request_user(request), incident_id))
     runtime = _get_intelligence_runtime()
     incident = runtime.incident_engine.get_incident(incident_id)
+    if incident is None:
+        incident = _command_center_intelligence().get_incident(incident_id)
     _audit(request, AuditAction.INCIDENT_VIEWED, resource_type="incident", resource_id=incident_id)
     return _filter_incident_response(IntelligenceResponseBuilder.incident_detail(incident), request)
 
@@ -936,9 +978,12 @@ def list_alerts_api(
 ):
     user = _request_user(request)
     response = _get_intelligence_runtime().get_alerts(state=state, severity=severity, limit=limit)
+    promoted = _command_center_intelligence().list_alerts(state=state, severity=severity, limit=limit)
+    combined = _merge_by_id([*response["items"], *promoted], "alert_id")
+    combined.sort(key=lambda item: float(item.get("updated_at") or item.get("created_at") or 0.0), reverse=True)
     response["items"] = [
         item
-        for item in response["items"]
+        for item in combined[:limit]
         if can_access_alert(user, str(item.get("alert_id") or ""))
         or can_access_event_payload(user, item)
     ]
@@ -948,10 +993,13 @@ def list_alerts_api(
 @router.get("/api/alerts/live")
 def live_alerts_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
     response = _get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    promoted = _command_center_intelligence().list_alerts(limit=limit, live_only=True)
     user = _request_user(request)
+    combined = _merge_by_id([*response["items"], *promoted], "alert_id")
+    combined.sort(key=lambda item: float(item.get("updated_at") or item.get("created_at") or 0.0), reverse=True)
     response["items"] = [
         item
-        for item in response["items"]
+        for item in combined[:limit]
         if can_access_alert(user, str(item.get("alert_id") or ""))
         or can_access_event_payload(user, item)
     ]
@@ -961,10 +1009,13 @@ def live_alerts_api(request: Request, limit: int = Query(default=100, ge=1, le=1
 @router.get("/api/alerts/operator-queue")
 def operator_queue_api(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
     response = _get_intelligence_runtime().get_live_alert_feed(limit=limit)
+    promoted = _command_center_intelligence().list_alerts(limit=limit, live_only=True)
     user = _request_user(request)
+    combined = _merge_by_id([*response["items"], *promoted], "alert_id")
+    combined.sort(key=lambda item: float(item.get("updated_at") or item.get("created_at") or 0.0), reverse=True)
     response["items"] = [
         item
-        for item in response["items"]
+        for item in combined[:limit]
         if can_access_alert(user, str(item.get("alert_id") or ""))
         or can_access_event_payload(user, item)
     ]
@@ -975,6 +1026,8 @@ def operator_queue_api(request: Request, limit: int = Query(default=100, ge=1, l
 def get_alert_api(alert_id: str, request: Request):
     _require_object_access(request, "alert", alert_id, can_access_alert(_request_user(request), alert_id))
     response = _get_intelligence_runtime().get_alert(alert_id)
+    if response.get("item") is None:
+        response["item"] = _command_center_intelligence().get_alert(alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
 
@@ -983,6 +1036,12 @@ def acknowledge_alert_api(alert_id: str, request: Request, body: AlertActionRequ
     ensure_alert_access(request, _request_user(request), alert_id)
     operator_id = body.operator_id if body else None
     response = _get_intelligence_runtime().acknowledge_alert(alert_id, operator_id=operator_id)
+    if response.get("item") is None:
+        response["item"] = _command_center_intelligence().transition_alert(
+            alert_id,
+            "acknowledged",
+            operator_id=operator_id,
+        )
     _audit(request, AuditAction.ALERT_ACKNOWLEDGED, resource_type="alert", resource_id=alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
@@ -992,6 +1051,12 @@ def resolve_alert_api(alert_id: str, request: Request, body: AlertActionRequest 
     ensure_alert_access(request, _request_user(request), alert_id)
     operator_id = body.operator_id if body else None
     response = _get_intelligence_runtime().resolve_alert(alert_id, operator_id=operator_id)
+    if response.get("item") is None:
+        response["item"] = _command_center_intelligence().transition_alert(
+            alert_id,
+            "resolved",
+            operator_id=operator_id,
+        )
     _audit(request, AuditAction.ALERT_RESOLVED, resource_type="alert", resource_id=alert_id)
     return _filter_alert_response(IntelligenceResponseBuilder.build_alert_detail_payload(response["item"]), request)
 
@@ -1001,6 +1066,12 @@ def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest
     ensure_alert_access(request, _request_user(request), alert_id)
     reason = body.reason if body else None
     response = _get_intelligence_runtime().escalate_alert(alert_id, reason=reason)
+    if response.get("item") is None:
+        response["item"] = _command_center_intelligence().transition_alert(
+            alert_id,
+            "escalated",
+            reason=reason,
+        )
     _audit(
         request,
         AuditAction.ALERT_ESCALATED,
@@ -1015,6 +1086,7 @@ def escalate_alert_api(alert_id: str, request: Request, body: AlertActionRequest
 def alert_history_api(alert_id: str, request: Request):
     ensure_alert_access(request, _request_user(request), alert_id)
     response = _get_intelligence_runtime().get_alert_history(alert_id)
+    response["items"] = [*response["items"], *_command_center_intelligence().get_alert_history(alert_id)]
     response["items"] = [
         item
         for item in response["items"]

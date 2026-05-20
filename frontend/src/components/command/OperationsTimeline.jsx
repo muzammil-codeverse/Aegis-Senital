@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getAlerts } from '../../api/alertsApi'
 import { listCases } from '../../api/caseApi'
 import { getFusionTimeline } from '../../api/droneFusionApi'
@@ -20,25 +20,35 @@ function normalizeFusionTimeline(payload) {
 
 export default function OperationsTimeline({ limit = 14 }) {
   const auth = useAuth()
+  const { authenticated, loading: authLoading, ready, hasPermission } = auth
+  const authReady = Boolean(ready ?? !authLoading)
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
+  const load = useCallback(async (isCancelled = () => false) => {
+      if (!authReady) {
+        setLoading(true)
+        setError(null)
+        return
+      }
+      if (!authenticated) {
+        setItems([])
+        setLoading(false)
+        setError('Sign in required')
+        return
+      }
       setLoading(true)
       setError(null)
       const rows = []
       try {
         const tasks = []
-        if (auth.hasPermission('alert:read')) tasks.push(getAlerts({ limit: 8 }).then(result => ['alerts', result.items || []]))
-        if (auth.hasPermission('case:read')) tasks.push(listCases({ limit: 8 }).then(result => ['cases', result.items || []]))
-        if (auth.hasPermission('drone:read')) tasks.push(listMissions({ limit: 8 }).then(result => ['missions', result.items || []]))
-        if (auth.hasPermission('drone_fusion:read')) tasks.push(getFusionTimeline({}).then(result => ['fusion', normalizeFusionTimeline(result)]))
-        if (auth.hasPermission('uploaded_video:read')) tasks.push(listUploadedVideoSessions().then(result => ['uploaded', result.items || []]))
-        if (auth.hasPermission('investigation:read')) tasks.push(investigationApi.listHypotheses({ limit: 8 }).then(result => ['investigation', result.items || []]))
+        if (hasPermission('alert:read')) tasks.push(getAlerts({ limit: 8 }).then(result => ['alerts', result.items || []]))
+        if (hasPermission('case:read')) tasks.push(listCases({ limit: 8 }).then(result => ['cases', result.items || []]))
+        if (hasPermission('drone:read')) tasks.push(listMissions({ limit: 8 }).then(result => ['missions', result.items || []]))
+        if (hasPermission('drone_fusion:read')) tasks.push(getFusionTimeline({}).then(result => ['fusion', normalizeFusionTimeline(result)]))
+        if (hasPermission('uploaded_video:read')) tasks.push(listUploadedVideoSessions().then(result => ['uploaded', result.items || []]))
+        if (hasPermission('investigation:read')) tasks.push(investigationApi.listHypotheses({ limit: 8 }).then(result => ['investigation', result.items || []]))
         const settled = await Promise.allSettled(tasks)
 
         for (const result of settled) {
@@ -107,21 +117,31 @@ export default function OperationsTimeline({ limit = 14 }) {
         }
 
         rows.sort((a, b) => asTimestamp(b.timestamp) - asTimestamp(a.timestamp))
-        if (!cancelled) setItems(rows.slice(0, limit))
+        if (!isCancelled()) setItems(rows.slice(0, limit))
       } catch (err) {
-        if (!cancelled) setError(err?.message || 'Failed to load operations timeline')
+        if (!isCancelled()) setError(err?.message || 'Failed to load operations timeline')
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!isCancelled()) setLoading(false)
+      }
+  }, [authReady, authenticated, hasPermission, limit])
+
+  useEffect(() => {
+    let cancelled = false
+    const isCancelled = () => cancelled
+    const initialTimer = window.setTimeout(() => { load(isCancelled) }, 0)
+    if (!authReady || !authenticated) {
+      return () => {
+        cancelled = true
+        window.clearTimeout(initialTimer)
       }
     }
-
-    load()
-    const timer = window.setInterval(load, 30000)
+    const timer = window.setInterval(() => { load(isCancelled) }, 30000)
     return () => {
       cancelled = true
+      window.clearTimeout(initialTimer)
       window.clearInterval(timer)
     }
-  }, [auth.hasPermission, limit])
+  }, [authenticated, authReady, load])
 
   const emptyMessage = useMemo(() => {
     if (loading) return 'Loading operations timeline...'

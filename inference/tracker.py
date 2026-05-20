@@ -8,15 +8,18 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from inference.camera_graph import CameraGraph
 from inference.config_runtime import load_runtime_config
 from inference.identity_db import IdentityDB, get_db
-from inference.identity_fusion_engine import IdentityFusionEngine
 from inference.monitoring.metrics import get_metrics
 from inference.schemas import Detection, DetectionResult, FramePacket, Track
+
+if TYPE_CHECKING:
+    from inference.identity_fusion_engine import IdentityFusionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -259,8 +262,9 @@ class MultiObjectTracker:
         max_age: int | None = None,
         match_threshold: float | None = None,
         db: IdentityDB | None = None,
-        identity_fusion: IdentityFusionEngine | None = None,
+        identity_fusion: "IdentityFusionEngine | Any | None" = None,
         camera_graph: CameraGraph | None = None,
+        enable_identity: bool = True,
     ) -> None:
         cfg = _tracker_config()
         self.active_tracks: dict[int, _TrackState] = {}
@@ -268,8 +272,13 @@ class MultiObjectTracker:
         self.next_track_id = 1
         self._max_age = int(max_age if max_age is not None else cfg.get("max_age", _MAX_AGE_DEFAULT))
         self._match_threshold = float(match_threshold if match_threshold is not None else cfg.get("match_threshold", _MATCH_THRESHOLD))
-        self._db = db or get_db()
-        self._identity_fusion = identity_fusion or IdentityFusionEngine(self._db)
+        self._identity_enabled = bool(enable_identity)
+        self._db = db or (get_db() if self._identity_enabled else None)
+        if identity_fusion is None and self._identity_enabled and self._db is not None:
+            from inference.identity_fusion_engine import IdentityFusionEngine
+
+            identity_fusion = IdentityFusionEngine(self._db)
+        self._identity_fusion = identity_fusion
         self._camera_graph = camera_graph
         self.previous_assignments: dict[str, int] = {}
 
@@ -282,7 +291,8 @@ class MultiObjectTracker:
 
     def _update_inner(self, frame_packet: FramePacket) -> list[Track]:
         camera_id = frame_packet.camera_id or "default"
-        self._identity_fusion.annotate_detections(frame_packet)
+        if self._identity_enabled and self._identity_fusion is not None:
+            self._identity_fusion.annotate_detections(frame_packet)
         detections = []
         for det in frame_packet.detections:
             if not det.bbox or len(det.bbox) != 4 or det.bbox[2] <= det.bbox[0] or det.bbox[3] <= det.bbox[1]:
@@ -355,7 +365,8 @@ class MultiObjectTracker:
             if state.missed_frames > self._max_age:
                 state.metadata["predicted_cameras"] = self._predict_camera_handoff(state)
                 self.lost_tracks[state.track_id] = self.active_tracks.pop(state.track_id)
-                self._db.insert_track(state.to_track())
+                if self._db is not None:
+                    self._db.insert_track(state.to_track())
 
         self._resolve_identities(frame_packet, matched_track_to_detection)
         logger.debug(
@@ -386,6 +397,8 @@ class MultiObjectTracker:
         frame_packet: FramePacket,
         matched_track_to_detection: dict[int, Detection],
     ) -> None:
+        if not self._identity_enabled or self._identity_fusion is None or self._db is None:
+            return
         from inference.identity.identity_profile_store import get_identity_store
 
         store = get_identity_store()
@@ -449,7 +462,8 @@ class MultiObjectTracker:
             if state.missed_frames > self._max_age:
                 state.metadata["predicted_cameras"] = self._predict_camera_handoff(state)
                 self.lost_tracks[state.track_id] = self.active_tracks.pop(state.track_id)
-                self._db.insert_track(state.to_track())
+                if self._db is not None:
+                    self._db.insert_track(state.to_track())
 
     def _predict_camera_handoff(self, state: _TrackState) -> list[dict]:
         if self._camera_graph is None:

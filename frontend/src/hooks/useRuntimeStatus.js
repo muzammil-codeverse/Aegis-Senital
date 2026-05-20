@@ -35,7 +35,7 @@ function statusWeight(status) {
 
 function sectionFromApiError(key, label, error, networkAsCritical = false) {
   const status = error?.status
-  if (status === 401) return section(key, label, 'unknown', 'Sign in to view this subsystem')
+  if (status === 401) return section(key, label, 'critical', 'Session expired while loading this subsystem')
   if (status === 403) return section(key, label, 'unknown', 'Permission denied for this subsystem')
   if (status === 404) return section(key, label, 'degraded', 'Subsystem endpoint unavailable in this build')
   if (status === 503) return section(key, label, 'degraded', 'Subsystem reported degraded readiness')
@@ -56,6 +56,7 @@ function parseSystemHealth(payload) {
 
 export function useRuntimeStatus({ pollMs = 20000 } = {}) {
   const auth = useAuth()
+  const { authenticated, hasPermission, loading: authLoading, ready } = auth
   const [state, setState] = useState({
     loading: true,
     error: null,
@@ -66,7 +67,16 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
   })
 
   const refresh = useCallback(async () => {
-    if (!auth.authenticated) {
+    const authReady = Boolean(ready ?? !authLoading)
+    if (!authReady) {
+      setState(current => ({
+        ...current,
+        loading: true,
+        error: null,
+      }))
+      return
+    }
+    if (!authenticated) {
       setState({
         loading: false,
         error: null,
@@ -82,13 +92,12 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
       if (import.meta.env.DEV && !window.__AEGIS_API_BASE_LOGGED__) {
         window.__AEGIS_API_BASE_LOGGED__ = true
         // Dev-only diagnostic to help spot base URL drift during demo setup.
-        // eslint-disable-next-line no-console
         console.info(`[Aegis] API base URL: ${API_BASE_URL}`)
       }
       const system = parseSystemHealth(await getSystemHealth())
       if (system?.status === 'error') {
         if (system?.error && /sign in|authentication required|invalid or expired token|permission/i.test(String(system.error))) {
-          sections.push(section('system', 'Backend', 'unknown', 'Sign in to view protected runtime health'))
+          sections.push(section('system', 'Backend', 'critical', 'Session validation failed for protected runtime health'))
         } else {
           const publicHealth = await getPublicHealth()
           if (publicHealth?.status === 'ok') {
@@ -110,7 +119,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
       const redisCheck = sectionFromHealthCheck('redis', 'Redis', system.checks?.redis)
       if (redisCheck) sections.push(redisCheck)
 
-      if (auth.hasPermission('gis:read')) {
+      if (hasPermission('gis:read')) {
         try {
           const gis = await getGisConfig()
           const item = gis.item || {}
@@ -120,7 +129,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
         }
       }
 
-      if (auth.hasPermission('drone:read')) {
+      if (hasPermission('drone:read')) {
         try {
           const drone = await droneSimulationApi.getStatus()
           const item = drone.item || {}
@@ -139,8 +148,8 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
           sections.push(section(
             'droneMission',
             'Drone Mission',
-            active.length > 0 ? 'ok' : 'unknown',
-            active.length > 0 ? `${active.length} simulated mission(s) active or staged` : 'No active mission',
+            active.length > 0 ? 'ok' : 'degraded',
+            active.length > 0 ? `${active.length} simulated mission(s) active or staged` : 'Awaiting Preflight',
             { count: active.length },
           ))
         } catch (error) {
@@ -148,7 +157,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
         }
       }
 
-      if (auth.hasPermission('drone_fusion:read')) {
+      if (hasPermission('drone_fusion:read')) {
         try {
           const fusion = await getFusionHealth()
           const item = fusion.item || {}
@@ -163,7 +172,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
         }
       }
 
-      if (auth.hasPermission('investigation:read')) {
+      if (hasPermission('investigation:read')) {
         try {
           const investigation = await investigationApi.listHypotheses({ limit: 10 })
           const pending = (investigation.items || []).filter(item => String(item.review_status || 'pending').toLowerCase() === 'pending')
@@ -179,7 +188,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
         }
       }
 
-      if (auth.hasPermission('model:read')) {
+      if (hasPermission('model:read')) {
         try {
           const [policy, limitations] = await Promise.all([
             fetchPromotionPolicy(),
@@ -204,7 +213,7 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
         }
       }
 
-      if (auth.hasPermission('llm:read')) {
+      if (hasPermission('llm:read')) {
         try {
           const llm = await getLlmStatus()
           const item = llm.item || {}
@@ -240,14 +249,20 @@ export function useRuntimeStatus({ pollMs = 20000 } = {}) {
         error: error?.status === 401 ? 'Please sign in.' : (error?.message || 'Unable to load runtime status'),
       }))
     }
-  }, [auth.authenticated, auth.hasPermission])
+  }, [authenticated, authLoading, hasPermission, ready])
 
   useEffect(() => {
-    if (!auth.authenticated) return undefined
-    refresh()
+    const authReady = Boolean(ready ?? !authLoading)
+    const initialTimer = window.setTimeout(refresh, 0)
+    if (!authReady || !authenticated) {
+      return () => window.clearTimeout(initialTimer)
+    }
     const timer = window.setInterval(refresh, pollMs)
-    return () => window.clearInterval(timer)
-  }, [auth.authenticated, pollMs, refresh])
+    return () => {
+      window.clearTimeout(initialTimer)
+      window.clearInterval(timer)
+    }
+  }, [authenticated, authLoading, pollMs, ready, refresh])
 
   return {
     ...state,

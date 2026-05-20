@@ -72,6 +72,8 @@ function OverlayBox({ item, scaleX, scaleY }) {
 function computeDisplayState(camera, latestFrame, streamSession, preferAnnotated, replayFrame) {
   if (replayFrame) return 'REPLAY_FRAME'
   if (!camera) return 'NO_FRAME'
+  if (camera.simulated && camera.snapshotUrl) return 'SNAPSHOT'
+  if (camera.simulated) return 'PLACEHOLDER'
   if (camera.status === 'disabled') return 'DISABLED'
   if (camera.status === 'error') return 'ERROR'
   if (camera.status === 'offline') return 'OFFLINE'
@@ -118,8 +120,11 @@ export default function LiveVideoSurface({
   }, [])
 
   useEffect(() => {
-    setImgError(false)
-    setImgKey(k => k + 1)
+    const timer = window.setTimeout(() => {
+      setImgError(false)
+      setImgKey(k => k + 1)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [latestFrame?.frame_id, latestFrame?.timestamp, replayFrame])
 
   if (!camera && !replayFrame) return null
@@ -147,11 +152,13 @@ export default function LiveVideoSurface({
     imageUrl = `${API_BASE_URL}${latestFrame.annotated_image_url}`
   } else if (latestFrame?.image_url) {
     imageUrl = `${API_BASE_URL}${latestFrame.image_url}`
+  } else if (camera?.snapshotUrl) {
+    imageUrl = camera.snapshotUrl
   } else if (camera) {
     imageUrl = `${API_BASE_URL}/api/cameras/${encodeURIComponent(camera.camera_id)}/latest-frame/image`
   }
 
-  const hasImage = (latestFrame?.status === 'ok' || replayFrame) && imageUrl && !imgError
+  const hasImage = (latestFrame?.status === 'ok' || replayFrame || camera?.snapshotUrl) && imageUrl && !imgError
   const overlayItems = showOverlays ? (latestFrame?.overlay_items || latestFrame?.overlays || []) : []
   // Phase 23: open-vocab detections as overlay items (shown in purple)
   const ovDetections = showOverlays && latestFrame?.open_vocab_detections
@@ -268,8 +275,10 @@ export default function LiveVideoSurface({
             color: '#374151', fontSize: '0.75rem', gap: 4,
           }}>
             <span style={{ fontSize: '1.5rem', opacity: 0.3 }}>▶</span>
-            <span>RTSP · WebRTC · HLS</span>
-            <span style={{ fontSize: '0.65rem', color: '#1f2937' }}>Live stream slot</span>
+            <span>{camera?.simulated ? 'Awaiting visual capture' : 'RTSP / WebRTC / HLS'}</span>
+            <span style={{ fontSize: '0.65rem', color: '#1f2937' }}>
+              {camera?.simulated ? camera.camera_id : 'Live stream slot'}
+            </span>
           </div>
         )}
 

@@ -13,6 +13,9 @@ from typing import Any
 
 import cv2
 
+from app.core.capabilities.defaults import register_default_capabilities
+from app.core.capabilities.models import CapabilityState
+from app.core.capabilities.registry import get_capability_registry
 from app.models.case_models import CaseCreateRequest, CaseEvidenceCreateRequest
 from app.models.incident_models import IncidentEventRecord
 from app.models.security_models import AuditAction
@@ -33,6 +36,7 @@ from app.repositories.incident_repository import get_incident_repository
 from app.security.config import PROJECT_ROOT
 from app.security.upload_policy import get_upload_security_policy
 from app.services.case_service import get_case_service
+from app.services.command_center_intelligence_service import CommandCenterIntelligenceService
 from app.services.audit_log_service import get_audit_log_service
 from app.services.uploaded_video_progress_service import get_uploaded_video_progress_service
 from inference.config_runtime import load_runtime_config
@@ -121,12 +125,79 @@ class UploadedVideoService:
         self._root_dir = self._resolve_dir(str(self._storage_cfg.get("root_dir") or "storage/uploaded_videos"))
         self._processed_dir = self._resolve_dir(str(self._storage_cfg.get("processed_dir") or "storage/uploaded_video_results"))
         self._evidence_dir = self._resolve_dir(str(self._storage_cfg.get("evidence_dir") or "storage/evidence"))
+        self._command_center_dir = self._resolve_dir(str(self._storage_cfg.get("command_center_dir") or "storage/command_center_intelligence"))
+        self._command_center_service = CommandCenterIntelligenceService(
+            storage_dir=self._command_center_dir,
+            incident_repository=self._incident_repository,
+            case_service=self._case_service,
+        )
         self._lock = threading.RLock()
         self._jobs: dict[str, _ActiveUploadJob] = {}
 
     @property
     def enabled(self) -> bool:
         return bool(self._config.get("enabled", True))
+
+    def _mark_capability(
+        self,
+        capability_id: str,
+        state: CapabilityState | str,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+        *,
+        health_score: float | None = None,
+    ) -> None:
+        try:
+            registry = register_default_capabilities(get_capability_registry())
+            registry.update_status(
+                capability_id,
+                state,
+                reason,
+                metadata={"uploaded_video": metadata or {}},
+                health_score=health_score,
+            )
+        except Exception:
+            pass
+
+    def _mark_capability_faulted(self, capability_id: str, error: Exception | str, metadata: dict[str, Any] | None = None) -> None:
+        try:
+            registry = register_default_capabilities(get_capability_registry())
+            registry.mark_faulted(capability_id, error, {"uploaded_video": metadata or {}})
+        except Exception:
+            pass
+
+    def _write_processing_status(
+        self,
+        session: UploadedVideoSession,
+        status_value: str,
+        *,
+        started_at: str | None = None,
+        active: bool,
+        report_ready: bool = False,
+        event_count: int = 0,
+        last_error: str | None = None,
+    ) -> UploadedVideoProcessingStatus:
+        session.status = status_value
+        if last_error:
+            session.metadata = {
+                **(session.metadata or {}),
+                "last_error": last_error,
+                "last_error_at": _now_iso(),
+            }
+        self._write_session(session)
+        status = UploadedVideoProcessingStatus(
+            session_id=session.session_id,
+            status=status_value,
+            progress=session.progress,
+            started_at=started_at,
+            completed_at=session.completed_at,
+            active=active,
+            report_ready=report_ready,
+            event_count=event_count,
+            last_error=last_error,
+        )
+        self._write_status(session.session_id, status)
+        return status
 
     def upload_video(
         self,
@@ -195,6 +266,8 @@ class UploadedVideoService:
 
     def start_processing(self, session_id: str, user: UserAccount | str) -> UploadedVideoProcessingStatus:
         session = self._require_session(session_id)
+        if session.status == "completed":
+            return self.get_status(session_id, user)
         with self._lock:
             existing = self._jobs.get(session_id)
             if existing and existing.thread.is_alive():
@@ -210,6 +283,13 @@ class UploadedVideoService:
             self._jobs[session_id] = _ActiveUploadJob(thread=thread, cancel_event=cancel_event, started_at=started_at)
             session.status = "queued"
             self._write_session(session)
+            self._mark_capability(
+                "uploaded_video_pipeline",
+                CapabilityState.ACTIVE,
+                "Uploaded-video processing job queued.",
+                {"session_id": session_id, "stage": "queued"},
+                health_score=0.9,
+            )
             status = UploadedVideoProcessingStatus(
                 session_id=session_id,
                 status="queued",
@@ -262,6 +342,11 @@ class UploadedVideoService:
             return None
         return UploadedVideoReport.model_validate(payload)
 
+    def get_command_center_links(self, session_id: str, user: UserAccount | str | None = None) -> dict[str, Any] | None:
+        del user
+        link = self._command_center_service.get_uploaded_video_link(session_id)
+        return link.command_center_summary() if link is not None else None
+
     def list_sessions(self, *, created_by: str | None = None) -> list[UploadedVideoSession]:
         items: list[UploadedVideoSession] = []
         seen: set[str] = set()
@@ -299,6 +384,13 @@ class UploadedVideoService:
             event_count=len(self.get_events(session_id)),
         )
         self._write_status(session_id, status)
+        self._mark_capability(
+            "uploaded_video_pipeline",
+            CapabilityState.READY,
+            "Uploaded-video processing was cancelled; pipeline remains ready for a new job.",
+            {"session_id": session_id, "stage": "cancelled"},
+            health_score=0.85,
+        )
         self._refresh_active_metric()
         return status
 
@@ -330,8 +422,9 @@ class UploadedVideoService:
             ),
             actor=_safe_user_id(user),
         )
+        evidence_ids: list[str] = []
         if payload.attach_source_video and bool(self._case_cfg.get("attach_source_video_as_evidence", True)):
-            self._case_service.add_evidence(
+            evidence = self._case_service.add_evidence(
                 case.case_id,
                 CaseEvidenceCreateRequest(
                     evidence_type="upload",
@@ -349,11 +442,12 @@ class UploadedVideoService:
                 ),
                 actor=_safe_user_id(user),
             )
+            evidence_ids.append(evidence.evidence_id)
         if payload.attach_snapshots and bool(self._case_cfg.get("attach_snapshots_as_evidence", True)):
             for event in events:
                 if not event.snapshot_uri:
                     continue
-                self._case_service.add_evidence(
+                evidence = self._case_service.add_evidence(
                     case.case_id,
                     CaseEvidenceCreateRequest(
                         evidence_type="image",
@@ -373,9 +467,10 @@ class UploadedVideoService:
                     ),
                     actor=_safe_user_id(user),
                 )
+                evidence_ids.append(evidence.evidence_id)
         if payload.attach_report and report is not None:
             report_path = self._report_path(session_id)
-            self._case_service.add_evidence(
+            evidence = self._case_service.add_evidence(
                 case.case_id,
                 CaseEvidenceCreateRequest(
                     evidence_type="system_report",
@@ -392,13 +487,14 @@ class UploadedVideoService:
                 ),
                 actor=_safe_user_id(user),
             )
+            evidence_ids.append(evidence.evidence_id)
         attach_clips = bool(payload.attach_replay_clips) and bool(self._replay_cfg.get("attach_clips_as_evidence", True))
         if attach_clips:
             for event in events:
                 clip = event.replay_clip
                 if clip is None:
                     continue
-                self._case_service.add_evidence(
+                evidence = self._case_service.add_evidence(
                     case.case_id,
                     CaseEvidenceCreateRequest(
                         evidence_type="clip",
@@ -427,7 +523,14 @@ class UploadedVideoService:
                     ),
                     actor=_safe_user_id(user),
                 )
+                evidence_ids.append(evidence.evidence_id)
         session.linked_case_id = case.case_id
+        existing_command_center = dict(session.metadata.get("command_center") or {}) if isinstance(session.metadata, dict) else {}
+        linked = self._command_center_service.link_case_to_uploaded_video(session_id, case.case_id, evidence_ids)
+        session.metadata = {
+            **(session.metadata or {}),
+            "command_center": linked.command_center_summary() if linked is not None else existing_command_center,
+        }
         self._write_session(session)
         return case
 
@@ -539,20 +642,21 @@ class UploadedVideoService:
 
     def _process_session_job(self, session_id: str, cancel_event: threading.Event) -> None:
         session = self._require_session(session_id)
-        session.status = "processing"
-        self._write_session(session)
         started_at = _now_iso()
-        self._write_status(
-            session_id,
-            UploadedVideoProcessingStatus(
-                session_id=session_id,
-                status="processing",
-                progress=session.progress,
-                started_at=started_at,
-                active=True,
-                report_ready=False,
-                event_count=0,
-            ),
+        self._write_processing_status(
+            session,
+            "processing",
+            started_at=started_at,
+            active=True,
+            report_ready=False,
+            event_count=0,
+        )
+        self._mark_capability(
+            "uploaded_video_pipeline",
+            CapabilityState.ACTIVE,
+            "Uploaded-video processing job is active.",
+            {"session_id": session_id, "stage": "processing"},
+            health_score=0.95,
         )
         start_ts = time.monotonic()
         capture: cv2.VideoCapture | None = None
@@ -561,15 +665,55 @@ class UploadedVideoService:
         processed_frames = 0
         source_video_path = self._resolve_storage_uri(session.storage_uri)
         try:
+            self._write_processing_status(
+                session,
+                "frame_extraction",
+                started_at=started_at,
+                active=True,
+                report_ready=False,
+                event_count=0,
+            )
             model_pool = self._load_shared_model_pool(session)
-            processor = StreamProcessor(f"uploaded:{session_id}", session.storage_uri, model_pool)
+            self._mark_capability(
+                "tracking_engine",
+                CapabilityState.ACTIVE,
+                "Tracking engine engaged by uploaded-video processing.",
+                {"session_id": session_id},
+                health_score=0.9,
+            )
+            self._mark_capability(
+                "event_engine",
+                CapabilityState.ACTIVE,
+                "Event engine engaged by uploaded-video processing.",
+                {"session_id": session_id},
+                health_score=0.9,
+            )
+            try:
+                processor = StreamProcessor(
+                    f"uploaded:{session_id}",
+                    session.storage_uri,
+                    model_pool,
+                    enable_advanced_runtime=False,
+                )
+            except TypeError:
+                processor = StreamProcessor(f"uploaded:{session_id}", session.storage_uri, model_pool)
             capture = cv2.VideoCapture(str(source_video_path))
+            if not capture.isOpened():
+                raise RuntimeError(f"OpenCV could not open uploaded video: {session.storage_uri}")
             total_frames = max(0, int(session.frame_count or capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0))
             fps = float(session.fps or capture.get(cv2.CAP_PROP_FPS) or 0.0) or 1.0
             stride = self._effective_stride(fps)
             target_max = self._processing_cfg.get("max_frames")
             if target_max is None:
                 target_max = (session.metadata or {}).get("options", {}).get("max_frames")
+            self._write_processing_status(
+                session,
+                "inference",
+                started_at=started_at,
+                active=True,
+                report_ready=False,
+                event_count=0,
+            )
             frame_index = 0
             while True:
                 if cancel_event.is_set():
@@ -644,7 +788,7 @@ class UploadedVideoService:
                     session_id,
                     UploadedVideoProcessingStatus(
                         session_id=session_id,
-                        status="processing",
+                        status="inference",
                         progress=session.progress,
                         started_at=started_at,
                         active=True,
@@ -654,8 +798,18 @@ class UploadedVideoService:
                 )
                 _metric_increment("uploaded_video_frames_processed_total")
                 frame_index += 1
+            was_cancelled = session.status == "cancelled" or cancel_event.is_set()
+            if not was_cancelled:
+                self._write_processing_status(
+                    session,
+                    "event_generation",
+                    started_at=started_at,
+                    active=True,
+                    report_ready=False,
+                    event_count=len(generated_events),
+                )
             session.completed_at = _now_iso()
-            if session.status != "cancelled":
+            if not was_cancelled:
                 session.status = "completed"
                 _metric_increment("uploaded_video_processing_completed_total")
                 get_audit_log_service().record(
@@ -675,11 +829,40 @@ class UploadedVideoService:
                     source_video_path,
                     video_duration_cap,
                 )
+                self._write_processing_status(
+                    session,
+                    "report_generation",
+                    started_at=started_at,
+                    active=True,
+                    report_ready=False,
+                    event_count=len(generated_events),
+                )
             report = self._build_report(session, generated_events, generated_timeline, processed_frames, time.monotonic() - start_ts)
+            session.report_uri = self._storage_uri(self._report_path(session_id))
+            promotion = self._command_center_service.promote_uploaded_video(
+                session=session,
+                report=report,
+                events=generated_events,
+                timeline=generated_timeline,
+            )
+            report.metadata = {
+                **(report.metadata or {}),
+                "command_center": promotion.command_center_summary(),
+            }
+            report.chain_of_custody = {
+                **(report.chain_of_custody or {}),
+                "command_center_evidence_refs": list(promotion.evidence_refs),
+                "normalized_intelligence_events": self._storage_uri(self._session_dir(session_id) / "normalized_intelligence_events.json"),
+                "evidence_manifest": self._storage_uri(self._session_dir(session_id) / "evidence_manifest.json"),
+            }
+            session.metadata = {
+                **(session.metadata or {}),
+                "command_center": promotion.command_center_summary(),
+            }
             self._write_json(self._events_path(session_id), [event.model_dump(mode="json") for event in generated_events])
             self._write_json(self._timeline_path(session_id), [item.model_dump(mode="json") for item in generated_timeline])
             self._write_json(self._report_path(session_id), report.model_dump(mode="json"))
-            session.report_uri = self._storage_uri(self._report_path(session_id))
+            session.status = "cancelled" if was_cancelled else "completed"
             self._write_session(session)
             self._write_status(
                 session_id,
@@ -696,24 +879,51 @@ class UploadedVideoService:
             )
             _metric_increment("uploaded_video_events_generated_total", len(generated_events))
             _metric_set("uploaded_video_processing_latency_ms", int((time.monotonic() - start_ts) * 1000))
+            terminal_reason = (
+                "Uploaded-video intelligence job completed and report is ready."
+                if session.status == "completed"
+                else "Uploaded-video processing cancelled before completion."
+            )
+            self._mark_capability(
+                "uploaded_video_pipeline",
+                CapabilityState.READY,
+                terminal_reason,
+                {"session_id": session_id, "event_count": len(generated_events), "frames_processed": processed_frames},
+                health_score=0.95 if session.status == "completed" else 0.85,
+            )
+            for capability_id in ("tracking_engine", "event_engine"):
+                self._mark_capability(
+                    capability_id,
+                    CapabilityState.READY,
+                    "Runtime stage completed for uploaded-video processing.",
+                    {"session_id": session_id},
+                    health_score=0.9,
+                )
         except Exception as exc:
             session.status = "failed"
             session.completed_at = _now_iso()
-            self._write_session(session)
-            self._write_status(
-                session_id,
-                UploadedVideoProcessingStatus(
-                    session_id=session_id,
-                    status="failed",
-                    progress=session.progress,
-                    started_at=started_at,
-                    completed_at=session.completed_at,
-                    active=False,
-                    report_ready=self._report_path(session_id).exists(),
-                    event_count=len(generated_events),
-                    last_error=str(exc),
-                ),
+            self._write_processing_status(
+                session,
+                "failed",
+                started_at=started_at,
+                active=False,
+                report_ready=self._report_path(session_id).exists(),
+                event_count=len(generated_events),
+                last_error=str(exc),
             )
+            self._mark_capability_faulted(
+                "uploaded_video_pipeline",
+                exc,
+                {"session_id": session_id, "stage": session.status, "event_count": len(generated_events)},
+            )
+            for capability_id in ("tracking_engine", "event_engine"):
+                self._mark_capability(
+                    capability_id,
+                    CapabilityState.DEGRADED,
+                    "Uploaded-video processing failed before the runtime stage completed.",
+                    {"session_id": session_id, "error": str(exc)[:240]},
+                    health_score=0.45,
+                )
             _metric_increment("uploaded_video_processing_failed_total")
             get_audit_log_service().record(
                 AuditAction.UPLOADED_VIDEO_PROCESSING_FAILED,
@@ -743,8 +953,18 @@ class UploadedVideoService:
         relevant_tasks = {"weapon_detection", "phone_detection", "face_embedding"}
         models_used = [item for item in active_models if str(item.get("task") or "") in relevant_tasks]
         counts_by_type: dict[str, int] = {}
+        confidences: list[float] = []
         for event in events:
             counts_by_type[event.event_type] = counts_by_type.get(event.event_type, 0) + 1
+            confidence = (event.metadata or {}).get("confidence")
+            if isinstance(confidence, (int, float)):
+                confidences.append(float(confidence))
+        confidence_summary = {
+            "min": round(min(confidences), 4) if confidences else 0.0,
+            "max": round(max(confidences), 4) if confidences else 0.0,
+            "average": round(sum(confidences) / len(confidences), 4) if confidences else 0.0,
+            "count": len(confidences),
+        }
         replay_clips_payload: list[dict[str, Any]] = []
         coc_clips: list[dict[str, Any]] = []
         for event in events:
@@ -786,7 +1006,13 @@ class UploadedVideoService:
             processing_options=dict((session.metadata or {}).get("options") or {}),
             models_used=models_used,
             timeline=timeline,
-            detections_summary={"event_types": counts_by_type, "total_events": len(events)},
+            detections_summary={
+                "event_types": counts_by_type,
+                "detected_classes": sorted(counts_by_type),
+                "detection_count": len(events),
+                "total_events": len(events),
+                "confidence_summary": confidence_summary,
+            },
             anomaly_summary={"event_count": sum(1 for event in events if "anomaly" in event.event_type)},
             identity_summary={"summary": "Any identity-related outputs remain possible matches pending operator review."},
             segmentation_summary={"status": "best_effort"},
@@ -894,12 +1120,37 @@ class UploadedVideoService:
         return max(1, adaptive_stride * base_stride)
 
     def _load_shared_model_pool(self, session: UploadedVideoSession) -> ModelPool:
-        model_pool = ModelPool()
-        if model_pool.is_loaded:
-            return model_pool
+        for capability_id in ("yolo_weapon_detector", "yolo_phone_detector"):
+            self._mark_capability(
+                capability_id,
+                CapabilityState.WARMING,
+                "Uploaded-video processing is validating and loading detector artifacts.",
+                {"session_id": session.session_id},
+                health_score=0.75,
+            )
+
         router = ModelRouter()
-        weapon_model = router.get_model("weapon")
-        phone_model = router.get_model("phone")
+        resolved_models: dict[str, dict[str, Any]] = {}
+        errors: dict[str, str] = {}
+        for task, capability_id in (
+            ("weapon", "yolo_weapon_detector"),
+            ("phone", "yolo_phone_detector"),
+        ):
+            try:
+                resolved_models[task] = router.get_model(task)
+            except Exception as exc:
+                errors[capability_id] = str(exc)
+                self._mark_capability_faulted(
+                    capability_id,
+                    exc,
+                    {"session_id": session.session_id, "task": task},
+                )
+
+        if errors:
+            details = "; ".join(f"{capability_id}: {message}" for capability_id, message in errors.items())
+            raise RuntimeError(f"Detector capability not ready for uploaded-video processing. {details}")
+
+        model_pool = ModelPool()
         options = (session.metadata or {}).get("options") or {}
         requested_device = str(
             options.get("device")
@@ -907,11 +1158,53 @@ class UploadedVideoService:
             or self._processing_cfg.get("default_device")
             or "auto"
         )
-        model_pool.load(
-            str(weapon_model["resolved_path"]),
-            str(phone_model["resolved_path"]),
-            device=requested_device,
-        )
+        try:
+            if not model_pool.is_loaded:
+                model_pool.load(
+                    str(resolved_models["weapon"]["resolved_path"]),
+                    str(resolved_models["phone"]["resolved_path"]),
+                    device=requested_device,
+                )
+            for task, capability_id in (
+                ("weapon", "yolo_weapon_detector"),
+                ("phone", "yolo_phone_detector"),
+            ):
+                resolved = resolved_models[task]
+                self._mark_capability(
+                    capability_id,
+                    CapabilityState.READY,
+                    "Detector model is loaded for uploaded-video processing.",
+                    {
+                        "session_id": session.session_id,
+                        "model_id": resolved.get("model_id"),
+                        "version": resolved.get("version") or resolved.get("selected_version"),
+                        "device": getattr(model_pool, "device", requested_device),
+                    },
+                    health_score=0.95,
+                )
+            try:
+                from ml.runtime.model_registry import get_model_registry
+
+                registry = get_model_registry()
+                for task in ("weapon", "phone"):
+                    model_id = resolved_models[task].get("model_id")
+                    if model_id:
+                        registry.update_model_health(
+                            str(model_id),
+                            "loaded",
+                            detail="Loaded by uploaded-video processing job.",
+                            device=getattr(model_pool, "device", requested_device),
+                        )
+            except Exception:
+                pass
+        except Exception as exc:
+            for capability_id in ("yolo_weapon_detector", "yolo_phone_detector"):
+                self._mark_capability_faulted(
+                    capability_id,
+                    exc,
+                    {"session_id": session.session_id, "device": requested_device},
+                )
+            raise RuntimeError(f"Detector model activation failed for uploaded-video processing: {exc}") from exc
         return model_pool
 
     def _video_metadata(self, path: Path) -> dict[str, Any]:

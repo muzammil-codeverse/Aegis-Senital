@@ -106,6 +106,30 @@ def _uploaded_video_replay_counts() -> dict[str, int]:
     }
 
 
+def _uploaded_video_intelligence_counts() -> dict[str, int | float]:
+    try:
+        from app.services.command_center_intelligence_service import get_command_center_intelligence_service
+
+        summary = get_command_center_intelligence_service().analytics_summary()
+    except Exception:
+        return {
+            "uploaded_video_processed_videos": 0,
+            "uploaded_video_detection_count": 0,
+            "uploaded_video_alerts_generated": 0,
+            "uploaded_video_high_severity_detections": 0,
+            "uploaded_video_average_confidence": 0.0,
+            "uploaded_video_evidence_artifacts_created": 0,
+        }
+    return {
+        "uploaded_video_processed_videos": int(summary.get("processed_videos") or 0),
+        "uploaded_video_detection_count": int(summary.get("detections_total") or 0),
+        "uploaded_video_alerts_generated": int(summary.get("alerts_generated") or 0),
+        "uploaded_video_high_severity_detections": int(summary.get("high_severity_detections") or 0),
+        "uploaded_video_average_confidence": float(summary.get("average_confidence") or 0.0),
+        "uploaded_video_evidence_artifacts_created": int(summary.get("evidence_artifacts_created") or 0),
+    }
+
+
 def _drone_mission_analytics_counts() -> dict[str, int]:
     """Best-effort drone patrol mission stats from the JSONL repository."""
     try:
@@ -218,6 +242,7 @@ class AnalyticsService:
             camera_risk = self._compute_camera_risk(events, cases, self.repository.get_stream_health(normalized, filters), self.repository.get_identity_matches(normalized, filters))
             model_performance = self.get_model_performance(normalized, filters)
             replay_counts = _uploaded_video_replay_counts()
+            intelligence_counts = _uploaded_video_intelligence_counts()
             summary = DashboardSummary(
                 total_events=len(events),
                 critical_events=sum(1 for item in events if str(item.get("severity") or "").lower() == "critical"),
@@ -236,6 +261,12 @@ class AnalyticsService:
                 uploaded_video_replay_clips_generated_total=int(replay_counts.get("uploaded_video_replay_clips_generated_total", 0)),
                 uploaded_video_events_with_clips=int(replay_counts.get("uploaded_video_events_with_clips", 0)),
                 uploaded_video_events_without_clips=int(replay_counts.get("uploaded_video_events_without_clips", 0)),
+                uploaded_video_processed_videos=int(intelligence_counts.get("uploaded_video_processed_videos", 0)),
+                uploaded_video_detection_count=int(intelligence_counts.get("uploaded_video_detection_count", 0)),
+                uploaded_video_alerts_generated=int(intelligence_counts.get("uploaded_video_alerts_generated", 0)),
+                uploaded_video_high_severity_detections=int(intelligence_counts.get("uploaded_video_high_severity_detections", 0)),
+                uploaded_video_average_confidence=float(intelligence_counts.get("uploaded_video_average_confidence", 0.0)),
+                uploaded_video_evidence_artifacts_created=int(intelligence_counts.get("uploaded_video_evidence_artifacts_created", 0)),
                 **_drone_mission_analytics_counts(),
             )
             top_risk = camera_risk[0] if camera_risk else None

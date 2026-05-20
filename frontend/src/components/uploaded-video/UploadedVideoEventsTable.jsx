@@ -1,6 +1,11 @@
 import UploadedVideoClipControls from './UploadedVideoClipControls'
 
-export default function UploadedVideoEventsTable({ events = [], sessionId = '' }) {
+export default function UploadedVideoEventsTable({ events = [], sessionId = '', status = '' }) {
+  const terminalStatus = String(status || '').toLowerCase()
+  const emptyText = terminalStatus === 'completed'
+    ? 'No detections found.'
+    : 'No persisted uploaded-video events yet.'
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -10,7 +15,7 @@ export default function UploadedVideoEventsTable({ events = [], sessionId = '' }
         </div>
         <span className="count-pill">{events.length} events</span>
       </div>
-      {events.length === 0 ? <p className="muted">No persisted uploaded-video events yet.</p> : null}
+      {events.length === 0 ? <p className="muted">{emptyText}</p> : null}
       {events.length > 0 ? (
         <div className="table-shell">
           <table className="uploaded-video-table">

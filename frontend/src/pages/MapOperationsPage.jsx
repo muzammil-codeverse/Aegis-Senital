@@ -4,6 +4,7 @@ import CommandPageHeader from '../components/layout/CommandPageHeader'
 import { useAuth } from '../hooks/useAuth'
 import { useCameraGeoProfiles } from '../hooks/useCameraGeoProfiles'
 import { useGisMap } from '../hooks/useGisMap'
+import { useSimulationSources } from '../hooks/useSimulationSources'
 
 export default function MapOperationsPage() {
   const auth = useAuth()
@@ -16,15 +17,21 @@ export default function MapOperationsPage() {
     return o
   }, [filters])
 
-  const gisMap = useGisMap({ enabled: auth.hasPermission('gis:read'), filters: apiFilters, pollMs: 45_000 })
-  const profiles = useCameraGeoProfiles({ enabled: auth.hasPermission('gis:read'), pollMs: 0 })
+  const authReady = Boolean(auth.ready ?? !auth.loading)
+  const canReadGis = authReady && auth.authenticated && auth.hasPermission('gis:read')
+  const gisMap = useGisMap({ enabled: canReadGis, filters: apiFilters, pollMs: 45_000 })
+  const profiles = useCameraGeoProfiles({ enabled: canReadGis, pollMs: 0 })
+  const simulation = useSimulationSources({ enabled: canReadGis && auth.hasPermission('system:read'), pollMs: 45_000 })
 
   useEffect(() => {
-    const cid = window.sessionStorage.getItem('aegis.map.case_id')
-    if (cid) {
-      setFilters(f => ({ ...f, case_id: cid }))
-      window.sessionStorage.removeItem('aegis.map.case_id')
-    }
+    const timer = window.setTimeout(() => {
+      const cid = window.sessionStorage.getItem('aegis.map.case_id')
+      if (cid) {
+        setFilters(f => ({ ...f, case_id: cid }))
+        window.sessionStorage.removeItem('aegis.map.case_id')
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   const refreshAll = useCallback(async () => {
@@ -40,7 +47,7 @@ export default function MapOperationsPage() {
     [profiles, refreshAll],
   )
 
-  if (!auth.hasPermission('gis:read')) {
+  if (!canReadGis) {
     return <p className="muted">You do not have gis:read permission.</p>
   }
 
@@ -56,6 +63,8 @@ export default function MapOperationsPage() {
       <MapCommandCenter
         gisConfig={gisMap.config}
         layers={gisMap.layers}
+        simulationCameras={simulation.cameras}
+        simulationDrones={simulation.drones}
         canWriteGis={auth.hasPermission('gis:write')}
         onSaveCamera={onSaveCamera}
         filters={filters}

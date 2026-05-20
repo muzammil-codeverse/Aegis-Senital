@@ -102,9 +102,13 @@ class ScenarioEngine:
         time_window_secs: float = 7.5,
         db: IdentityDB | None = None,
         reasoner: ExternalReasoningEngine | None = None,
+        enable_persistence: bool = True,
+        require_persisted_events: bool = True,
     ) -> None:
         self._frame_window = max(1, int(fps * time_window_secs))
-        self._db = db or get_db()
+        self._db = db if db is not None else (get_db() if enable_persistence else None)
+        self._enable_persistence = bool(enable_persistence)
+        self._require_persisted_events = bool(require_persisted_events)
         self._classifier = ScenarioClassifier()
         self._reasoner = reasoner or ExternalReasoningEngine()
         self._known_signatures: dict[str, str] = {}
@@ -119,15 +123,19 @@ class ScenarioEngine:
         self._identity_history_len = int(cfg.get("identity_history_len", _IDENTITY_HISTORY_LEN))
 
     def aggregate(self, event_list: list[Event]) -> list[Scenario]:
-        persisted_events = [event for event in event_list if getattr(event, "persisted", False)]
-        if not persisted_events:
+        candidate_events = (
+            [event for event in event_list if getattr(event, "persisted", False)]
+            if self._require_persisted_events
+            else list(event_list)
+        )
+        if not candidate_events:
             return []
 
         # Update per-identity event history before clustering
-        self._update_identity_history(persisted_events)
+        self._update_identity_history(candidate_events)
 
-        vectors = [self._event_vector(event) for event in persisted_events]
-        clusters = self._cluster_events(persisted_events, vectors)
+        vectors = [self._event_vector(event) for event in candidate_events]
+        clusters = self._cluster_events(candidate_events, vectors)
         scenarios: list[Scenario] = []
 
         for cluster in clusters:
@@ -166,7 +174,10 @@ class ScenarioEngine:
             scenario.end_time = max(event.timestamp for event in cluster)
             reasoning = self._reasoner.explain(scenario.to_dict(), [event.to_dict() for event in cluster])
             scenario.metadata["reasoning"] = reasoning
-            self._db.persist_scenario(scenario)
+            if self._db is not None:
+                self._db.persist_scenario(scenario)
+            else:
+                scenario.metadata["persistence"] = "disabled_for_uploaded_video_job"
             scenarios.append(scenario)
             self._known_signatures[self._signature(scenario_type, identity_ids, camera_ids)] = risk_level
 

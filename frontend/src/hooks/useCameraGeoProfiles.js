@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getCameraGeoProfile, getGisCameras, updateCameraGeoProfile } from '../api/gisApi'
 import { normalizeError } from '../api/client'
+import { useAuthGate } from './useAuthenticatedQuery'
 
 export function useCameraGeoProfiles({ enabled = true, pollMs = 45_000 } = {}) {
+  const gate = useAuthGate('gis:read', { enabled })
   const [cameras, setCameras] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
   const refresh = useCallback(async () => {
-    if (!enabled) return
+    if (!gate.enabled) {
+      setLoading(gate.reason === 'checking')
+      setError(gate.reason && gate.reason !== 'disabled' && gate.reason !== 'checking' ? gate.message : null)
+      setCameras([])
+      return
+    }
     setLoading(true)
     try {
       const res = await getGisCameras()
@@ -19,14 +26,14 @@ export function useCameraGeoProfiles({ enabled = true, pollMs = 45_000 } = {}) {
     } finally {
       setLoading(false)
     }
-  }, [enabled])
+  }, [gate.enabled, gate.message, gate.reason])
 
   useEffect(() => {
     refresh()
-    if (!pollMs) return undefined
+    if (!pollMs || !gate.enabled) return undefined
     const t = window.setInterval(refresh, pollMs)
     return () => window.clearInterval(t)
-  }, [refresh, pollMs])
+  }, [gate.enabled, refresh, pollMs])
 
   const loadOne = useCallback(async cameraId => {
     const res = await getCameraGeoProfile(cameraId)
@@ -38,5 +45,5 @@ export function useCameraGeoProfiles({ enabled = true, pollMs = 45_000 } = {}) {
     await refresh()
   }, [refresh])
 
-  return { cameras, loading, error, refresh, loadOne, save }
+  return { cameras, loading, error, authGate: gate, refresh, loadOne, save }
 }

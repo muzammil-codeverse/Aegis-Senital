@@ -45,6 +45,7 @@ def uploaded_video_config(tmp_path: Path) -> dict:
                 "root_dir": str(tmp_path / "uploaded_videos"),
                 "processed_dir": str(tmp_path / "uploaded_video_results"),
                 "evidence_dir": str(tmp_path / "evidence"),
+                "command_center_dir": str(tmp_path / "command_center_intelligence"),
                 "require_managed_storage_in_production": False,
             },
             "upload": {

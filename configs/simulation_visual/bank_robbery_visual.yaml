@@ -1,0 +1,439 @@
+# Phase XI — Visual Simulation World Enrichment
+# bank_robbery_visual.yaml
+#
+# Visual scenario configuration for the bank_robbery_demo AirSim world layer.
+# This file drives the AegisVisualScenarioController which connects to the
+# running Cosys-AirSim / AirSim binary and renders actors, zones, camera
+# markers, and drone route overlays using the AirSim debug-plot API.
+#
+# Coordinate system: scenario_ned_positive_z_up
+#   x = North (metres from origin)
+#   y = East  (metres from origin)
+#   z = altitude above ground (metres, positive = up)
+# The controller negates z when issuing AirSim Pose calls (NED: z_down).
+#
+# Actor proxy colours follow OSHA safety palette for immediate recognition:
+#   SUSPECT        → red   [1.0, 0.0, 0.0, 1.0]
+#   CIVILIAN       → blue  [0.0, 0.5, 1.0, 1.0]
+#   SECURITY GUARD → yellow [1.0, 1.0, 0.0, 1.0]
+#   VEHICLE        → dark  [0.15, 0.15, 0.15, 1.0]
+#   DRONE          → cyan  [0.0, 1.0, 0.9, 1.0]
+#   CAMERA MARKER  → green [0.0, 1.0, 0.2, 1.0]
+#   ZONE BOUNDARY  → orange [1.0, 0.55, 0.0, 0.7]
+#   CRIME MARKER   → magenta [1.0, 0.0, 0.8, 1.0]
+
+scenario_id: bank_robbery_visual
+name: "Bank Robbery Visual Scenario — Phase XI"
+description: >
+  Visual layer for bank_robbery_demo. Renders suspect, civilians, security
+  guard, escape vehicle, bank zone, camera markers, and DRONE-ALPHA route
+  as AirSim debug overlays. Animates actors along Phase 6/7 waypoints.
+version: "1.0"
+phase: 11
+fallback_proxy_mode: true
+coordinate_system: scenario_ned_positive_z_up
+linked_scenario_id: bank_robbery_demo
+
+airsim:
+  host: "127.0.0.1"
+  port: 41451
+  vehicle_name: "Drone1"
+  timeout_seconds: 5.0
+
+home:
+  latitude: 30.1575
+  longitude: 71.5249
+  altitude_meters: 0.0
+  world_origin_x: 0.0
+  world_origin_y: 0.0
+
+# ---------------------------------------------------------------------------
+# Debug visual settings
+# ---------------------------------------------------------------------------
+visuals:
+  marker_size: 18.0
+  label_scale: 1.8
+  path_thickness: 4.0
+  zone_thickness: 2.5
+  marker_duration_seconds: 3600.0
+  is_persistent: true
+  flush_on_reset: true
+  animate_actors: true
+  animation_real_time_factor: 1.0   # 1.0 = match scenario clock 1:1
+  show_zone_boundaries: true
+  show_camera_frustums: true
+  show_drone_route: true
+  show_suspect_path: true
+  show_event_labels: true
+
+# ---------------------------------------------------------------------------
+# Zones — spatial regions with colour overlays
+# ---------------------------------------------------------------------------
+zones:
+  - zone_id: zone_financial
+    name: "Financial District / Bank"
+    color: [1.0, 0.55, 0.0, 0.7]
+    center: {x: 135.0, y: 90.0, z: 0.0}
+    extents: {dx: 40.0, dy: 35.0}
+    label: "BANK / FINANCIAL DISTRICT"
+    label_height: 8.0
+
+  - zone_id: zone_market
+    name: "Market District"
+    color: [0.6, 0.8, 0.0, 0.5]
+    center: {x: 200.0, y: 145.0, z: 0.0}
+    extents: {dx: 45.0, dy: 40.0}
+    label: "MARKET DISTRICT"
+    label_height: 8.0
+
+  - zone_id: zone_roads
+    name: "Main Road"
+    color: [0.4, 0.4, 0.4, 0.5]
+    center: {x: 260.0, y: 180.0, z: 0.0}
+    extents: {dx: 50.0, dy: 30.0}
+    label: "MAIN ROAD"
+    label_height: 6.0
+
+  - zone_id: zone_parking
+    name: "Parking Zone"
+    color: [0.2, 0.6, 1.0, 0.5]
+    center: {x: 310.0, y: 200.0, z: 0.0}
+    extents: {dx: 40.0, dy: 35.0}
+    label: "PARKING ZONE"
+    label_height: 6.0
+
+  - zone_id: zone_alley
+    name: "Alley Sector"
+    color: [0.5, 0.1, 0.5, 0.5]
+    center: {x: 330.0, y: 230.0, z: 0.0}
+    extents: {dx: 30.0, dy: 25.0}
+    label: "ALLEY SECTOR"
+    label_height: 6.0
+
+# ---------------------------------------------------------------------------
+# Visual actors
+# ---------------------------------------------------------------------------
+actors:
+
+  # ── SUSPECT-001 ──────────────────────────────────────────────────────────
+  - actor_id: SUSPECT-001
+    aegis_id: SUSPECT-001
+    name: "Primary Suspect"
+    role: suspect
+    visual_class: person_suspect
+    proxy_color: [1.0, 0.0, 0.0, 1.0]
+    proxy_label: "SUSPECT-001"
+    proxy_label_color: [1.0, 1.0, 0.0, 1.0]
+    proxy_size: 22.0
+    label_height_offset: 4.5
+    start_pose:
+      x: 120.0
+      y: 80.0
+      z: 1.8       # approx 1.8 m above ground (standing person)
+    animation:
+      loop: false
+      auto_start: true
+    waypoints:
+      - waypoint_id: wp-suspect-00
+        offset_seconds: 0
+        pose: {x: 120.0, y: 80.0, z: 1.8}
+        event: "Suspect enters Financial District"
+        camera_id: CAM-BANK-01
+      - waypoint_id: wp-suspect-01
+        offset_seconds: 5
+        pose: {x: 130.0, y: 85.0, z: 1.8}
+        event: "Suspect loiters near bank entrance"
+        camera_id: CAM-BANK-01
+      - waypoint_id: wp-suspect-02
+        offset_seconds: 15
+        pose: {x: 145.0, y: 100.0, z: 1.8}
+        event: "ARMED — weapon displayed at bank entrance"
+        camera_id: CAM-BANK-02
+        critical_event: true
+        critical_label: "! ARMED SUSPECT !"
+        critical_color: [1.0, 0.0, 0.0, 1.0]
+      - waypoint_id: wp-suspect-03
+        offset_seconds: 20
+        pose: {x: 160.0, y: 115.0, z: 1.8}
+        event: "Suspect exits bank — moving north"
+        camera_id: CAM-BANK-03
+      - waypoint_id: wp-suspect-04
+        offset_seconds: 25
+        pose: {x: 200.0, y: 145.0, z: 1.8}
+        event: "Suspect at market edge"
+        camera_id: CAM-MARKET-01
+      - waypoint_id: wp-suspect-05
+        offset_seconds: 30
+        pose: {x: 260.0, y: 180.0, z: 1.8}
+        event: "Suspect crosses main road"
+        camera_id: CAM-ROAD-01
+      - waypoint_id: wp-suspect-06
+        offset_seconds: 35
+        pose: {x: 310.0, y: 200.0, z: 1.8}
+        event: "Suspect at parking — escape vehicle contact"
+        camera_id: CAM-PARKING-01
+      - waypoint_id: wp-suspect-07
+        offset_seconds: 40
+        pose: {x: 330.0, y: 230.0, z: 1.8}
+        event: "Suspect enters alley — DRONE-ALPHA tracking"
+        camera_id: CAM-ALLEY-01
+      - waypoint_id: wp-suspect-08
+        offset_seconds: 50
+        pose: {x: 380.0, y: 260.0, z: 1.8}
+        event: "Suspect at road checkpoint — intercept recommended"
+        camera_id: CAM-ROAD-01
+
+  # ── CIVILIAN-GROUP-001 ────────────────────────────────────────────────────
+  - actor_id: CIVILIAN-GROUP-001
+    aegis_id: CIVILIAN-GROUP-001
+    name: "Bank Civilian Group"
+    role: civilian
+    visual_class: person_group
+    proxy_color: [0.0, 0.5, 1.0, 1.0]
+    proxy_label: "CIVILIANS"
+    proxy_label_color: [0.8, 0.9, 1.0, 1.0]
+    proxy_size: 16.0
+    label_height_offset: 3.5
+    # Group of 5 individuals — each rendered as a coloured sphere cluster
+    group_members:
+      - pose: {x: 136.0, y: 88.0, z: 1.8}
+      - pose: {x: 139.0, y: 92.0, z: 1.8}
+      - pose: {x: 133.0, y: 91.0, z: 1.8}
+      - pose: {x: 141.0, y: 86.0, z: 1.8}
+      - pose: {x: 137.0, y: 95.0, z: 1.8}
+    animation:
+      loop: false
+      auto_start: true
+    # After weapon detection (t=15s) civilians scatter
+    scatter_trigger_offset_seconds: 15
+    scatter_radius: 18.0
+    scatter_direction: [1.0, -1.0]  # away from bank entrance
+
+  # ── SECURITY-GUARD-001 ────────────────────────────────────────────────────
+  - actor_id: SECURITY-GUARD-001
+    aegis_id: SECURITY-GUARD-001
+    name: "Bank Security Guard"
+    role: security
+    visual_class: person_security
+    proxy_color: [1.0, 1.0, 0.0, 1.0]
+    proxy_label: "SECURITY-GUARD"
+    proxy_label_color: [1.0, 1.0, 0.0, 1.0]
+    proxy_size: 20.0
+    label_height_offset: 4.0
+    start_pose:
+      x: 127.0
+      y: 83.0
+      z: 1.8
+    animation:
+      loop: false
+      auto_start: true
+    waypoints:
+      - waypoint_id: sg-wp-00
+        offset_seconds: 0
+        pose: {x: 127.0, y: 83.0, z: 1.8}
+        event: "Guard on-duty at bank entrance"
+      - waypoint_id: sg-wp-01
+        offset_seconds: 16
+        pose: {x: 138.0, y: 97.0, z: 1.8}
+        event: "Guard responds to weapon alarm — moves toward incident"
+      - waypoint_id: sg-wp-02
+        offset_seconds: 22
+        pose: {x: 144.0, y: 104.0, z: 1.8}
+        event: "Guard reaches bank vault corridor — initiates lockdown"
+
+  # ── ESCAPE-VEHICLE-001 ────────────────────────────────────────────────────
+  - actor_id: ESCAPE-VEHICLE-001
+    aegis_id: ESCAPE-VEHICLE-001
+    name: "Escape Vehicle"
+    role: vehicle
+    visual_class: vehicle_getaway
+    proxy_color: [0.15, 0.15, 0.15, 1.0]
+    proxy_label: "ESCAPE-VEHICLE"
+    proxy_label_color: [1.0, 0.3, 0.0, 1.0]
+    proxy_size: 30.0
+    label_height_offset: 3.0
+    start_pose:
+      x: 315.0
+      y: 202.0
+      z: 1.2      # vehicle sits lower (wheel height)
+    animation:
+      loop: false
+      auto_start: false
+    waypoints:
+      - waypoint_id: ev-wp-00
+        offset_seconds: 0
+        pose: {x: 315.0, y: 202.0, z: 1.2}
+        event: "Getaway vehicle staged in parking zone"
+      - waypoint_id: ev-wp-01
+        offset_seconds: 38
+        pose: {x: 340.0, y: 235.0, z: 1.2}
+        event: "Escape vehicle moves toward alley exit after suspect contact"
+
+# ---------------------------------------------------------------------------
+# Camera markers (CAM-* zone indicators in 3-D world)
+# ---------------------------------------------------------------------------
+camera_markers:
+  marker_color: [0.0, 1.0, 0.2, 1.0]
+  marker_size: 14.0
+  label_height_offset: 3.5
+  frustum_length: 12.0
+  frustum_color: [0.0, 1.0, 0.2, 0.4]
+
+  cameras:
+    - camera_id: CAM-BANK-01
+      name: "Bank Entrance Camera 1"
+      pose: {x: 118.0, y: 77.0, z: 4.5}
+      facing_direction: [1.0, 0.5, -0.2]
+
+    - camera_id: CAM-BANK-02
+      name: "Bank Vault Corridor Camera 2"
+      pose: {x: 148.0, y: 103.0, z: 4.5}
+      facing_direction: [0.5, 1.0, -0.2]
+
+    - camera_id: CAM-BANK-03
+      name: "Bank ATM Exit Camera 3"
+      pose: {x: 162.0, y: 118.0, z: 4.5}
+      facing_direction: [1.0, 0.5, -0.2]
+
+    - camera_id: CAM-MARKET-01
+      name: "Market District Camera"
+      pose: {x: 198.0, y: 142.0, z: 5.0}
+      facing_direction: [1.0, 1.0, -0.2]
+
+    - camera_id: CAM-ROAD-01
+      name: "Main Road Checkpoint Camera"
+      pose: {x: 255.0, y: 175.0, z: 5.0}
+      facing_direction: [0.8, 1.0, -0.2]
+
+    - camera_id: CAM-PARKING-01
+      name: "Parking Zone Camera"
+      pose: {x: 305.0, y: 196.0, z: 5.0}
+      facing_direction: [1.0, 0.5, -0.2]
+
+    - camera_id: CAM-ALLEY-01
+      name: "Alley Camera"
+      pose: {x: 325.0, y: 226.0, z: 4.5}
+      facing_direction: [0.6, 1.0, -0.2]
+
+    - camera_id: CAM-GATE-01
+      name: "Parking Gate Camera"
+      pose: {x: 378.0, y: 258.0, z: 4.5}
+      facing_direction: [1.0, 0.8, -0.2]
+
+# ---------------------------------------------------------------------------
+# Crime scene markers — visual cues at incident origin
+# ---------------------------------------------------------------------------
+crime_markers:
+  - marker_id: crime-bank-incident
+    type: weapon_event
+    pose: {x: 145.0, y: 100.0, z: 0.5}
+    color: [1.0, 0.0, 0.8, 1.0]
+    size: 25.0
+    label: "! ARMED ROBBERY !"
+    label_color: [1.0, 0.0, 0.0, 1.0]
+    trigger_offset_seconds: 15
+    pulsing: true
+
+  - marker_id: crime-escape-zone
+    type: restricted_zone
+    pose: {x: 315.0, y: 202.0, z: 0.5}
+    color: [1.0, 0.3, 0.0, 0.8]
+    size: 20.0
+    label: "! ESCAPE VEHICLE !"
+    label_color: [1.0, 0.5, 0.0, 1.0]
+    trigger_offset_seconds: 35
+
+# ---------------------------------------------------------------------------
+# Drone route — DRONE-ALPHA intercept path
+# ---------------------------------------------------------------------------
+drone_route:
+  drone_id: DRONE-ALPHA
+  route_id: route_phase7_alpha
+  path_color: [0.0, 1.0, 0.9, 1.0]
+  path_thickness: 5.0
+  waypoint_size: 12.0
+  waypoint_color: [0.0, 0.9, 1.0, 1.0]
+  label_color: [0.0, 1.0, 0.9, 1.0]
+  animate_drone: true
+  dispatch_trigger_offset_seconds: 25
+
+  waypoints:
+    - waypoint_id: drone-wp-00
+      offset_seconds: 25
+      pose: {x: 120.0, y: 80.0, z: 40.0}
+      label: "DRONE-ALPHA — dispatch / bank overview"
+    - waypoint_id: drone-wp-01
+      offset_seconds: 27
+      pose: {x: 135.0, y: 90.0, z: 35.0}
+      label: "Bank roof overview — incident origin"
+    - waypoint_id: drone-wp-02
+      offset_seconds: 30
+      pose: {x: 200.0, y: 145.0, z: 30.0}
+      label: "Market intercept vector"
+    - waypoint_id: drone-wp-03
+      offset_seconds: 35
+      pose: {x: 310.0, y: 200.0, z: 25.0}
+      label: "Parking overhead — escape vehicle intercept"
+    - waypoint_id: drone-wp-04
+      offset_seconds: 42
+      pose: {x: 335.0, y: 235.0, z: 20.0}
+      label: "Alley tracking — suspect cornered"
+    - waypoint_id: drone-wp-05
+      offset_seconds: 50
+      pose: {x: 385.0, y: 265.0, z: 22.0}
+      label: "Gate/exit — final intercept"
+
+# ---------------------------------------------------------------------------
+# Event timeline — mirrors backend scenario_engine_service.py timeline
+# Used to drive visual state changes during animation
+# ---------------------------------------------------------------------------
+event_timeline:
+  - step: 0
+    offset_seconds: 0
+    visual_action: "show_actor:SUSPECT-001"
+    description: "Suspect appears in Financial District"
+  - step: 1
+    offset_seconds: 5
+    visual_action: "move_actor:SUSPECT-001:wp-suspect-01"
+    description: "Suspect loiters"
+  - step: 2
+    offset_seconds: 10
+    visual_action: "show_actor:CIVILIAN-GROUP-001"
+    description: "Civilians appear near bank"
+  - step: 3
+    offset_seconds: 15
+    visual_action: "activate_crime_marker:crime-bank-incident"
+    description: "CRITICAL — weapon detected"
+    critical: true
+  - step: 4
+    offset_seconds: 20
+    visual_action: "scatter_actor:CIVILIAN-GROUP-001 | move_actor:SECURITY-GUARD-001:sg-wp-01"
+    description: "Civilians scatter / guard responds"
+  - step: 5
+    offset_seconds: 25
+    visual_action: "dispatch_drone:DRONE-ALPHA"
+    description: "DRONE-ALPHA dispatched"
+  - step: 6
+    offset_seconds: 30
+    visual_action: "move_actor:SUSPECT-001:wp-suspect-05"
+    description: "Suspect crosses road"
+  - step: 7
+    offset_seconds: 35
+    visual_action: "activate_crime_marker:crime-escape-zone | move_actor:ESCAPE-VEHICLE-001:ev-wp-01"
+    description: "Escape vehicle contact"
+  - step: 8
+    offset_seconds: 40
+    visual_action: "move_actor:SUSPECT-001:wp-suspect-07"
+    description: "Suspect enters alley"
+  - step: 9
+    offset_seconds: 45
+    visual_action: "drone_observe:DRONE-ALPHA:zone_alley"
+    description: "Drone aerial confirmation"
+  - step: 10
+    offset_seconds: 50
+    visual_action: "move_actor:SUSPECT-001:wp-suspect-08"
+    description: "Suspect at road checkpoint"
+  - step: 11
+    offset_seconds: 60
+    visual_action: "scenario_complete"
+    description: "Scenario complete — full timeline captured"

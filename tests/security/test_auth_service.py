@@ -44,3 +44,20 @@ def test_password_change_validates_strength(service):
     user = service.create_user("admin", "ChangeMe123", role="admin")
     with pytest.raises(ValueError):
         service.change_password(user, "ChangeMe123", "weak")
+
+
+def test_admin_reset_password_creates_known_local_login(service):
+    admin = service.create_user("admin", "ChangeMe123", role="admin")
+    updated = service.reset_password_by_admin(
+        admin,
+        admin.user_id,
+        "AegisLocalAdmin2026!",
+        must_change_password=False,
+    )
+
+    assert updated is not None
+    assert updated.must_change_password is False
+
+    payload = service.login("admin", "AegisLocalAdmin2026!")
+    assert payload["access_token"]
+    assert payload["user"]["username"] == "admin"
