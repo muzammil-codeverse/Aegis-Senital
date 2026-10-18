@@ -76,7 +76,7 @@
   align-items: center;
 }
 .book-heading > p {
-  margin-right: 8vw;
+  margin-right: 18vw;
 }
 .book-shell.physical-book {
   height: clamp(400px, 39vw, 570px);

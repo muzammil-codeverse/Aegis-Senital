@@ -182,7 +182,12 @@ export function initStoryMotion({ gsap, ScrollTrigger }) {
           ".hero",
           0,
           mobile ? 0.44 : 0.4,
-          mobile ? 0.46 : 0.44,
+          mobile
+            ? 0.46
+            : Math.max(
+                0.44,
+                ((innerWidth * 0.77 * 0.59) / 2 + 100) / innerHeight,
+              ),
           mobile ? 1.15 : 0.77,
           -6,
         ),
