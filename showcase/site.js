@@ -1,3 +1,4 @@
+import { initBook, initStoryMotion } from "./story-motion.js";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
@@ -115,10 +116,10 @@ media.add(
         },
       );
       gsap.to(".drone-stage", {
-        yPercent: desktop ? 30 : 15,
-        xPercent: desktop ? 9 : 2,
+        yPercent: desktop ? 38 : 19,
+        xPercent: desktop ? 28 : 6,
         rotation: 5,
-        scale: 1.06,
+        scale: 0.82,
         ease: "none",
         scrollTrigger: {
           trigger: hero,
@@ -138,42 +139,38 @@ media.add(
         },
       });
     }
-    document
-      .querySelectorAll(".parallax-image")
-      .forEach((img) =>
-        gsap.fromTo(
-          img,
-          { yPercent: -7 },
-          {
-            yPercent: 4,
-            ease: "none",
-            scrollTrigger: {
-              trigger: img.parentElement,
-              start: "top bottom",
-              end: "bottom top",
-              scrub: 1,
-            },
+    document.querySelectorAll(".parallax-image").forEach((img) =>
+      gsap.fromTo(
+        img,
+        { yPercent: -7 },
+        {
+          yPercent: 4,
+          ease: "none",
+          scrollTrigger: {
+            trigger: img.parentElement,
+            start: "top bottom",
+            end: "bottom top",
+            scrub: 1,
           },
-        ),
-      );
-    document
-      .querySelectorAll(".parallax-detail")
-      .forEach((img) =>
-        gsap.fromTo(
-          img,
-          { yPercent: -10 },
-          {
-            yPercent: 0,
-            ease: "none",
-            scrollTrigger: {
-              trigger: img.closest("figure"),
-              start: "top bottom",
-              end: "bottom top",
-              scrub: 1,
-            },
+        },
+      ),
+    );
+    document.querySelectorAll(".parallax-detail").forEach((img) =>
+      gsap.fromTo(
+        img,
+        { yPercent: -10 },
+        {
+          yPercent: 0,
+          ease: "none",
+          scrollTrigger: {
+            trigger: img.closest("figure"),
+            start: "top bottom",
+            end: "bottom top",
+            scrub: 1,
           },
-        ),
-      );
+        },
+      ),
+    );
     if (document.querySelector(".capture")) {
       const capture = gsap.timeline({
         scrollTrigger: {
@@ -185,7 +182,7 @@ media.add(
       });
       capture
         .to(".capture-image", {
-          clipPath: "inset(0% 0%)",
+          clipPath: "circle(110% at 65% 38%)",
           duration: 0.7,
           ease: "power2.inOut",
         })
@@ -198,26 +195,24 @@ media.add(
         )
         .fromTo(".capture-copy", { y: 60 }, { y: 0, duration: 0.7 }, 0.25);
     }
-    gsap.utils
-      .toArray(".reveal")
-      .forEach((el) =>
-        gsap.fromTo(
-          el,
-          { y: 45, opacity: 0.25 },
-          {
-            y: 0,
-            opacity: 1,
-            duration: 0.9,
-            ease: "power2.out",
-            scrollTrigger: {
-              trigger: el,
-              start: "top 90%",
-              end: "top 55%",
-              scrub: 0.6,
-            },
+    gsap.utils.toArray(".reveal").forEach((el) =>
+      gsap.fromTo(
+        el,
+        { y: 45, opacity: 0.25 },
+        {
+          y: 0,
+          opacity: 1,
+          duration: 0.9,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: el,
+            start: "top 90%",
+            end: "top 55%",
+            scrub: 0.6,
           },
-        ),
-      );
+        },
+      ),
+    );
     if (document.querySelector(".evidence"))
       gsap.fromTo(
         ".evidence",
@@ -257,84 +252,6 @@ media.add(
   },
 );
 
-const rail = document.querySelector(".source-rail");
-const sourceButtons = [...document.querySelectorAll("[data-source]")];
-const progress = document.querySelector(".source-progress i");
-let travelTrigger;
-function setSource(index, ratio) {
-  sourceButtons.forEach((b, i) =>
-    b.setAttribute("aria-pressed", String(i === index)),
-  );
-  if (progress) progress.style.width = `${25 + ratio * 75}%`;
-}
-const sourceMedia = gsap.matchMedia();
-if (rail) {
-  sourceMedia.add(
-    "(min-width: 721px) and (prefers-reduced-motion: no-preference)",
-    () => {
-      const distance = () => Math.max(0, rail.scrollWidth - innerWidth);
-      const tween = gsap.to(rail, {
-        x: () => -distance(),
-        ease: "none",
-        scrollTrigger: {
-          trigger: ".source-stage",
-          pin: true,
-          start: "top top",
-          end: () => `+=${distance()}`,
-          scrub: 0.8,
-          invalidateOnRefresh: true,
-          anticipatePin: 1,
-          onUpdate: (self) =>
-            setSource(
-              Math.min(3, Math.round(self.progress * 3)),
-              self.progress,
-            ),
-        },
-      });
-      travelTrigger = tween.scrollTrigger;
-      return () => {
-        travelTrigger = undefined;
-      };
-    },
-  );
-  rail.addEventListener(
-    "scroll",
-    () => {
-      if (!travelTrigger) {
-        const max = rail.scrollWidth - rail.clientWidth;
-        const ratio = max > 0 ? rail.scrollLeft / max : 0;
-        setSource(Math.min(3, Math.round(ratio * 3)), ratio);
-      }
-    },
-    { passive: true },
-  );
-  sourceButtons.forEach((button, i) =>
-    button.addEventListener("click", () => {
-      if (travelTrigger) {
-        const max = rail.scrollWidth - innerWidth;
-        const target = Math.min(
-          max,
-          rail.children[i].offsetLeft -
-            parseFloat(getComputedStyle(rail).paddingLeft),
-        );
-        const y =
-          travelTrigger.start +
-          (target / max) * (travelTrigger.end - travelTrigger.start);
-        if (lenis) lenis.scrollTo(y, { duration: 0.9 });
-        else
-          scrollTo({
-            top: y,
-            behavior: reduced.matches ? "instant" : "smooth",
-          });
-      } else
-        rail.scrollTo({
-          left: rail.children[i].offsetLeft - rail.children[0].offsetLeft,
-          behavior: reduced.matches ? "instant" : "smooth",
-        });
-    }),
-  );
-}
-
 function goTo(el) {
   if (lenis) lenis.scrollTo(el, { duration: 1.1, offset: -75 });
   else el.scrollIntoView({ behavior: reduced.matches ? "instant" : "smooth" });
@@ -367,7 +284,7 @@ evidenceButton?.addEventListener("click", () => {
       ".inspection-image",
       { clipPath: "inset(10% 20%)", opacity: 0.5 },
       {
-        clipPath: "inset(0% 0%)",
+        clipPath: "circle(110% at 65% 38%)",
         opacity: 1,
         duration: 0.6,
         ease: "power3.out",
@@ -441,3 +358,6 @@ Promise.all(
   ),
 ).then(() => ScrollTrigger.refresh());
 document.fonts.ready.then(() => ScrollTrigger.refresh());
+
+initBook({ gsap, ScrollTrigger, reduced, getLenis: () => lenis });
+initStoryMotion({ gsap, ScrollTrigger, reduced });

@@ -15,7 +15,7 @@ Vite writes a static multi page site into `dist/`. The pages use clean URLs on V
 
 ## Experience
 
-The homepage uses locally bundled GSAP ScrollTrigger and Lenis. Desktop includes a pinned horizontal source sequence. Mobile uses native horizontal scrolling with source controls. Reduced motion removes smooth scrolling and long pins. Document transitions use the native browser API with a short fallback. Native dialogs provide menu focus containment and source inspection.
+The homepage uses locally bundled GSAP ScrollTrigger and Lenis. Desktop includes a pinned observation book with four distinct spreads and paper fold transitions. Mobile uses a vertically composed book with named chapter controls and horizontal swipe navigation. Reduced motion removes smooth scrolling and long pins. Document transitions use the native browser API with a short fallback. Native dialogs provide menu focus containment and source inspection. The drone recurs through the hero, skyline, capture, flight passage, aerial chapter and finale. See `docs/CHOREOGRAPHY_RESEARCH.md` for the research and motion contract.
 
 Images and the Archivo variable font are served locally. Responsive photo derivatives are selected through `srcset`. See `docs/assets.json` for image origins, usage boundaries and the font license.
 
