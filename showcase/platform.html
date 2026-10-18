@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#ced6d2" />
+    <title>The bigger picture. | Aegis Sentinel</title>
+    <meta
+      name="description"
+      content="Aegis Sentinel connects visual analysis with spatial context, investigation workflows and evidence review."
+    />
+    <link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
+    <link
+      rel="preload"
+      href="/assets/archivo.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/site.js"></script>
+  </head>
+  <body class="detail-page">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="header">
+      <a class="brand" href="/" aria-label="Aegis Sentinel home"
+        ><svg viewBox="0 0 34 38" aria-hidden="true">
+          <path d="M17 2 31 10v17l-14 9L3 27V10Z" />
+          <path d="m10 24 7-13 7 13M13 20h8" /></svg
+        ><span>AEGIS<br />SENTINEL</span></a
+      >
+      <nav class="header-links" aria-label="Primary">
+        <a href="/platform">Platform</a><a href="/operations">Operations</a
+        ><a href="/intelligence">Intelligence</a>
+      </nav>
+      <div class="header-actions">
+        <a class="login-link" href="/login"
+          >Log in <span aria-hidden="true">↗</span></a
+        ><button
+          id="menu-button"
+          class="menu-button"
+          aria-expanded="false"
+          aria-controls="site-menu"
+        >
+          Menu <span aria-hidden="true">+</span>
+        </button>
+      </div>
+    </header>
+    <dialog id="site-menu" class="site-menu" aria-label="Site navigation">
+      <div class="menu-top">
+        <a class="brand" href="/" aria-label="Aegis Sentinel home"
+          ><svg viewBox="0 0 34 38" aria-hidden="true">
+            <path d="M17 2 31 10v17l-14 9L3 27V10Z" />
+            <path d="m10 24 7-13 7 13M13 20h8" /></svg
+          ><span>AEGIS<br />SENTINEL</span></a
+        ><button id="menu-close" class="menu-button">
+          Close <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <div class="menu-layout">
+        <nav aria-label="All pages">
+          <a href="/">Home <span>01</span></a
+          ><a href="/platform">Platform <span>02</span></a
+          ><a href="/operations">Operations <span>03</span></a
+          ><a href="/intelligence">Intelligence <span>04</span></a
+          ><a href="/technology">Technology <span>05</span></a>
+        </nav>
+        <div class="menu-aside">
+          <img
+            src="/assets/architecture.webp"
+            srcset="
+              /assets/architecture-small.webp  960w,
+              /assets/architecture.webp       2000w
+            "
+            sizes="(max-width: 720px) 100vw, 100vw"
+            alt="Architecture rising towards an open sky"
+            width="600"
+            height="400"
+          />
+          <p>See the bigger picture.</p>
+          <a class="text-link" href="/signup">Create an account ↗</a
+          ><a class="text-link" href="/login">Log in ↗</a>
+        </div>
+      </div>
+      <div class="menu-bottom">
+        <span>A Valtum Studio project</span><a href="/privacy">Privacy</a>
+      </div>
+    </dialog>
+    <main id="main">
+      <section class="detail-hero light-scene">
+        <h1 class="detail-title">The bigger picture.</h1>
+        <div class="detail-intro">
+          <h2>One platform. More context.</h2>
+          <p>
+            Aegis Sentinel connects visual analysis with spatial context,
+            investigation workflows and evidence review.
+          </p>
+        </div>
+        <div class="detail-hero-image">
+          <img
+            class=""
+            src="/assets/night.webp"
+            srcset="/assets/night-small.webp 960w, /assets/night.webp 2000w"
+            sizes="(max-width: 720px) 100vw, 100vw"
+            alt="One platform. More context."
+            width="2000"
+            height="1333"
+            fetchpriority="high"
+            decoding="async"
+          />
+        </div>
+      </section>
+      <section class="editorial light-scene">
+        <figure>
+          <img
+            class="parallax-detail"
+            src="/assets/observation.webp"
+            srcset="
+              /assets/observation-small.webp  960w,
+              /assets/observation.webp       2000w
+            "
+            sizes="(max-width: 720px) 100vw, 100vw"
+            alt="Start with the source."
+            width="2000"
+            height="1333"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+        <div>
+          <h2 class="reveal">Start with the source.</h2>
+          <p>
+            Bring fixed camera streams and uploaded media into a visual analysis
+            workflow. Detection and tracking turn input into candidate
+            observations, with source context kept close.
+          </p>
+        </div>
+      </section>
+      <section class="editorial light-scene reverse">
+        <figure>
+          <img
+            class="parallax-detail"
+            src="/assets/city.webp"
+            srcset="/assets/city-small.webp 960w, /assets/city.webp 2000w"
+            sizes="(max-width: 720px) 100vw, 100vw"
+            alt="Expand the field of view."
+            width="2000"
+            height="1333"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+        <div>
+          <h2 class="reveal">Expand the field of view.</h2>
+          <p>
+            Simulated aerial missions and geospatial context help place
+            observations within a wider setting. Examine where information comes
+            from and how it relates.
+          </p>
+        </div>
+      </section>
+      <section class="editorial light-scene">
+        <figure>
+          <img
+            class="parallax-detail"
+            src="/assets/architecture.webp"
+            srcset="
+              /assets/architecture-small.webp  960w,
+              /assets/architecture.webp       2000w
+            "
+            sizes="(max-width: 720px) 100vw, 100vw"
+            alt="Keep the reasoning visible."
+            width="2000"
+            height="1333"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+        <div>
+          <h2 class="reveal">Keep the reasoning visible.</h2>
+          <p>
+            Cases, evidence attachments and timelines bring an investigation
+            together. Model limitations and review states help operators
+            distinguish a possibility from a finding.
+          </p>
+        </div>
+      </section>
+      <section class="next-page dark-scene">
+        <p>Keep exploring.</p>
+        <a href="/technology">Inside the technology <span>↗</span></a>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-top">
+        <h2>There is always<br />more to the story.</h2>
+        <a
+          class="circle-link"
+          href="/platform"
+          aria-label="Explore the platform"
+          >↗</a
+        >
+      </div>
+      <div class="footer-links">
+        <p>Visual intelligence.<br />Human perspective.</p>
+        <nav aria-label="Footer">
+          <a href="/platform">Platform</a><a href="/operations">Operations</a
+          ><a href="/intelligence">Intelligence</a
+          ><a href="/technology">Technology</a>
+        </nav>
+        <nav aria-label="Account and information">
+          <a href="/login">Log in</a><a href="/signup">Sign up</a
+          ><a href="/privacy">Privacy</a
+          ><a
+            href="https://github.com/muzammil-codeverse/Aegis-Senital"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Source ↗</a
+          >
+        </nav>
+      </div>
+      <div class="footer-wordmark" aria-hidden="true">AEGIS SENTINEL</div>
+      <div class="footer-bottom">
+        <span>© 2026 Aegis Sentinel</span><span>By Valtum Studio</span
+        ><button class="back-top" aria-label="Back to top">
+          Back to top ↑
+        </button>
+      </div>
+    </footer>
+  </body>
+</html>

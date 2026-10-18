@@ -1,0 +1,47 @@
+{
+  "retrieved": "2026-10-18",
+  "photo_license": "https://unsplash.com/license",
+  "photography_role": "Illustrative editorial media, not recordings of Aegis operations",
+  "assets": [
+    {
+      "file": "city.webp",
+      "source": "https://images.unsplash.com/photo-1502067553236-cd6cad847b00",
+      "small": "city-small.webp",
+      "bytes": 202372
+    },
+    {
+      "file": "observation.webp",
+      "source": "https://images.unsplash.com/photo-1519374086542-9ff30b72beec",
+      "small": "observation-small.webp",
+      "bytes": 579950
+    },
+    {
+      "file": "night.webp",
+      "source": "https://images.unsplash.com/photo-1601922047316-70884dbbde2f",
+      "small": "night-small.webp",
+      "bytes": 408816
+    },
+    {
+      "file": "architecture.webp",
+      "source": "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab",
+      "small": "architecture-small.webp",
+      "bytes": 323804
+    },
+    {
+      "file": "street.webp",
+      "source": "https://images.unsplash.com/photo-1519501025264-65ba15a82390",
+      "small": "street-small.webp",
+      "bytes": 459250
+    }
+  ],
+  "drone": {
+    "file": "aegis-drone.webp",
+    "source": "User supplied transparent asset",
+    "role": "Illustrative third party hardware; no manufacturer affiliation implied"
+  },
+  "font": {
+    "family": "Archivo",
+    "source": "https://fonts.google.com/specimen/Archivo",
+    "license": "SIL Open Font License 1.1"
+  }
+}
