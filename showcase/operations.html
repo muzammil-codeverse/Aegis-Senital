@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      try {
+        if (
+          sessionStorage.getItem("aegis:arrival") &&
+          !matchMedia("(prefers-reduced-motion:reduce)").matches
+        )
+          document.documentElement.classList.add("route-arrival");
+      } catch {}
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#ced6d2" />
@@ -20,7 +29,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <script type="module" src="/site.js"></script>
   </head>
-  <body class="detail-page">
+  <body class="detail-page operations-page">
     <a class="skip" href="#main">Skip to content</a>
     <header class="header">
       <a class="brand" href="/" aria-label="Aegis Sentinel home"
@@ -86,105 +95,163 @@
         <span>A Valtum Studio project</span><a href="/privacy">Privacy</a>
       </div>
     </dialog>
-    <main id="main">
-      <section class="detail-hero light-scene">
-        <h1 class="detail-title">Another point of view.</h1>
-        <div class="detail-intro">
-          <h2>A wider field of vision.</h2>
-          <p>
-            Bring fixed sources and simulated aerial perspectives into the same
-            conversation.
-          </p>
-        </div>
-        <div class="detail-hero-image">
+    <main id="main" class="operations-story">
+      <section class="mission-opening dark-scene">
+        <div class="mission-landscape">
           <img
             class=""
-            src="/assets/city.webp"
-            srcset="/assets/city-small.webp 960w, /assets/city.webp 2000w"
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="A wider field of vision."
+            src="/assets/observation.webp"
+            srcset="
+              /assets/observation-small.webp  960w,
+              /assets/observation.webp       2000w
+            "
+            sizes="(max-width:720px) 100vw, 80vw"
+            alt="An aerial view of a dense urban block"
             width="2000"
             height="1333"
             fetchpriority="high"
             decoding="async"
           />
         </div>
-      </section>
-      <section class="editorial light-scene">
-        <figure>
-          <img
-            class="parallax-detail"
-            src="/assets/observation.webp"
-            srcset="
-              /assets/observation-small.webp  960w,
-              /assets/observation.webp       2000w
-            "
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="A mission begins with intent."
-            width="2000"
-            height="1333"
-            loading="lazy"
-            decoding="async"
+        <div class="mission-vignette"></div>
+        <svg
+          class="mission-contour"
+          viewBox="0 0 1440 1000"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M-40 800 C200 800 180 310 510 430 S850 900 1050 430 S1250 160 1500 200"
           />
-        </figure>
-        <div>
-          <h2 class="reveal">A mission begins with intent.</h2>
-          <p>
-            The mission planner supports simulated routes and mission status. An
-            operator starts the mission and retains a clear view of its source
-            context.
-          </p>
+          <circle cx="510" cy="430" r="13" />
+          <circle cx="1050" cy="430" r="13" />
+        </svg>
+        <h1 class="route-title">Change<br /><span>your altitude.</span></h1>
+        <div class="mission-intro">
+          <p>A different view changes<br />the questions you can ask.</p>
+          <a href="#mission-journey" class="text-link">Follow the mission ↓</a>
         </div>
+        <span class="mission-disclosure">Aerial missions are simulated.</span>
       </section>
-      <section class="editorial light-scene reverse">
-        <figure>
-          <img
-            class="parallax-detail"
-            src="/assets/night.webp"
-            srcset="/assets/night-small.webp 960w, /assets/night.webp 2000w"
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="Context travels with the view."
-            width="2000"
-            height="1333"
-            loading="lazy"
-            decoding="async"
-          />
-        </figure>
-        <div>
-          <h2 class="reveal">Context travels with the view.</h2>
-          <p>
-            Simulated aerial observations carry route and camera context into
-            geospatial workflows. These missions are simulations, rather than
-            claims of deployed aircraft operations.
+      <section id="mission-journey" class="mission-journey light-scene">
+        <div class="journey-line" aria-hidden="true"><i></i></div>
+        <article class="journey-stop stop-plan">
+          <span class="stop-dot" aria-hidden="true"></span>
+          <div class="stop-title">
+            <span>01</span>
+            <h2>Before<br />the flight.</h2>
+          </div>
+          <div class="planning-sheet">
+            <h3>A question sets<br />the course.</h3>
+            <p>
+              Define a route and its context. Simulated missions make it
+              possible to explore a field of view without representing a live
+              aircraft connection.
+            </p>
+            <div class="sheet-coordinate" aria-hidden="true">
+              <span>◎</span
+              ><svg viewBox="0 0 380 170">
+                <path d="M10 140 Q100 20 160 100 T370 30" />
+                <circle cx="160" cy="100" r="6" /></svg
+              ><span>↗</span>
+            </div>
+            <a href="/technology" class="text-link"
+              >The system behind the view ↗</a
+            >
+          </div>
+        </article>
+        <article class="journey-stop stop-flight">
+          <span class="stop-dot" aria-hidden="true"></span>
+          <div class="stop-title">
+            <span>02</span>
+            <h2>Above<br />the familiar.</h2>
+          </div>
+          <div class="flight-panorama">
+            <img
+              class=""
+              src="/assets/city.webp"
+              srcset="/assets/city-small.webp 960w, /assets/city.webp 2000w"
+              sizes="(max-width:720px) 100vw, 80vw"
+              alt="A city opens into a wider skyline"
+              width="2000"
+              height="1333"
+              loading="lazy"
+              decoding="async"
+            />
+            <div class="panorama-frame" aria-hidden="true"></div>
+            <p>A wider setting.<br />A more useful question.</p>
+          </div>
+          <p class="journey-note">
+            Move between ground level observations and aerial context. Examine
+            where information originates and what lies beyond the frame.
           </p>
-        </div>
-      </section>
-      <section class="editorial light-scene">
-        <figure>
-          <img
-            class="parallax-detail"
-            src="/assets/street.webp"
-            srcset="/assets/street-small.webp 960w, /assets/street.webp 2000w"
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="More sources. Better questions."
-            width="2000"
-            height="1333"
-            loading="lazy"
-            decoding="async"
-          />
-        </figure>
-        <div>
-          <h2 class="reveal">More sources. Better questions.</h2>
-          <p>
-            Candidate relationships between aerial and fixed camera observations
-            give an analyst another path to explore. Every proposed connection
-            remains subject to human review.
+        </article>
+        <article class="journey-stop stop-return">
+          <span class="stop-dot" aria-hidden="true"></span>
+          <div class="stop-title">
+            <span>03</span>
+            <h2>Return<br />with context.</h2>
+          </div>
+          <div class="return-contact">
+            <figure>
+              <img
+                class=""
+                src="/assets/street.webp"
+                srcset="
+                  /assets/street-small.webp  960w,
+                  /assets/street.webp       2000w
+                "
+                sizes="(max-width:720px) 100vw, 80vw"
+                alt="Street level context"
+                width="2000"
+                height="1333"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>The original view</figcaption>
+            </figure>
+            <span aria-hidden="true">↗</span>
+            <figure>
+              <img
+                class=""
+                src="/assets/observation.webp"
+                srcset="
+                  /assets/observation-small.webp  960w,
+                  /assets/observation.webp       2000w
+                "
+                sizes="(max-width:720px) 100vw, 80vw"
+                alt="An overhead perspective of a city block"
+                width="2000"
+                height="1333"
+                loading="lazy"
+                decoding="async"
+              />
+              <figcaption>The wider view</figcaption>
+            </figure>
+          </div>
+          <p class="journey-note">
+            Bring observations back into an investigation. Review sources, times
+            and relationships together. A different altitude adds context, not
+            certainty.
           </p>
-        </div>
+        </article>
       </section>
-      <section class="next-page dark-scene">
-        <p>Keep exploring.</p>
-        <a href="/technology">Inside the technology <span>↗</span></a>
+      <section class="mission-end dark-scene">
+        <img
+          class="parallax-image"
+          src="/assets/night.webp"
+          srcset="/assets/night-small.webp 960w, /assets/night.webp 2000w"
+          sizes="(max-width:720px) 100vw, 80vw"
+          alt="The city after dark"
+          width="2000"
+          height="1333"
+          loading="lazy"
+          decoding="async"
+        />
+        <div class="mission-end-copy">
+          <h2>The flight ends.<br /><em>The inquiry continues.</em></h2>
+          <a href="/intelligence" class="text-link">Follow the evidence ↗</a>
+        </div>
       </section>
     </main>
     <footer class="footer">

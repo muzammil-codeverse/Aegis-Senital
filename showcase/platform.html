@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      try {
+        if (
+          sessionStorage.getItem("aegis:arrival") &&
+          !matchMedia("(prefers-reduced-motion:reduce)").matches
+        )
+          document.documentElement.classList.add("route-arrival");
+      } catch {}
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#ced6d2" />
@@ -20,7 +29,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <script type="module" src="/site.js"></script>
   </head>
-  <body class="detail-page">
+  <body class="detail-page platform-page">
     <a class="skip" href="#main">Skip to content</a>
     <header class="header">
       <a class="brand" href="/" aria-label="Aegis Sentinel home"
@@ -86,108 +95,191 @@
         <span>A Valtum Studio project</span><a href="/privacy">Privacy</a>
       </div>
     </dialog>
-    <main id="main">
-      <section class="detail-hero light-scene">
-        <h1 class="detail-title">The bigger picture.</h1>
-        <div class="detail-intro">
-          <h2>One platform. More context.</h2>
-          <p>
-            Aegis Sentinel connects visual analysis with spatial context,
-            investigation workflows and evidence review.
-          </p>
+    <main id="main" class="platform-story">
+      <section class="platform-opening light-scene">
+        <h1 class="route-title">
+          <span>Everything.</span><span>In perspective.</span>
+        </h1>
+        <div class="atlas-photos" aria-hidden="true">
+          <figure>
+            <img
+              class=""
+              src="/assets/street.webp"
+              srcset="/assets/street-small.webp 960w, /assets/street.webp 2000w"
+              sizes="(max-width:720px) 100vw, 80vw"
+              alt=""
+              width="2000"
+              height="1333"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure>
+            <img
+              class=""
+              src="/assets/observation.webp"
+              srcset="
+                /assets/observation-small.webp  960w,
+                /assets/observation.webp       2000w
+              "
+              sizes="(max-width:720px) 100vw, 80vw"
+              alt=""
+              width="2000"
+              height="1333"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </figure>
+          <figure>
+            <img
+              class=""
+              src="/assets/architecture.webp"
+              srcset="
+                /assets/architecture-small.webp  960w,
+                /assets/architecture.webp       2000w
+              "
+              sizes="(max-width:720px) 100vw, 80vw"
+              alt=""
+              width="2000"
+              height="1333"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
         </div>
-        <div class="detail-hero-image">
-          <img
-            class=""
-            src="/assets/night.webp"
-            srcset="/assets/night-small.webp 960w, /assets/night.webp 2000w"
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="One platform. More context."
-            width="2000"
-            height="1333"
-            fetchpriority="high"
-            decoding="async"
-          />
+        <div class="opening-caption">
+          <p>One platform. A connected way of seeing.</p>
+          <p>
+            Visual input, spatial context and evidence.<br />Brought together
+            around the questions that matter.
+          </p>
+          <a href="#assembly" class="text-link">See how it connects ↓</a>
         </div>
       </section>
-      <section class="editorial light-scene">
-        <figure>
-          <img
-            class="parallax-detail"
-            src="/assets/observation.webp"
-            srcset="
-              /assets/observation-small.webp  960w,
-              /assets/observation.webp       2000w
-            "
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="Start with the source."
-            width="2000"
-            height="1333"
-            loading="lazy"
-            decoding="async"
-          />
-        </figure>
-        <div>
-          <h2 class="reveal">Start with the source.</h2>
+      <section id="assembly" class="platform-assembly light-scene">
+        <div class="assembly-heading">
+          <h2>Separate signals.<br /><em>Shared context.</em></h2>
           <p>
-            Bring fixed camera streams and uploaded media into a visual analysis
-            workflow. Detection and tracking turn input into candidate
-            observations, with source context kept close.
+            Follow the information from its source to a decision someone can
+            explain.
           </p>
         </div>
-      </section>
-      <section class="editorial light-scene reverse">
-        <figure>
-          <img
-            class="parallax-detail"
-            src="/assets/city.webp"
-            srcset="/assets/city-small.webp 960w, /assets/city.webp 2000w"
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="Expand the field of view."
-            width="2000"
-            height="1333"
-            loading="lazy"
-            decoding="async"
-          />
-        </figure>
-        <div>
-          <h2 class="reveal">Expand the field of view.</h2>
-          <p>
-            Simulated aerial missions and geospatial context help place
-            observations within a wider setting. Examine where information comes
-            from and how it relates.
-          </p>
+        <div class="assembly-rows">
+          <article class="assembly-row">
+            <span class="assembly-number">01</span>
+            <h3>Observe.</h3>
+            <p>
+              Camera streams and uploaded media become candidate observations.
+              Keep the original source within reach.
+            </p>
+            <figure>
+              <img
+                class=""
+                src="/assets/street.webp"
+                srcset="
+                  /assets/street-small.webp  960w,
+                  /assets/street.webp       2000w
+                "
+                sizes="(max-width:720px) 100vw, 80vw"
+                alt="Looking along a city street"
+                width="2000"
+                height="1333"
+                loading="lazy"
+                decoding="async"
+              />
+            </figure>
+          </article>
+          <article class="assembly-row">
+            <span class="assembly-number">02</span>
+            <h3>Connect.</h3>
+            <p>
+              Place observations in time and space. Simulated aerial missions
+              offer another view of the same question.
+            </p>
+            <figure>
+              <img
+                class=""
+                src="/assets/city.webp"
+                srcset="/assets/city-small.webp 960w, /assets/city.webp 2000w"
+                sizes="(max-width:720px) 100vw, 80vw"
+                alt="A wider view across the city"
+                width="2000"
+                height="1333"
+                loading="lazy"
+                decoding="async"
+              />
+            </figure>
+          </article>
+          <article class="assembly-row">
+            <span class="assembly-number">03</span>
+            <h3>Examine.</h3>
+            <p>
+              Bring attachments, notes and timelines into a case. Review the
+              evidence and its limitations before drawing conclusions.
+            </p>
+            <figure>
+              <img
+                class=""
+                src="/assets/observation.webp"
+                srcset="
+                  /assets/observation-small.webp  960w,
+                  /assets/observation.webp       2000w
+                "
+                sizes="(max-width:720px) 100vw, 80vw"
+                alt="Streets and buildings seen from above"
+                width="2000"
+                height="1333"
+                loading="lazy"
+                decoding="async"
+              />
+            </figure>
+          </article>
         </div>
       </section>
-      <section class="editorial light-scene">
-        <figure>
-          <img
-            class="parallax-detail"
-            src="/assets/architecture.webp"
-            srcset="
-              /assets/architecture-small.webp  960w,
-              /assets/architecture.webp       2000w
-            "
-            sizes="(max-width: 720px) 100vw, 100vw"
-            alt="Keep the reasoning visible."
-            width="2000"
-            height="1333"
-            loading="lazy"
-            decoding="async"
-          />
-        </figure>
-        <div>
-          <h2 class="reveal">Keep the reasoning visible.</h2>
-          <p>
-            Cases, evidence attachments and timelines bring an investigation
-            together. Model limitations and review states help operators
-            distinguish a possibility from a finding.
-          </p>
+      <section class="platform-orbit dark-scene" aria-labelledby="orbit-title">
+        <div class="orbit-heading">
+          <h2 id="orbit-title">
+            A system.<br />With people<br /><em>at its centre.</em>
+          </h2>
+          <p>Explore the relationships.</p>
+        </div>
+        <div class="orbit-system">
+          <div class="orbit-ring" aria-hidden="true"></div>
+          <div class="orbit-core">
+            <img
+              class="orbit-photo"
+              src="/assets/street.webp"
+              srcset="/assets/street-small.webp 960w, /assets/street.webp 2000w"
+              sizes="(max-width:720px) 100vw, 80vw"
+              alt="Illustrative source context"
+              width="2000"
+              height="1333"
+              loading="lazy"
+              decoding="async"
+            />
+            <div>
+              <h3 id="orbit-name">The source</h3>
+              <p id="orbit-copy">
+                Return to the original media. A model output begins a question,
+                it does not close it.
+              </p>
+            </div>
+          </div>
+          <div
+            class="orbit-options"
+            role="group"
+            aria-label="Explore platform relationships"
+          >
+            <button data-orbit="0" aria-pressed="true">Source</button
+            ><button data-orbit="1" aria-pressed="false">Place</button
+            ><button data-orbit="2" aria-pressed="false">Evidence</button
+            ><button data-orbit="3" aria-pressed="false">Review</button>
+          </div>
         </div>
       </section>
-      <section class="next-page dark-scene">
-        <p>Keep exploring.</p>
-        <a href="/technology">Inside the technology <span>↗</span></a>
+      <section class="next-page light-scene">
+        <p>Follow an observation into the field.</p>
+        <a href="/operations">A different altitude <span>↗</span></a>
       </section>
     </main>
     <footer class="footer">

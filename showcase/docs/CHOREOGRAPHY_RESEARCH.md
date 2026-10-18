@@ -34,3 +34,26 @@ Live inspection and published descriptions are distinguished here. No performanc
 The existing GSAP and Lenis dependencies remain. No canvas renderer, 3D model, video sequence or new image download is required. The desktop book pin is limited to sufficiently wide and tall viewports. Phones receive a vertically composed spread with explicit chapter controls and horizontal swipe detection that preserves vertical scrolling. Reduced motion removes idle flight, smoothing, pinning and page folds, retaining direct chapter selection.
 
 A chapter state machine keeps the last requested destination when navigation happens during a turn. Only the active spread is exposed to assistive technology and keyboard focus. Previous and next states stop at the first and last chapter; arrow keys, Home and End operate the tab list.
+
+## Revision: continuity, paper and distinct routes
+
+The earlier version repeated the drone asset in six independent scenes. It also simulated a page fold with a horizontal scale transform. Those implementation choices explained the visible lack of continuity and paper depth.
+
+### Additional references inspected
+
+| Reference | What was verified | Applied decision |
+| --- | --- | --- |
+| [StPageFlip](https://nodlik.github.io/StPageFlip/) and its [source](https://github.com/Nodlik/StPageFlip) | Official documentation and live HTML example, including next page interaction. Soft leaves support corner geometry, clipped reverse surfaces and moving shadows. | Replace the scale fold with eight soft HTML leaves. Keep chapter selection, previous and next controls, keyboard access and portrait mode. No model or WebGL scene. |
+| [BookBlock, Codrops](https://tympanus.net/codrops/2012/09/03/bookblock-a-content-flip-plugin/) | Original implementation article describes separate surfaces and shadow overlays. | Paper needs to cross a binding and reveal the next surface. Merely exchanging images halfway through a scale animation is insufficient. |
+| [Gianluca Gradogna portfolio](https://gianlucagradogna.com/) and [creator case study](https://tympanus.net/codrops/2025/01/30/case-study-gianluca-gradogna-portfolio-25/) | Live split composition, image layers and photography navigation; creator describes position, opacity and clip masks as core techniques. The screenshots show contrasting editorial treatments within one visual identity. | Build separate compositions for system, mission and evidence. Carry the shared palette and typography across them. Use a paired shutter for route departures and arrivals. |
+| [Cyd Stumpel transition selection, Awwwards](https://www.awwwards.com/inspiration/default-page-transition-cyd-stumpel-portfolio-2025) | Search listing identifies a View Transition API example. The page fetch timed out. Timing and live interaction were not verified. | Technical context only. No claims about measured runtime or copied timings. |
+
+### Revised sequence
+
+The homepage has one drone image node. That same node moves into a fixed flight layer. A single measured path interpolates its position, scale and bank through every section, in both scroll directions. No scene swaps, opacity handoffs or cloned drone images are used. The hero sits higher and uses a two line composition. Motion preferences return the original element to a static hero.
+
+The book now reads as paper, with eight leaves and four chapters. It is intentionally controlled by the reader rather than automatically forcing page turns during a pinned scroll. Mobile uses individual leaves so typography remains readable. Buttons and keyboard navigation use the same page engine as direct corner dragging. Reduced motion chapter selection changes pages immediately.
+
+Platform is an image atlas, an assembly of three signals, and an interactive relationship orbit. Operations is an aerial opening followed by a vertical mission itinerary, a planning sheet, a framed panorama and a return contact sheet. Intelligence is a fanned archive, selectable source inspection and a reasoning sequence ending in a large human decision statement. They no longer share alternating editorial blocks.
+
+The route transition closes two panels around the destination name, then opens onto the new document. It works across the actual static routes, retains normal modified clicks, and clears itself after browser back navigation. Reduced motion keeps ordinary document navigation.

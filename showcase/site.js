@@ -1,4 +1,9 @@
 import { initBook, initStoryMotion } from "./story-motion.js";
+import {
+  initEditorialMotion,
+  initSceneTransitions,
+} from "./editorial-motion.js";
+import "./cinematic.css";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Lenis from "lenis";
@@ -103,31 +108,6 @@ media.add(
           ease: "power3.out",
         },
       );
-      gsap.fromTo(
-        ".hero-drone",
-        { y: 75, opacity: 0, rotation: -9 },
-        {
-          y: 0,
-          opacity: 1,
-          rotation: -5,
-          duration: 1.5,
-          ease: "power3.out",
-          delay: 0.2,
-        },
-      );
-      gsap.to(".drone-stage", {
-        yPercent: desktop ? 38 : 19,
-        xPercent: desktop ? 28 : 6,
-        rotation: 5,
-        scale: 0.82,
-        ease: "none",
-        scrollTrigger: {
-          trigger: hero,
-          start: "top top",
-          end: "bottom top",
-          scrub: 1,
-        },
-      });
       gsap.to(".hero-type", {
         yPercent: -13,
         ease: "none",
@@ -321,32 +301,7 @@ document
   .querySelector(".auth-form")
   ?.addEventListener("submit", (e) => e.preventDefault());
 
-// Native document transitions where supported, with a short fallback elsewhere.
-if (!("startViewTransition" in document) && !reduced.matches) {
-  document.querySelectorAll("a[href]").forEach((a) =>
-    a.addEventListener("click", (e) => {
-      if (
-        e.defaultPrevented ||
-        e.metaKey ||
-        e.ctrlKey ||
-        e.shiftKey ||
-        e.altKey ||
-        a.target === "_blank" ||
-        a.hasAttribute("download")
-      )
-        return;
-      const url = new URL(a.href, location.href);
-      if (url.origin !== location.origin || url.pathname === location.pathname)
-        return;
-      e.preventDefault();
-      document.querySelector("main").classList.add("route-exit");
-      setTimeout(() => location.assign(url.href), 220);
-    }),
-  );
-}
-addEventListener("pageshow", () =>
-  document.querySelector("main")?.classList.remove("route-exit"),
-);
+initSceneTransitions({ gsap, reduced, getLenis: () => lenis });
 Promise.all(
   [...document.images].map((img) =>
     img.complete
@@ -361,3 +316,5 @@ document.fonts.ready.then(() => ScrollTrigger.refresh());
 
 initBook({ gsap, ScrollTrigger, reduced, getLenis: () => lenis });
 initStoryMotion({ gsap, ScrollTrigger, reduced });
+
+initEditorialMotion({ gsap, ScrollTrigger, reduced });

@@ -1,120 +1,129 @@
-// A four chapter book. Page folds use only 2D transforms and the existing image assets.
-export function initBook({ gsap, ScrollTrigger, reduced, getLenis }) {
+import { PageFlip } from "page-flip";
+
+// Eight real HTML leaves. Soft page geometry is clipped around the dragged corner,
+// including the reverse surface and the library's dynamic inner/outer shadows.
+export function initBook({ gsap, ScrollTrigger, reduced }) {
   const stage = document.querySelector(".book-stage");
   if (!stage) return;
   const shell = stage.querySelector(".book-shell");
-  const spreads = [...stage.querySelectorAll(".book-spread")];
+  const host = stage.querySelector(".book-pages");
   const tabs = [...stage.querySelectorAll("[data-chapter]")];
-  const leaf = stage.querySelector(".turning-leaf");
   const prev = stage.querySelector("#book-prev");
   const next = stage.querySelector("#book-next");
   const status = stage.querySelector(".book-status");
-  const mm = gsap.matchMedia();
-  let active = 0;
-  let desired = 0;
-  let turning = false;
-  let turn;
-  let pin;
-
-  function expose(index) {
-    spreads.forEach((spread, i) => {
-      spread.hidden = i !== index;
-      spread.inert = i !== index;
+  const pages = [];
+  [...host.querySelectorAll(".book-spread")].forEach((spread, chapter) => {
+    [...spread.children].forEach((content) => {
+      const leaf = document.createElement("div");
+      leaf.className = `paper-leaf spread-${chapter}`;
+      leaf.dataset.density = "soft";
+      leaf.setAttribute("role", "group");
+      leaf.setAttribute(
+        "aria-label",
+        `Chapter ${chapter + 1}, page ${pages.length + 1}`,
+      );
+      leaf.append(content);
+      pages.push(leaf);
     });
-    tabs.forEach((tab, i) => {
-      tab.setAttribute("aria-selected", String(i === index));
-      tab.tabIndex = i === index ? 0 : -1;
-    });
+  });
+  host.replaceChildren(...pages);
+  host.querySelectorAll("img").forEach((img) => (img.loading = "eager"));
+  stage.querySelector(".turning-leaf")?.remove();
+  tabs.forEach((tab) => {
+    tab.removeAttribute("aria-controls");
+    tab.removeAttribute("role");
+    tab.setAttribute("aria-pressed", "false");
+    tab.removeAttribute("aria-selected");
+    tab.tabIndex = 0;
+  });
+  stage.querySelector(".chapter-tabs").setAttribute("role", "group");
+  shell.classList.add("physical-book");
+  const book = new PageFlip(host, {
+    width: Math.round(
+      innerWidth <= 720 ? shell.clientWidth : shell.clientWidth / 2,
+    ),
+    height: shell.clientHeight,
+    size: "stretch",
+    minWidth: 280,
+    maxWidth: 700,
+    minHeight: 340,
+    maxHeight: 650,
+    usePortrait: true,
+    showCover: false,
+    drawShadow: true,
+    maxShadowOpacity: 0.38,
+    flippingTime: 1250,
+    autoSize: false,
+    mobileScrollSupport: false,
+    swipeDistance: 35,
+    clickEventForward: true,
+    disableFlipByClick: true,
+    showPageCorners: !reduced.matches,
+    startZIndex: 2,
+  });
+  let current = 0,
+    desired = 0,
+    busy = false,
+    dragging = false;
+  const portrait = () => book.getOrientation() === "portrait";
+  function sync(index) {
+    current = index;
+    const chapter = Math.floor(index / 2);
+    tabs.forEach((tab, i) =>
+      tab.setAttribute("aria-pressed", String(i === chapter)),
+    );
+    prev.setAttribute(
+      "aria-label",
+      portrait() ? "Previous page" : "Previous chapter",
+    );
+    next.setAttribute("aria-label", portrait() ? "Next page" : "Next chapter");
     prev.disabled = index === 0;
-    next.disabled = index === spreads.length - 1;
-    status.textContent = `Chapter ${index + 1} of ${spreads.length}`;
-    active = index;
-  }
-
-  function request(index) {
-    desired = Math.max(0, Math.min(spreads.length - 1, index));
-    if (turning || desired === active) return;
-    if (reduced.matches) {
-      expose(desired);
-      return;
-    }
-    const target = desired;
-    const direction = target > active ? 1 : -1;
-    const previous = spreads[active];
-    const incoming = spreads[target];
-    const oldArt = previous.querySelector(".page-right");
-    const newArt = incoming.querySelector(".page-right");
-    turning = true;
-    leaf.innerHTML = oldArt.innerHTML;
-    leaf.className = `turning-leaf spread-${active}`;
-    gsap.set(leaf, { visibility: "visible", scaleX: 1, skewY: 0, opacity: 1 });
-    turn = gsap.timeline({
-      onComplete: () => {
-        gsap.set(leaf, {
-          visibility: "hidden",
-          clearProps: "transform,opacity",
-        });
-        leaf.replaceChildren();
-        turning = false;
-        request(desired);
-      },
+    next.disabled = index >= (portrait() ? 7 : 6);
+    status.textContent = `Chapter ${chapter + 1} of 4 · ${portrait() ? `Page ${index + 1} of 8` : "Drag a corner to turn the page"}`;
+    pages.forEach((page, i) => {
+      const visible = i === index || (!portrait() && i === index + 1);
+      page.inert = !visible;
+      page.setAttribute("aria-hidden", String(!visible));
     });
-    turn
-      .to(
-        previous.querySelector(".page-copy"),
-        { y: -12 * direction, opacity: 0, duration: 0.22, ease: "power2.in" },
-        0,
-      )
-      .to(
-        leaf,
-        { scaleX: 0, skewY: direction * 8, duration: 0.44, ease: "power2.in" },
-        0,
-      )
-      .call(
-        () => {
-          expose(target);
-          gsap.set(previous.querySelector(".page-copy"), {
-            clearProps: "transform,opacity",
-          });
-          leaf.innerHTML = newArt.innerHTML;
-          leaf.className = `turning-leaf spread-${target}`;
-          gsap.set(newArt, { opacity: 0 });
-          gsap.set(leaf, { scaleX: 0, skewY: -direction * 8 });
-        },
-        null,
-        0.44,
-      )
-      .to(
-        leaf,
-        { scaleX: 1, skewY: 0, duration: 0.52, ease: "power3.out" },
-        0.44,
-      )
-      .fromTo(
-        incoming.querySelector(".page-copy"),
-        { y: 18 * direction, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.52, ease: "power3.out" },
-        0.44,
-      )
-      .set(newArt, { clearProps: "opacity" }, 0.96);
   }
-
   function navigate(index) {
-    index = Math.max(0, Math.min(spreads.length - 1, index));
-    if (pin && !reduced.matches) {
-      const y = pin.start + (index / 3) * (pin.end - pin.start);
-      const lenis = getLenis();
-      if (lenis) lenis.scrollTo(y, { duration: 0.85 });
-      else scrollTo({ top: y, behavior: "smooth" });
-    } else {
-      shell.scrollIntoView({
-        block: "start",
-        behavior: reduced.matches ? "instant" : "smooth",
-      });
-    }
-    request(index);
+    shell.scrollIntoView({
+      block: "center",
+      behavior: reduced.matches ? "instant" : "smooth",
+    });
+    dragging = false;
+    desired = Math.max(0, Math.min(portrait() ? 7 : 6, index));
+    if (!portrait()) desired = Math.floor(desired / 2) * 2;
+    if (busy || desired === current) return;
+    if (reduced.matches) book.turnToPage(desired);
+    else book.flip(desired, desired > current ? "bottom" : "top");
   }
+  book.on("flip", (e) => {
+    if (dragging) desired = e.data;
+    sync(e.data);
+  });
+  book.on("changeState", (e) => {
+    busy = e.data !== "read";
+    shell.classList.toggle("is-turning", busy);
+    if (busy) pages.forEach((page) => (page.inert = true));
+    else {
+      sync(book.getCurrentPageIndex());
+      if (desired !== current) navigate(desired);
+    }
+  });
+  // A direct drag sets the intended destination; only button requests are queued.
+  host.addEventListener("pointerdown", () => {
+    dragging = true;
+    desired = current;
+  });
+  book.on("changeOrientation", () => {
+    sync(book.getCurrentPageIndex());
+    ScrollTrigger.refresh();
+  });
+  book.loadFromHTML(pages);
+  sync(0);
   tabs.forEach((tab, i) => {
-    tab.addEventListener("click", () => navigate(i));
+    tab.addEventListener("click", () => navigate(i * 2));
     tab.addEventListener("keydown", (e) => {
       let target;
       if (e.key === "ArrowRight") target = Math.min(3, i + 1);
@@ -123,266 +132,175 @@ export function initBook({ gsap, ScrollTrigger, reduced, getLenis }) {
       if (e.key === "End") target = 3;
       if (target !== undefined) {
         e.preventDefault();
-        tabs[target].focus({ preventScroll: true });
-        navigate(target);
+        tabs[target].focus();
+        navigate(target * 2);
       }
     });
   });
-  prev.addEventListener("click", () => navigate(desired - 1));
-  next.addEventListener("click", () => navigate(desired + 1));
-  let pointer;
-  shell.addEventListener("pointerdown", (e) => {
-    if (e.pointerType !== "mouse") pointer = { x: e.clientX, y: e.clientY };
-  });
-  shell.addEventListener("pointerup", (e) => {
-    if (!pointer) return;
-    const dx = e.clientX - pointer.x,
-      dy = e.clientY - pointer.y;
-    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.8)
-      navigate(desired + (dx < 0 ? 1 : -1));
-    pointer = undefined;
-  });
-  shell.addEventListener("pointercancel", () => {
-    pointer = undefined;
-  });
-  mm.add(
-    "(min-width: 900px) and (min-height: 720px) and (prefers-reduced-motion: no-preference)",
-    () => {
-      pin = ScrollTrigger.create({
-        trigger: stage,
-        pin: true,
-        start: "top top",
-        end: () => `+=${Math.max(1800, innerHeight * 2.6)}`,
-        anticipatePin: 1,
-        invalidateOnRefresh: true,
-        onUpdate: (self) => request(Math.min(3, Math.round(self.progress * 3))),
-      });
-      return () => {
-        pin = undefined;
-      };
-    },
+  prev.addEventListener("click", () =>
+    navigate(desired - (portrait() ? 1 : 2)),
+  );
+  next.addEventListener("click", () =>
+    navigate(desired + (portrait() ? 1 : 2)),
   );
   reduced.addEventListener("change", () => {
-    turn?.kill();
-    turning = false;
-    gsap.set(leaf, { visibility: "hidden" });
-    spreads.forEach((s) =>
-      gsap.set(s.querySelectorAll(".page-copy,.page-right"), {
-        clearProps: "transform,opacity",
-      }),
-    );
-    expose(desired);
+    if (reduced.matches) book.turnToPage(desired);
   });
 }
 
-export function initStoryMotion({ gsap, ScrollTrigger, reduced }) {
-  if (!document.querySelector(".hero")) return;
+export function initStoryMotion({ gsap, ScrollTrigger }) {
+  const stage = document.querySelector(".drone-stage");
+  if (!stage) return;
+  const home = document.querySelector(".hero");
   const mm = gsap.matchMedia();
-  mm.add(
-    {
-      desktop: "(min-width:721px)",
-      motion: "(prefers-reduced-motion:no-preference)",
-    },
-    (ctx) => {
-      if (!ctx.conditions.motion) return;
-      const idle = gsap.to(".hero-drone", {
-        y: -9,
-        rotation: -3.5,
-        duration: 2.8,
-        ease: "sine.inOut",
-        yoyo: true,
-        repeat: -1,
-        delay: 1.8,
-        paused: true,
-      });
-      ScrollTrigger.create({
-        trigger: ".hero",
-        start: "top bottom",
-        end: "bottom top",
-        onToggle: (self) => (self.isActive ? idle.play() : idle.pause()),
-      });
-      const hover = document.querySelector(".drone-hover");
-      const hero = document.querySelector(".hero");
-      const moveX = gsap.quickTo(hover, "x", {
-        duration: 1,
-        ease: "power3.out",
-      });
-      const moveY = gsap.quickTo(hover, "y", {
-        duration: 1,
-        ease: "power3.out",
-      });
-      const move = (e) => {
-        if (e.pointerType === "mouse") {
-          const r = hero.getBoundingClientRect();
-          moveX((e.clientX / r.width - 0.5) * 28);
-          moveY(((e.clientY - r.top) / r.height - 0.5) * 20);
-        }
+  mm.add("(prefers-reduced-motion: no-preference)", () => {
+    // Move, never clone: this is the only drone image in the entire home document.
+    document.body.append(stage);
+    stage.classList.add("persistent-drone");
+    const image = stage.querySelector("img");
+    gsap.set(image, { clearProps: "all" });
+    let stops = [],
+      targetY = scrollY,
+      state,
+      pointerX = 0,
+      pointerY = 0;
+    const clamp = gsap.utils.clamp;
+    const pose = (selector, offset, x, y, w, r) => {
+      const el = document.querySelector(selector);
+      return {
+        at: el.getBoundingClientRect().top + scrollY + el.offsetHeight * offset,
+        x,
+        y,
+        w,
+        r,
       };
-      const leave = () => {
-        moveX(0);
-        moveY(0);
-      };
-      hero.addEventListener("pointermove", move);
-      hero.addEventListener("pointerleave", leave);
-      gsap.fromTo(
-        ".world-flyby",
-        { xPercent: -60, yPercent: 20, scale: 0.68 },
-        {
-          xPercent: 170,
-          yPercent: -55,
-          scale: 0.42,
-          ease: "none",
-          scrollTrigger: {
-            trigger: ".world",
-            start: "top bottom",
-            end: "bottom top",
-            scrub: 1.4,
-          },
-        },
+    };
+    function measure() {
+      const mobile = innerWidth <= 720;
+      stops = [
+        pose(
+          ".hero",
+          0,
+          mobile ? 0.44 : 0.4,
+          mobile ? 0.46 : 0.44,
+          mobile ? 1.15 : 0.77,
+          -6,
+        ),
+        pose(".world", 0, 0.77, 0.24, mobile ? 0.48 : 0.29, 9),
+        pose(".world", 0.65, 0.8, 0.29, mobile ? 0.41 : 0.23, -4),
+        pose(".capture", 0, 0.74, 0.23, mobile ? 0.38 : 0.23, -9),
+        pose(".capture", 0.65, 0.82, 0.22, mobile ? 0.3 : 0.16, 5),
+        pose(".flight-passage", 0.12, 0.51, 0.43, mobile ? 1.0 : 0.67, -8),
+        pose(".flight-passage", 0.62, 0.72, 0.36, mobile ? 0.63 : 0.4, 7),
+        pose(".observation-book", 0, 0.88, 0.21, mobile ? 0.3 : 0.16, -4),
+        pose(".observation-book", 0.7, 0.9, 0.21, mobile ? 0.28 : 0.14, -6),
+        pose(".judgment-layout", 0, 0.88, 0.23, mobile ? 0.27 : 0.15, 3),
+        pose(".system-editorial", 0, 0.86, 0.23, mobile ? 0.28 : 0.16, -5),
+        pose(".reprise", 0.05, 0.64, 0.28, mobile ? 0.74 : 0.53, -6),
+        pose(".footer", 0, 0.87, 0.22, mobile ? 0.3 : 0.17, 3),
+        pose(".footer", 0.9, 0.88, 0.72, mobile ? 0.25 : 0.14, -7),
+      ].sort((a, b) => a.at - b.at);
+      targetY = scrollY;
+      state = { ...sample(targetY) };
+    }
+    function sample(y) {
+      let a = stops[0],
+        b = a;
+      for (let i = 1; i < stops.length; i++) {
+        b = stops[i];
+        if (y <= b.at) break;
+        a = b;
+      }
+      let t = clamp(0, 1, (y - a.at) / Math.max(1, b.at - a.at));
+      t = t * t * (3 - 2 * t);
+      return Object.fromEntries(
+        ["x", "y", "w", "r"].map((k) => [k, a[k] + (b[k] - a[k]) * t]),
       );
-      gsap.fromTo(
-        ".capture-drone",
-        { xPercent: -18, yPercent: 25, scale: 0.8 },
-        {
-          xPercent: 55,
-          yPercent: -15,
-          scale: 0.18,
-          autoAlpha: 0,
-          ease: "power2.inOut",
-          scrollTrigger: {
-            trigger: ".capture",
-            start: "top 75%",
-            end: "top -20%",
-            scrub: 1,
-          },
-        },
-      );
-      const route = document.querySelector(".flight-route path");
-      const length = route.getTotalLength();
-      gsap.set(route, { strokeDasharray: length, strokeDashoffset: length });
-      gsap.to(route, {
+    }
+    measure();
+    const setX = gsap.quickSetter(stage, "x", "px"),
+      setY = gsap.quickSetter(stage, "y", "px"),
+      setR = gsap.quickSetter(stage, "rotation", "deg");
+    gsap.set(stage, { xPercent: -50, yPercent: -50 });
+    const tick = (_, delta) => {
+      const target = sample(targetY),
+        blend = 1 - Math.exp(-delta / 140);
+      for (const k of ["x", "y", "w", "r"])
+        state[k] += (target[k] - state[k]) * blend;
+      const time = performance.now() / 1000;
+      setX(state.x * innerWidth + pointerX);
+      setY(state.y * innerHeight + Math.sin(time * 1.8) * 4 + pointerY);
+      setR(state.r + Math.sin(time * 0.8) * 0.7);
+      stage.style.width = `${state.w * innerWidth}px`;
+    };
+    gsap.ticker.add(tick);
+    const trigger = ScrollTrigger.create({
+      start: 0,
+      end: "max",
+      onUpdate: (self) => (targetY = self.scroll()),
+      onRefresh: measure,
+    });
+    const move = (e) => {
+      if (e.pointerType === "mouse" && scrollY < home.offsetHeight * 0.7) {
+        pointerX = (e.clientX / innerWidth - 0.5) * 16;
+        pointerY = (e.clientY / innerHeight - 0.5) * 10;
+      }
+    };
+    const leave = () => (pointerX = pointerY = 0);
+    home.addEventListener("pointermove", move);
+    home.addEventListener("pointerleave", leave);
+    const route = document.querySelector(".flight-route path");
+    const length = route.getTotalLength();
+    gsap.fromTo(
+      route,
+      { strokeDasharray: length, strokeDashoffset: length },
+      {
         strokeDashoffset: 0,
         ease: "none",
         scrollTrigger: {
           trigger: ".flight-passage",
-          start: "top 75%",
-          end: "bottom 35%",
+          start: "top 80%",
+          end: "bottom 40%",
           scrub: 1,
         },
-      });
-      gsap.fromTo(
-        ".passage-drone",
-        {
-          xPercent: ctx.conditions.desktop ? -32 : -10,
-          yPercent: 35,
-          rotation: -10,
-          scale: 0.88,
+      },
+    );
+    gsap.fromTo(
+      ".flight-words span:first-child",
+      { xPercent: -8 },
+      {
+        xPercent: 4,
+        ease: "none",
+        scrollTrigger: {
+          trigger: ".flight-passage",
+          start: "top bottom",
+          end: "bottom top",
+          scrub: 1,
         },
-        {
-          xPercent: ctx.conditions.desktop ? 54 : 13,
-          yPercent: -20,
-          rotation: 6,
-          scale: 1.05,
-          ease: "none",
-          scrollTrigger: {
-            trigger: ".flight-passage",
-            start: "top bottom",
-            end: "bottom top",
-            scrub: 1.2,
-          },
+      },
+    );
+    gsap.fromTo(
+      ".flight-words span:last-child",
+      { xPercent: 8 },
+      {
+        xPercent: -4,
+        ease: "none",
+        scrollTrigger: {
+          trigger: ".flight-passage",
+          start: "top bottom",
+          end: "bottom top",
+          scrub: 1,
         },
-      );
-      gsap.fromTo(
-        ".flight-words span:first-child",
-        { xPercent: -8 },
-        {
-          xPercent: 4,
-          ease: "none",
-          scrollTrigger: {
-            trigger: ".flight-passage",
-            start: "top bottom",
-            end: "bottom top",
-            scrub: 1,
-          },
-        },
-      );
-      gsap.fromTo(
-        ".flight-words span:last-child",
-        { xPercent: 8 },
-        {
-          xPercent: -4,
-          ease: "none",
-          scrollTrigger: {
-            trigger: ".flight-passage",
-            start: "top bottom",
-            end: "bottom top",
-            scrub: 1,
-          },
-        },
-      );
-      gsap.fromTo(
-        ".reprise-drone",
-        { xPercent: 35, yPercent: 22, rotation: 7, scale: 0.82 },
-        {
-          xPercent: -4,
-          yPercent: -10,
-          rotation: -5,
-          scale: 1,
-          ease: "none",
-          scrollTrigger: {
-            trigger: ".reprise",
-            start: "top bottom",
-            end: "bottom top",
-            scrub: 1.2,
-          },
-        },
-      );
-      const statement = document.querySelector(".judgment-copy>p");
-      if (!statement.querySelector("span"))
-        statement.innerHTML = statement.innerHTML
-          .split(/<br\s*\/?>/)
-          .map((line) => `<span>${line.trim()}</span>`)
-          .join("");
-      gsap.fromTo(
-        statement.children,
-        { opacity: 0.18, y: 12 },
-        {
-          opacity: 1,
-          y: 0,
-          stagger: 0.25,
-          ease: "none",
-          scrollTrigger: {
-            trigger: statement,
-            start: "top 85%",
-            end: "bottom 45%",
-            scrub: 0.8,
-          },
-        },
-      );
-      const wordmark = document.querySelector(".footer-wordmark");
-      if (!wordmark.querySelector("span")) {
-        const span = document.createElement("span");
-        span.textContent = wordmark.textContent;
-        wordmark.replaceChildren(span);
-      }
-      gsap.fromTo(
-        wordmark.firstElementChild,
-        { yPercent: 90 },
-        {
-          yPercent: 0,
-          ease: "power2.out",
-          scrollTrigger: {
-            trigger: wordmark,
-            start: "top 98%",
-            end: "bottom 92%",
-            scrub: 1,
-          },
-        },
-      );
-      return () => {
-        hero.removeEventListener("pointermove", move);
-        hero.removeEventListener("pointerleave", leave);
-      };
-    },
-  );
+      },
+    );
+    return () => {
+      trigger.kill();
+      gsap.ticker.remove(tick);
+      home.removeEventListener("pointermove", move);
+      home.removeEventListener("pointerleave", leave);
+      stage.classList.remove("persistent-drone");
+      gsap.set(stage, { clearProps: "all" });
+      home.append(stage);
+    };
+  });
 }

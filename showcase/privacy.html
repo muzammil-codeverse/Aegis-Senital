@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      try {
+        if (
+          sessionStorage.getItem("aegis:arrival") &&
+          !matchMedia("(prefers-reduced-motion:reduce)").matches
+        )
+          document.documentElement.classList.add("route-arrival");
+      } catch {}
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#ced6d2" />
